@@ -70,12 +70,15 @@ def testsets_build() -> None:
     from miroir.eval.build_sets import build  # noqa: PLC0415
 
     report = build(get_settings())
-    typer.echo(f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'spec':>6} {'closed-ok':>9}")
+    typer.echo(
+        f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'dropped':>7} {'spec':>6}"
+        f" {'closed-ok':>9}"
+    )
     for s in report.sets:
-        flag = "" if s.tune + s.sealed == s.spec else "  differs from spec §7"
+        flag = "" if s.tune + s.sealed + s.dropped == s.spec else "  differs from spec §7"
         typer.echo(
-            f"{s.set_id:<4} {s.tune:>6} {s.sealed:>6} {s.tune + s.sealed:>6} {s.spec:>6}"
-            f" {s.closed_ok:>9}{flag}"
+            f"{s.set_id:<4} {s.tune:>6} {s.sealed:>6} {s.tune + s.sealed:>6} {s.dropped:>7}"
+            f" {s.spec:>6} {s.closed_ok:>9}{flag}"
         )
     typer.echo(
         f"galleries: full {report.full}, screening {report.screening} "

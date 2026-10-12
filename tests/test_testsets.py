@@ -10,6 +10,7 @@ from miroir.eval.build_sets import (
     SplitSet,
     check_halves_apart,
     needed_images,
+    same_shoot,
     screening_gallery,
     split_by_entity,
     t1_queries,
@@ -30,6 +31,8 @@ def _record(
     *,
     entity_id: str | None = None,
     publishable: bool = True,
+    photographers: tuple[str, ...] = (),
+    photo_date: str = "",
 ) -> Record:
     entity = entity_id or ref
     images = tuple(
@@ -62,16 +65,21 @@ def _record(
         pop_url="",
         linked_refs=(),
         images=images,
+        photographers=photographers,
+        photo_date=photo_date,
     )
 
 
 def _corpus() -> list[Record]:
-    """40 buildings with 1-4 one-photo records each, 40 Joconde records, 30 loose records."""
+    """40 buildings with 1-4 one-photo records each, 40 Joconde records, 30 loose records.
+
+    A building's photos are refs 100 apart, so each is its own shoot.
+    """
     records: list[Record] = []
     for b in range(40):
         building = f"PA{b:08d}"
         records.extend(
-            _record(Collection.MEMOIRE, f"AP{b:04d}-{p}", 1, entity_id=building)
+            _record(Collection.MEMOIRE, f"APMH{b * 1000 + p * 100:08d}", 1, entity_id=building)
             for p in range(1 + b % 4)
         )
     records.extend(_record(Collection.JOCONDE, f"J{n:05d}", 1 + n % 3) for n in range(40))
@@ -92,6 +100,63 @@ def test_t1_one_query_per_building_with_two_or_more_photos() -> None:
         assert q.expected_entity_ids == (q.entity_id,)
         record = by_image[q.query_image_id]
         assert q.exclude_image_ids == tuple(i.image_id for i in record.images)
+
+
+def _photo(ref: str, building: str, who: str = "", when: str = "") -> Record:
+    photographers = (who,) if who else ()
+    return _record(
+        Collection.MEMOIRE,
+        ref,
+        1,
+        entity_id=building,
+        photographers=photographers,
+        photo_date=when,
+    )
+
+
+def test_same_shoot_is_photographer_and_date_or_near_refs() -> None:
+    a = _photo("APMH00001000", "PA1", "Hurault", "1944")
+    assert same_shoot(a, _photo("APMH00009000", "PA1", "Hurault", "1944"))
+    assert not same_shoot(a, _photo("APMH00009000", "PA1", "Hurault", "1945"))
+    assert not same_shoot(a, _photo("APMH00009000", "PA1", "Bonnel", "1944"))
+    assert same_shoot(a, _photo("APMH00001050", "PA1"))  # no metadata, ref within the window
+    assert not same_shoot(a, _photo("APMH00001051", "PA1"))
+    assert not same_shoot(a, _photo("APLP00001001", "PA1"))  # another series
+    assert same_shoot(_photo("AP2322T000470", "PA1"), _photo("AP2322T000471", "PA1"))
+    assert same_shoot(a, a)
+
+
+def test_t1_hides_the_query_shoot_and_drops_buildings_with_one_shoot() -> None:
+    two_shoots = [
+        _photo("APMH00001000", "PA1", "Hurault", "1944"),
+        _photo("APMH00001001", "PA1", "Hurault", "1944"),
+        _photo("APMH00007000", "PA1", "Bonnel", "1970"),
+    ]
+    one_shoot = [_photo(f"APMH0000200{n}", "PA2", "Bonnel", "1968") for n in range(3)]
+    records = [*two_shoots, *one_shoot]
+    ref_of = {r.images[0].image_id: r.ref for r in records}
+    queries = {q.entity_id: q for q in t1_queries(records, size=2)}
+
+    q = queries["PA1"]
+    hidden = {ref_of[i] for i in q.exclude_image_ids}
+    if ref_of[q.query_image_id] == "APMH00007000":
+        assert hidden == {"APMH00007000"}
+    else:
+        assert hidden == {"APMH00001000", "APMH00001001"}
+    assert build_sets.answerable(q, RecordIndex(records))
+    assert not build_sets.answerable(queries["PA2"], RecordIndex(records))
+
+
+def test_dropped_queries_keep_their_images_in_the_galleries() -> None:
+    one_shoot = [_photo(f"APMH0900000{n}", "PA99", "Bonnel", "1968") for n in range(3)]
+    records = [*_corpus(), *one_shoot]
+    built = build_sets.build_sets(records, Sizes(t1=100, t5=20, t8_per_part=0, screening=150))
+    kept = {q.entity_id for s in built.splits for q in s.queries if s.set_id == "T1"}
+    drawn = {q.entity_id for s in built.drawn for q in s.queries if s.set_id == "T1"}
+    assert drawn - kept == {"PA99"}
+    assert built.dropped["T1"] == 1
+    needed = needed_images((q for s in built.drawn for q in s.queries), RecordIndex(records))
+    assert {r.images[0].image_id for r in one_shoot} <= needed
 
 
 def test_t5_leaves_the_other_views_in_the_gallery() -> None:
@@ -117,7 +182,7 @@ def test_t3_queries_an_artwork_crop_and_names_its_room_photo(settings: Settings)
 
 
 def test_split_puts_each_entity_in_one_half_only() -> None:
-    splits = build_sets.build_sets(_corpus(), SMALL)
+    splits = build_sets.build_sets(_corpus(), SMALL).splits
     check_halves_apart(splits)
     tune = {q.entity_id for s in splits for q in s.tune}
     sealed = {q.entity_id for s in splits for q in s.sealed}
@@ -131,7 +196,7 @@ def test_split_puts_each_entity_in_one_half_only() -> None:
 def test_t8_removes_the_whole_entity_and_expects_nothing() -> None:
     records = _corpus()
     index = RecordIndex(records)
-    t8 = {s.set_id: s for s in build_sets.build_sets(records, SMALL)}["T8"]
+    t8 = {s.set_id: s for s in build_sets.build_sets(records, SMALL).splits}["T8"]
     assert len(t8.tune) == len(t8.sealed) == 2 * SMALL.t8_per_part
     for q in t8.queries:
         assert q.expected_entity_ids == ()
@@ -161,7 +226,7 @@ def test_split_by_entity_rounds_tune_up() -> None:
 def test_screening_gallery_keeps_needed_images_and_fills_with_distractors() -> None:
     records = _corpus()
     index = RecordIndex(records)
-    splits = build_sets.build_sets(records, SMALL)
+    splits = build_sets.build_sets(records, SMALL).splits
     needed = needed_images((q for s in splits for q in s.queries), index)
     gallery = screening_gallery(index.image_publishable, needed, size=150)
     assert len(gallery) == 150

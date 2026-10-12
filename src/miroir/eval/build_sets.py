@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -19,7 +20,8 @@ from miroir.records.store import read_records
 
 logger = logging.getLogger(__name__)
 
-#: Queries per set in technical spec §7. T3 takes every artwork with 2+ crops (231 planned).
+#: Queries drawn per set in technical spec §7, before T1 drops buildings with one shoot only.
+#: T3 takes every artwork with 2+ crops (231 planned).
 SPEC_SIZES: dict[str, int] = {"T1": 1_000, "T3": 198, "T5": 1_000, "T8": 500}
 
 #: Gallery for comparing models before the winners run on everything.
@@ -30,6 +32,13 @@ FULL = "full"
 
 #: Rose Valland refs of the Jeu de Paume room photos and the artworks seen in them.
 JEU_DE_PAUME_PREFIX = "JDP-"
+
+#: Two Mémoire photos whose refs differ only in their last number, by at most this much, count
+#: as one shoot. Among photos of one building, 95% of pairs within 50 share photographer and
+#: date; within 100, 85%; within 200, 68%.
+SHOOT_REF_WINDOW = 50
+
+_REF_NUMBER = re.compile(r"(.*\D)?(\d+)(\D*)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +69,8 @@ class SetReport:
     spec: int
     closed_ok: int
     """Queries a closed model may run: publishable query image and a publishable answer."""
+    dropped: int = 0
+    """Queries drawn but left with no answer once their exclusions apply (T1's shoot rule)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +109,36 @@ def _sample[T](rng: random.Random, items: Sequence[T], size: int, set_id: str) -
 # --- the sets -------------------------------------------------------------------
 
 
+def same_shoot(a: Record, b: Record) -> bool:
+    """Two Mémoire photos from one shoot: same photographer and date, or nearby refs.
+
+    Refs are numbered as the prints were filed, so near refs in one series are mostly one
+    visit (see `SHOOT_REF_WINDOW`). The ref test also covers the 3% of photos with no
+    photographer or date.
+    """
+    if a.ref == b.ref:
+        return True
+    if (
+        a.photo_date
+        and a.photo_date == b.photo_date
+        and set(a.photographers) & set(b.photographers)
+    ):
+        return True
+    ref_a, ref_b = _REF_NUMBER.fullmatch(a.ref), _REF_NUMBER.fullmatch(b.ref)
+    if ref_a is None or ref_b is None:
+        return False
+    same_series = (ref_a[1], ref_a[3]) == (ref_b[1], ref_b[3])
+    return same_series and abs(int(ref_a[2]) - int(ref_b[2])) <= SHOOT_REF_WINDOW
+
+
 def t1_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Query]:
-    """Mémoire buildings (PA) with 2+ photos. One photo is the query; the others are the answer."""
+    """Mémoire buildings (PA) with 2+ photos. One photo is the query; the others are the answer.
+
+    Photos from the query's shoot leave the gallery (`same_shoot`): they are often the next
+    frame on the same film, so finding them tests near-duplicate search, not knowing the
+    building from another visit. A query left with no answer stays in the draw, so the halves
+    and galleries do not move, and `drop_unanswerable` removes it after the split.
+    """
     rng = _rng(seed, "T1")
     photos: defaultdict[str, list[tuple[str, Record]]] = defaultdict(list)
     for record in records:
@@ -110,6 +149,7 @@ def t1_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Q
     queries: list[Query] = []
     for entity in _sample(rng, eligible, size, "T1"):
         image_id, record = rng.choice(sorted(photos[entity], key=lambda item: item[0]))
+        shoot = {r.ref: r for _, r in photos[entity] if same_shoot(record, r)}.values()
         queries.append(
             Query(
                 query_id=f"T1-{image_id}",
@@ -117,8 +157,8 @@ def t1_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Q
                 entity_id=entity,
                 query_image_id=image_id,
                 expected_entity_ids=(entity,),
-                # The query's whole photo record leaves the gallery (one image in Mémoire).
-                exclude_image_ids=tuple(sorted(i.image_id for i in record.images)),
+                # The query's photo record and every other photo of its shoot leave the gallery.
+                exclude_image_ids=tuple(sorted(i.image_id for r in shoot for i in r.images)),
             )
         )
     return queries
@@ -276,27 +316,61 @@ def closed_ok(query: Query, publishable_gallery: set[str], index: RecordIndex) -
 # --- the whole build ----------------------------------------------------------------
 
 
-def build_sets(records: Sequence[Record], sizes: Sizes, seed: int = SEED) -> list[SplitSet]:
+@dataclass(frozen=True, slots=True)
+class BuiltSets:
+    splits: tuple[SplitSet, ...]
+    """What gets written: queries with no answer left are gone."""
+    drawn: tuple[SplitSet, ...]
+    """Every query drawn, before `drop_unanswerable`. Galleries are built from these, so a
+    stricter answer rule does not move the screening gallery or the runs embedded on it."""
+    dropped: dict[str, int]
+
+
+def answerable(query: Query, index: RecordIndex) -> bool:
+    """Some image of a right entity is left once the query's exclusions leave the gallery."""
+    hidden = {query.query_image_id, *query.exclude_image_ids}
+    return any(i not in hidden for e in query.expected_entity_ids for i in index.entity_images[e])
+
+
+def drop_unanswerable(split: SplitSet, index: RecordIndex) -> SplitSet:
+    """Remove queries whose every answer is excluded. The halves stay as drawn."""
+    kept = SplitSet(
+        split.set_id,
+        tune=tuple(q for q in split.tune if answerable(q, index)),
+        sealed=tuple(q for q in split.sealed if answerable(q, index)),
+    )
+    dropped = len(split.queries) - len(kept.queries)
+    if dropped:
+        logger.info("%s: dropped %d queries with no answer left", split.set_id, dropped)
+    return kept
+
+
+def build_sets(records: Sequence[Record], sizes: Sizes, seed: int = SEED) -> BuiltSets:
     index = RecordIndex(records)
     t1 = split_by_entity("T1", t1_queries(records, sizes.t1, seed), seed)
     t3 = split_by_entity("T3", t3_queries(records, seed), seed)
     t5 = split_by_entity("T5", t5_queries(records, sizes.t5, seed), seed)
+    # T8 needs no answer, so it draws from every T1 and T5 query, answerable or not.
     t8 = t8_split((t1, t5), index, sizes.t8_per_part, seed)
-    splits = [t1, t3, t5, t8]
-    check_halves_apart(splits)
-    return splits
+    drawn = (t1, t3, t5, t8)
+    check_halves_apart(drawn)
+    splits = tuple(s if s.set_id == "T8" else drop_unanswerable(s, index) for s in drawn)
+    dropped = {
+        s.set_id: len(d.queries) - len(s.queries) for s, d in zip(splits, drawn, strict=True)
+    }
+    return BuiltSets(splits=splits, drawn=drawn, dropped=dropped)
 
 
 def build(settings: Settings, sizes: Sizes | None = None, seed: int = SEED) -> BuildReport:
     sizes = sizes or Sizes()
     records = read_records(settings.records_parquet, settings.images_parquet)
     index = RecordIndex(records)
-    splits = build_sets(records, sizes, seed)
-    for split in splits:
+    built = build_sets(records, sizes, seed)
+    for split in built.splits:
         write_set(settings, split.set_id, split.tune, split.sealed)
 
     all_ids = set(index.image_publishable)
-    needed = needed_images((q for s in splits for q in s.queries), index)
+    needed = needed_images((q for s in built.drawn for q in s.queries), index)
     screening = screening_gallery(all_ids, needed, sizes.screening, seed)
     publishable = {i for i in screening if index.image_publishable[i]}
     write_gallery(settings, FULL, all_ids)
@@ -310,12 +384,20 @@ def build(settings: Settings, sizes: Sizes | None = None, seed: int = SEED) -> B
             sealed=len(s.sealed),
             spec=SPEC_SIZES[s.set_id],
             closed_ok=sum(closed_ok(q, publishable, index) for q in s.queries),
+            dropped=built.dropped[s.set_id],
         )
-        for s in splits
+        for s in built.splits
     )
     for r in reports:
-        logger.info("%s: %d tune, %d sealed (spec %d)", r.set_id, r.tune, r.sealed, r.spec)
-        if r.tune + r.sealed != r.spec:
+        logger.info(
+            "%s: %d tune, %d sealed, %d dropped (spec %d drawn)",
+            r.set_id,
+            r.tune,
+            r.sealed,
+            r.dropped,
+            r.spec,
+        )
+        if r.tune + r.sealed + r.dropped != r.spec:
             logger.warning(
                 "%s has %d queries; spec §7 says %d", r.set_id, r.tune + r.sealed, r.spec
             )
