@@ -14,7 +14,7 @@ make fmt                       # format and auto-fix
 uv run miroir --help           # every entry point is a subcommand
 uv run miroir records build    # exports -> records.parquet + images.parquet (about 6 s)
 uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
-uv run miroir testsets commons # Commons photos -> T2, T2b, T8 extras, screening-v2 (cached; 20 s)
+uv run miroir testsets commons # Commons photos -> T2, T2b, T8c, screening-v2 (cached; 20 s)
 uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
 uv run miroir eval stack ...    # fuse models (G1, G2), expand queries (E5), score T8
 uv run miroir eval summary     # rebuild the results table in docs/results.md

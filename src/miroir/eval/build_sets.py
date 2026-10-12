@@ -1,7 +1,7 @@
 """Build test sets T1, T3, T5, T8 and the galleries from the record table (technical spec §7).
 
-When `commons.parquet` exists (`miroir testsets commons`), also T2, T2b and the Commons part
-of T8, and the `screening-v2` galleries that hold their answers.
+When `commons.parquet` exists (`miroir testsets commons`), also T2, T2b and T8c (Commons
+photos), and the `screening-v2` galleries that hold their answers.
 
 Every draw uses a `random.Random` seeded from `config.SEED` and the set id, over inputs sorted
 by id, so the same records always give the same sets.
@@ -26,11 +26,9 @@ logger = logging.getLogger(__name__)
 
 #: Queries drawn per set in technical spec §7, before T1 drops buildings with one shoot only.
 #: T3 takes every artwork with 2+ crops (231 planned).
-SPEC_SIZES: dict[str, int] = {"T1": 1_000, "T3": 198, "T5": 1_000, "T8": 500}
+SPEC_SIZES: dict[str, int] = {"T1": 1_000, "T3": 198, "T5": 1_000, "T8": 500, "T8c": 300}
 #: Commons sets: at least this many queries (their size depends on what Commons holds).
 MIN_SIZES: dict[str, int] = {"T2": 1_000, "T2b": 500}
-#: Commons photos added to T8 (`miroir.commons.build.Targets`: 200 buildings, 100 works).
-T8_COMMONS = 300
 
 #: Gallery for comparing models before the winners run on everything.
 SCREENING_SIZE = 20_000
@@ -293,17 +291,16 @@ def split_following(
     queries: Iterable[Query],
     fixed: Mapping[str, Half],
     seed: int = SEED,
-    draw: str | None = None,
 ) -> SplitSet:
     """Like `split_by_entity`, but entities already in a half of another set keep it.
 
     The other entities are shuffled and fill the halves so that, together, half the entities
-    (rounded up) are in `tune`. `draw` names the shuffle when two draws share a set id.
+    (rounded up) are in `tune`.
     """
     queries = sorted(queries, key=lambda q: q.query_id)
     entities = sorted({q.entity_id for q in queries})
     free = [e for e in entities if e not in fixed]
-    _rng(seed, f"{draw or set_id}:split").shuffle(free)
+    _rng(seed, f"{set_id}:split").shuffle(free)
     tune_fixed = {e for e in entities if fixed.get(e) == "tune"}
     room = min(max((len(entities) + 1) // 2 - len(tune_fixed), 0), len(free))
     tune_entities = tune_fixed | set(free[:room])
@@ -375,17 +372,17 @@ def commons_queries(
 ) -> tuple[dict[CommonsSet, list[Query]], int]:
     """One query per Commons photo, and how many were dropped because the table changed.
 
-    T2 and T2b need an image of the entity in the table; a T8 photo needs none. The Commons
+    T2 and T2b need an image of the entity in the table; a T8c photo needs none. The Commons
     photo is never in a gallery, so there is nothing to exclude.
     """
     queries: dict[CommonsSet, list[Query]] = {s: [] for s in CommonsSet}
     dropped = 0
     for p in photos:
         in_table = p.entity_id in index.entity_images
-        if in_table == (p.set_id == CommonsSet.T8):
+        if in_table == (p.set_id == CommonsSet.T8C):
             dropped += 1
             continue
-        expected = () if p.set_id == CommonsSet.T8 else (p.entity_id,)
+        expected = () if p.set_id == CommonsSet.T8C else (p.entity_id,)
         queries[p.set_id].append(
             Query(
                 query_id=f"{p.set_id.value}-{p.image_id}",
@@ -418,7 +415,7 @@ class BuiltSets:
     stricter answer rule does not move the screening gallery or the runs embedded on it."""
     dropped: dict[str, int]
     commons: tuple[SplitSet, ...] = ()
-    """T2, T2b and the Commons part of T8 (also inside T8 in `splits`)."""
+    """T2, T2b and T8c, the sets of Commons photos (also in `splits`)."""
 
 
 def answerable(query: Query, index: RecordIndex) -> bool:
@@ -465,18 +462,12 @@ def build_sets(
         parts: list[SplitSet] = []
         for commons_set in CommonsSet:
             label = commons_set.value
-            split = split_following(
-                label, by_set[commons_set], fixed, seed, draw=f"{label}-commons"
-            )
+            split = split_following(label, by_set[commons_set], fixed, seed)
             fixed.update(halves_of([split]))
             parts.append(split)
         commons_splits = tuple(parts)
-        t2, t2b, t8_commons = commons_splits
-        merged_t8 = SplitSet("T8", t8.tune + t8_commons.tune, t8.sealed + t8_commons.sealed)
-        splits = [merged_t8 if s.set_id == "T8" else s for s in splits]
-        splits.extend((t2, t2b))
-        dropped.update({"T2": 0, "T2b": 0})
-        dropped["T8"] += commons_dropped
+        splits.extend(commons_splits)
+        dropped.update({"T2": 0, "T2b": 0, "T8c": commons_dropped})
     check_halves_apart((*drawn, *commons_splits))
     return BuiltSets(splits=tuple(splits), drawn=drawn, dropped=dropped, commons=commons_splits)
 
@@ -543,12 +534,7 @@ def _set_report(
     split: SplitSet, built: BuiltSets, index: RecordIndex, publishable: set[str]
 ) -> SetReport:
     at_least = split.set_id in MIN_SIZES
-    if at_least:
-        spec = MIN_SIZES[split.set_id]
-    elif split.set_id == "T8" and built.commons:
-        spec = SPEC_SIZES["T8"] + T8_COMMONS
-    else:
-        spec = SPEC_SIZES[split.set_id]
+    spec = MIN_SIZES[split.set_id] if at_least else SPEC_SIZES[split.set_id]
     return SetReport(
         set_id=split.set_id,
         tune=len(split.tune),

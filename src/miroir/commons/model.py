@@ -1,4 +1,4 @@
-"""Wikimedia Commons photos used as test queries (technical spec §7: T2, T2b, T8).
+"""Wikimedia Commons photos used as test queries (technical spec §7: T2, T2b, T8c).
 
 They are queries only: no Commons photo is ever added to a gallery. Every one is openly
 licensed, so it may go to any model service, closed ones included.
@@ -22,8 +22,9 @@ class CommonsSet(StrEnum):
     """Phone building: a photo of a Mérimée building (PA) that has photos in Mémoire."""
     T2B = "T2b"
     """Museum work: a photo of a Joconde work that has an image in our table."""
-    T8 = "T8"
-    """Not found: a French monument or work with no image in our table."""
+    T8C = "T8c"
+    """Not found: a French monument or work with no image in our table. Kept apart from T8,
+    whose queries are collection images scored with the gallery's own vectors."""
 
 
 class Source(StrEnum):

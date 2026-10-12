@@ -1,4 +1,4 @@
-"""Find Commons photos for T2, T2b and the Commons part of T8; write `commons.parquet`.
+"""Find Commons photos for T2, T2b and T8c; write `commons.parquet`.
 
 Ground truth comes from official ids on Wikidata: Mérimée (P380) for buildings, Joconde (P347)
 for museum works. For each item we look at its image (P18) and the newest files of its Commons
@@ -297,7 +297,7 @@ def find_commons_photos(
     targets: Targets | None = None,
     seed: int = SEED,
 ) -> tuple[list[CommonsPhoto], CommonsReport]:
-    """T2, T2b and T8 photos for the record table, and what was left out and why."""
+    """T2, T2b and T8c photos for the record table, and what was left out and why."""
     targets = targets or Targets()
     entity_ids = {r.entity_id for r in records}
     buildings = {
@@ -315,7 +315,7 @@ def find_commons_photos(
     t8_buildings, _ = unambiguous(merimee, lambda i: i.startswith("PA") and i not in entity_ids)
     t8_works, _ = unambiguous(joconde, lambda i: i not in entity_ids)
     logger.info(
-        "eligible entities: T2 %d, T2b %d, T8 %d buildings and %d works",
+        "eligible entities: T2 %d, T2b %d, T8c %d buildings and %d works",
         len(t2_pool),
         len(t2b_pool),
         len(t8_buildings),
@@ -335,10 +335,10 @@ def find_commons_photos(
         record_images=works,
     )
     t8b, t8b_report = finder.gather(
-        CommonsSet.T8, Kind.BUILDING, t8_buildings, limit=targets.t8_buildings, per_entity=1
+        CommonsSet.T8C, Kind.BUILDING, t8_buildings, limit=targets.t8_buildings, per_entity=1
     )
     t8w, t8w_report = finder.gather(
-        CommonsSet.T8, Kind.ARTWORK, t8_works, limit=targets.t8_artworks, per_entity=1
+        CommonsSet.T8C, Kind.ARTWORK, t8_works, limit=targets.t8_artworks, per_entity=1
     )
     photos, shared = drop_shared([*t2, *t2b, *t8b, *t8w])
     report = CommonsReport(

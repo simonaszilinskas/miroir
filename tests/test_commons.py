@@ -457,8 +457,8 @@ def _corpus_with_commons() -> tuple[list[Record], list[CommonsPhoto]]:
             for k in range(2)
         ),
         *(_photo(f"File:w{n}.jpg", CommonsSet.T2B, f"J{n:05d}") for n in range(0, 30, 3)),
-        *(_photo(f"File:x{n}.jpg", CommonsSet.T8, f"PA9{n:07d}") for n in range(6)),
-        _photo("File:stale.jpg", CommonsSet.T8, "PA00000001"),  # now in the table: dropped
+        *(_photo(f"File:x{n}.jpg", CommonsSet.T8C, f"PA9{n:07d}") for n in range(6)),
+        _photo("File:stale.jpg", CommonsSet.T8C, "PA00000001"),  # now in the table: dropped
     ]
     return records, photos
 
@@ -473,8 +473,9 @@ def test_build_adds_commons_sets_and_a_v2_gallery_with_their_answers(settings: S
     sets = {s.set_id: s for s in report.sets}
     assert sets["T2"].tune + sets["T2"].sealed == 30
     assert sets["T2b"].tune + sets["T2b"].sealed == 10
-    assert sets["T8"].tune + sets["T8"].sealed == 8 + 6
-    assert sets["T8"].dropped == 1
+    assert sets["T8"].tune + sets["T8"].sealed == 8
+    assert sets["T8c"].tune + sets["T8c"].sealed == 6
+    assert sets["T8c"].dropped == 1
 
     def both(set_id: str) -> list[Query]:
         return load_queries(settings, set_id, "tune") + load_queries(
@@ -482,12 +483,13 @@ def test_build_adds_commons_sets_and_a_v2_gallery_with_their_answers(settings: S
         )
 
     halves: dict[str, str] = {}
-    for set_id in ("T1", "T3", "T5", "T8", "T2", "T2b"):
+    for set_id in ("T1", "T3", "T5", "T8", "T2", "T2b", "T8c"):
         for half in ("tune", "sealed"):
             queries = load_queries(settings, set_id, half, allow_sealed=True)
             for q in queries:
                 assert halves.setdefault(q.entity_id, half) == half
-    t8_commons = [q for q in both("T8") if is_commons_image(q.query_image_id)]
+    assert not any(is_commons_image(q.query_image_id) for q in both("T8"))
+    t8_commons = both("T8c")
     assert len(t8_commons) == 6
     assert all(q.expected_entity_ids == () and q.exclude_image_ids == () for q in t8_commons)
 
