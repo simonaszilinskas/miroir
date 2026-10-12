@@ -13,8 +13,7 @@ import io
 import logging
 import threading
 from collections import Counter
-from collections.abc import Iterable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +25,7 @@ from PIL import UnidentifiedImageError
 
 from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST
 from miroir.http import Retry, send
+from miroir.parallel import bounded_map
 from miroir.records.model import Image
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 #: Longest side, in pixels, of every image sent to an outside model.
 LONG_SIDE = 512
 JPEG_QUALITY = 90
-#: Parallel downloads from POP. Polite: the bucket and IIIF server are public services.
-CONCURRENCY = 8
+#: Parallel downloads from POP. Kept low: the bucket and IIIF server are public services,
+#: and the Mac should stay responsive.
+CONCURRENCY = 4
 
 
 class FetchSkip(StrEnum):
@@ -155,13 +156,9 @@ class ImageFetcher:
             self._cache.put(image.image_id, result.jpeg)
         return result
 
-    def fetch_all(self, images: Sequence[Image]) -> Iterator[Fetched]:
-        """Fetch in parallel; yields results in the order of `images`."""
-        if self._concurrency <= 1:
-            yield from map(self.fetch, images)
-            return
-        with ThreadPoolExecutor(self._concurrency) as pool:
-            yield from pool.map(self.fetch, images)
+    def fetch_all(self, images: Iterable[Image]) -> Iterator[Fetched]:
+        """Fetch in parallel; yields results in the order of `images`, a few at a time."""
+        yield from bounded_map(self.fetch, images, workers=self._concurrency)
 
     def _download(self, image: Image) -> Fetched:
         direct = self._get(image.url)

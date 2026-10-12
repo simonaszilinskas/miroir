@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -8,6 +9,7 @@ from PIL import Image as PILImage
 
 from miroir.http import send
 from miroir.images.fetch import FetchSkip, ImageCache, ImageFetcher, iiif_url, to_jpeg
+from miroir.parallel import bounded_map
 from miroir.records.model import Collection, Image, ImageType
 from tests.fakes import NO_WAIT, FakePop, jpeg
 
@@ -104,3 +106,17 @@ def test_send_returns_the_last_busy_answer_when_out_of_tries() -> None:
     client = httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(429)))
     response = send(client, client.build_request("GET", "https://x.test/"), NO_WAIT)
     assert response.status_code == 429
+
+
+def test_bounded_map_keeps_order_and_reads_input_lazily() -> None:
+    read: list[int] = []
+
+    def numbers() -> Iterator[int]:
+        for n in range(100):
+            read.append(n)
+            yield n
+
+    out = bounded_map(lambda n: n * 2, numbers(), workers=2, window=4)
+    assert [next(out) for _ in range(3)] == [0, 2, 4]
+    assert len(read) <= 8
+    assert list(out) == [n * 2 for n in range(3, 100)]

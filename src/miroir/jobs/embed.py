@@ -13,7 +13,6 @@ import random
 import time
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 from itertools import batched
@@ -47,13 +46,14 @@ from miroir.jobs.spend import (
     load_probe,
     save_probe,
 )
+from miroir.parallel import bounded_map
 from miroir.records.model import Image
 from miroir.records.store import read_records
 
 logger = logging.getLogger(__name__)
 
 #: Parallel requests to OpenRouter.
-REQUEST_CONCURRENCY = 4
+REQUEST_CONCURRENCY = 2
 #: A run stops if it costs this many times its projection (prices or billing changed).
 OVERRUN_FACTOR = 1.5
 
@@ -82,7 +82,7 @@ class PrivacyError(PermissionError):
 @dataclass(frozen=True, slots=True)
 class Embedded:
     ids: tuple[str, ...]
-    vectors: NDArray[np.float32]
+    vectors: NDArray[np.floating]
     cost_usd: float
     skips: Mapping[str, int]
     """Inputs left out, by reason."""
@@ -148,26 +148,26 @@ class OpenRouterEmbedder:
         images = [self._images[i] for i in image_ids]
         skips: Counter[str] = Counter()
         ids: list[str] = []
-        rows: list[NDArray[np.float32]] = []
+        rows: list[NDArray[np.float16]] = []  # normalised float16: half the memory
         spent = 0.0
-        with ThreadPoolExecutor(self._concurrency) as pool:
-            for chunk, result in pool.map(self._embed_chunk, self._chunks(images, skips)):
-                spent += result.cost_usd
-                self.ledger.record(
-                    kind,
-                    option=self.option.option,
-                    run=run,
-                    model=self.option.model,
-                    cost_usd=result.cost_usd,
-                    items=len(chunk),
-                )
-                ids.extend(f.image_id for f in chunk)
-                rows.append(result.vectors)
-                if spent > limit_usd:
-                    msg = f"{run}: spent ${spent:.4f}, over its ${limit_usd:.4f} limit; stopped"
-                    raise BudgetError(msg)
-                if len(ids) % 1000 < len(chunk):
-                    logger.info("%s: %d/%d images, $%.4f", run, len(ids), len(images), spent)
+        chunks = self._chunks(images, skips)
+        for chunk, result in bounded_map(self._embed_chunk, chunks, workers=self._concurrency):
+            spent += result.cost_usd
+            self.ledger.record(
+                kind,
+                option=self.option.option,
+                run=run,
+                model=self.option.model,
+                cost_usd=result.cost_usd,
+                items=len(chunk),
+            )
+            ids.extend(f.image_id for f in chunk)
+            rows.append(_unit_float16(result.vectors))
+            if spent > limit_usd:
+                msg = f"{run}: spent ${spent:.4f}, over its ${limit_usd:.4f} limit; stopped"
+                raise BudgetError(msg)
+            if len(ids) % 1000 < len(chunk):
+                logger.info("%s: %d/%d images, $%.4f", run, len(ids), len(images), spent)
         vectors = np.concatenate(rows) if rows else np.zeros((0, 0), dtype=np.float32)
         return Embedded(tuple(ids), vectors, spent, dict(skips))
 
@@ -346,6 +346,11 @@ def _gallery(embedder: OpenRouterEmbedder, name: str) -> list[str]:
         msg = f"no gallery {name!r} at {path}: run `miroir testsets build` first"
         raise FileNotFoundError(msg)
     return read_gallery(embedder.settings, name)
+
+
+def _unit_float16(vectors: NDArray[np.float32]) -> NDArray[np.float16]:
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return (vectors / np.where(norms == 0, 1, norms)).astype(np.float16)
 
 
 def _keep(fetched: Fetched, skips: Counter[str]) -> bool:
