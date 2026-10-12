@@ -35,6 +35,15 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 #: Base URL of a record page on POP.
 POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 
+#: Wikidata's SPARQL endpoint and the Wikimedia Commons API, read to build test sets T2, T2b
+#: and the Commons part of T8 (technical spec §7).
+WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+#: Wikimedia asks every client to name itself and give a contact.
+WIKIMEDIA_USER_AGENT = (
+    "MIROIR/0.1 (https://github.com/simonaszilinskas/miroir) test-set builder, python-httpx"
+)
+
 # Paths inside Modal containers (miroir.jobs.modal_app). They exist only there.
 #: Volume holding model weights (Hugging Face cache), shared by every run.
 MODAL_WEIGHTS_MOUNT = "/weights"
@@ -128,6 +137,17 @@ class Settings(BaseSettings):
     @property
     def image_cache_dir(self) -> Path:
         return self.data_root / "cache" / "images"
+
+    @property
+    def commons_cache_dir(self) -> Path:
+        """Answers from Wikidata and the Commons API, and Commons thumbnails, kept on disk so a
+        rebuild of the Commons test sets sends no request. Delete it to fetch afresh."""
+        return self.data_root / "cache" / "commons"
+
+    @property
+    def commons_parquet(self) -> Path:
+        """Commons photos chosen as test queries (T2, T2b, T8), with licence and author."""
+        return self.data_root / "commons.parquet"
 
     @property
     def spend_ledger(self) -> Path:
