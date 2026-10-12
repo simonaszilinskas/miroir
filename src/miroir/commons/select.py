@@ -208,6 +208,25 @@ def names_place(file: CommonsFile, category: str) -> bool:
     return bool(wanted & title)
 
 
+#: Words a file title may hold besides the commune and still say nothing of the building.
+_FILLER = frozenset(
+    ["de", "la", "le", "les", "du", "des", "d", "l", "en", "sur", "et", "img", "dsc"]
+)
+_TITLE_WORD = re.compile(r"[a-z]+")
+
+
+def only_commune(file: CommonsFile, commune: str) -> bool:
+    """The title holds only the commune's name and numbers ("Torsac 3", "Mazangé (11)").
+
+    Such a file shows somewhere in the commune, not always the building (label check,
+    docs/results.md, filter B).
+    """
+    name = file.title.removeprefix("File:").rsplit(".", 1)[0]
+    words = set(_TITLE_WORD.findall(fold(name))) - _FILLER
+    town = set(_TITLE_WORD.findall(fold(commune))) - _FILLER
+    return bool(town) and words <= town
+
+
 def is_view_subcategory(name: str) -> bool:
     """A subcategory worth opening for interior and detail photos."""
     words = fold(name)

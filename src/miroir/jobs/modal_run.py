@@ -24,7 +24,7 @@ import json
 import logging
 import random
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -42,6 +42,7 @@ from miroir.eval import amstertime
 from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
 from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
+from miroir.images.fetch import Fetched
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_spec import (
     CHUNK_IMAGES,
@@ -86,6 +87,12 @@ OVERRUN_FACTOR = 1.5
 #: Start-up varies more than per-image time; small runs get this much slack on top.
 OVERRUN_MARGIN_USD = 0.25
 SERVICE_NAME = "Modal"
+
+
+class SuppliesImages(Protocol):
+    """Gives image bytes by id, in order: Commons photos, grey copies (`embed_supplied`)."""
+
+    def fetch_all(self, image_ids: Iterable[str]) -> Iterator[Fetched]: ...
 
 
 class RemoteCalls(Protocol):
@@ -388,6 +395,93 @@ class ModalRunner:
             )
             cost += paid.cost_usd
             _keep_chunk(paid.result, opt, checkpoint, skips)
+            if cost > limit:
+                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
+                raise BudgetError(msg)
+        info = self._info(
+            opt,
+            gallery=label,
+            machine=opt.machine,
+            cost=self.ledger.total(SpendKind.RUN, run=run),
+            wall=self._clock() - start,
+            skips=skips,
+        )
+        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
+        checkpoint.remove()
+        return written
+
+    def embed_supplied(
+        self,
+        option_id: str,
+        label: str,
+        ids: Sequence[str],
+        source: SuppliesImages,
+        *,
+        max_usd: float | None = None,
+    ) -> VectorSet:
+        """Embed images whose bytes the Mac sends, into run `<option>-<label>`.
+
+        For images a container cannot read itself: Commons photos added to the gallery (F2),
+        or grey copies made on the Mac (F1). POP ids must be publishable. Needs a probe of
+        the option, like a gallery run; resumes from its checkpoint.
+        """
+        opt = option(option_id)
+        pop, _ = split_commons(ids)
+        self._store().check(pop, SERVICE_NAME)
+        run = run_name(opt, label)
+        out = self.settings.vectors_path(run)
+        _refuse_existing(out)
+        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
+        held = set(checkpoint.ids)
+        todo = [i for i in dict.fromkeys(ids) if i not in held]
+        projected = check_run(
+            self.budget,
+            self.ledger,
+            self._key_usage,
+            self.probe_for(opt),
+            option=opt.id,
+            model=opt.model,
+            resolution=opt.resolution,
+            count=len(todo),
+        )
+        if max_usd is not None and projected > max_usd:
+            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
+            raise BudgetError(msg)
+        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
+        logger.info(
+            "%s: %d images to send as bytes (%d saved before), about $%.2f (stops past $%.2f)",
+            run,
+            len(todo),
+            len(held),
+            projected,
+            limit,
+        )
+        start = self._clock()
+        skips: dict[str, int] = {}
+        cost = 0.0
+        for chunk in _chunks(todo):
+            supplied: list[SuppliedImage] = []
+            for fetched in source.fetch_all(chunk):
+                if fetched.jpeg is None:
+                    reason = f"fetch_{fetched.skip.value if fetched.skip else 'unknown'}"
+                    skips[reason] = skips.get(reason, 0) + 1
+                else:
+                    supplied.append(SuppliedImage(fetched.image_id, fetched.jpeg))
+            if not supplied:
+                continue
+            paid = self._paid(
+                lambda supplied=supplied: self._calls.embed(opt, [], supplied),
+                machine=opt.machine,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option=opt.id,
+                run=run,
+                model=opt.model,
+                items=len(supplied),
+            )
+            cost += paid.cost_usd
+            _keep_chunk(paid.result, opt, checkpoint, skips)
+            logger.info("%s: %d/%d images, $%.4f", run, len(checkpoint.ids), len(ids), cost)
             if cost > limit:
                 msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
                 raise BudgetError(msg)

@@ -26,7 +26,7 @@ from miroir.eval.expansion import QE_TOP, expand_queries
 from miroir.eval.fusion import Method, fuse, split_weight
 from miroir.eval.notfound import Confidence, NotFoundScore, confidences, not_found_score
 from miroir.eval.results import RunResult, set_score, write_result
-from miroir.eval.run import publishable_only, search_queries
+from miroir.eval.run import entity_map, publishable_only, search_queries
 from miroir.eval.scoring import (
     Asked,
     EntityScores,
@@ -40,7 +40,6 @@ from miroir.eval.scoring import (
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors
-from miroir.records.store import read_images
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +114,7 @@ def score_stack(
         msg = f"no not-found measure for {not_found!r}; known: {', '.join(NOT_FOUND_SETS)}"
         raise ValueError(msg)
     gallery_ids = read_gallery(settings, gallery)
-    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
+    entity_of = entity_map(settings)
     query_runs = stack.query_runs or (None,) * len(stack.runs)
     models = tuple(
         load_model(settings, run, entity_of, gallery_ids, query_run=asking)

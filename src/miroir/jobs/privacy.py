@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from miroir.commons.images import commons_photos
 from miroir.config import Settings
 from miroir.records.model import Image
-from miroir.records.store import read_records
+from miroir.records.store import read_commons, read_records
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,10 @@ class PublishableImages:
         records = read_records(settings.records_parquet, settings.images_parquet)
         images = {i.image_id: i for r in records for i in r.images}
         publishable = frozenset(i.image_id for r in records if r.publishable for i in r.images)
-        return cls(images, publishable, frozenset(commons_photos(settings)))
+        commons = set(commons_photos(settings))
+        for path in settings.commons_gallery_parquets():  # F2 gallery photos, also Commons
+            commons.update(p.image_id for p in read_commons(path))
+        return cls(images, publishable, frozenset(commons))
 
     def check_known(self, image_ids: Sequence[str]) -> None:
         """Raise unless every id is in images.parquet or commons.parquet (publishable or not)."""

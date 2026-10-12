@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -246,6 +246,42 @@ def merge_runs(directory: Path, runs: Sequence[VectorSet], *, gallery: str) -> V
         notes=notes,
     )
     return write_vectors(directory, ids, vectors, info)
+
+
+def overlay_runs(
+    directory: Path, base: VectorSet, top: VectorSet, *, ids: Sequence[str], gallery: str
+) -> VectorSet:
+    """Write a run holding `ids`, each from `top` when it has it, else from `base`.
+
+    For step F1: grey copies (`top`) of the images that had colour, and the vectors of
+    images already grey (`base`). Both runs must be of the same model, size and pooling.
+    """
+    same = (base.info.model, base.info.resolution, base.info.pooling, base.dim)
+    if (top.info.model, top.info.resolution, top.info.pooling, top.dim) != same:
+        msg = f"cannot overlay {top.info.model} on {base.info.model}"
+        raise ValueError(msg)
+    top_row, base_row = top.index(), base.index()
+    missing = [i for i in ids if i not in top_row and i not in base_row]
+    if missing:
+        msg = f"{len(missing)} id(s) in neither run, e.g. {missing[:3]}"
+        raise ValueError(msg)
+    rows = [
+        np.asarray(top.vectors[top_row[i]])
+        if i in top_row
+        else np.asarray(base.vectors[base_row[i]])
+        for i in ids
+    ]
+    replaced = sum(1 for i in ids if i in top_row)
+    info = replace(
+        base.info,
+        gallery=gallery,
+        created=max(base.info.created, top.info.created),
+        cost_usd=base.info.cost_usd + top.info.cost_usd,
+        wall_time_s=base.info.wall_time_s + top.info.wall_time_s,
+        notes=f"{replaced} of {len(ids)} rows from {top.info.gallery}, the rest from "
+        f"{base.info.gallery}; {top.info.notes}",
+    )
+    return write_vectors(directory, list(ids), np.stack(rows), info)
 
 
 def meta_dict(info: RunInfo) -> dict[str, object]:

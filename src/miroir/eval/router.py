@@ -35,7 +35,7 @@ from miroir.config import SEED, Settings, eval_result_path
 from miroir.eval.fusion import fuse_per_query, min_max
 from miroir.eval.notfound import Confidence, NotFoundScore, confidences, not_found_score
 from miroir.eval.results import RunResult, set_score, write_result
-from miroir.eval.run import publishable_only, search_queries
+from miroir.eval.run import entity_map, publishable_only, search_queries
 from miroir.eval.scoring import (
     EntityScores,
     Floats,
@@ -56,7 +56,7 @@ from miroir.eval.stack import (
 )
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.records.model import Collection, Record
-from miroir.records.store import read_images, read_records
+from miroir.records.store import read_records
 
 logger = logging.getLogger(__name__)
 
@@ -430,7 +430,7 @@ def score_router(
         msg = "G4 needs two or more vector runs and at least one set"
         raise ValueError(msg)
     gallery_ids = read_gallery(settings, gallery)
-    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
+    entity_of = entity_map(settings)
     type_of_image = photo_types(settings)
     models = tuple(load_model(settings, run, entity_of, gallery_ids) for run in runs)
     guessing = tuple(read_vectors(settings.vectors_path(r)) for r in guess_runs)
@@ -491,6 +491,7 @@ def score_router(
 
 
 def photo_types(settings: Settings) -> dict[str, PhotoType]:
+    """Each image's photo type where its record says it (`photo_type`)."""
     records = read_records(settings.records_parquet, settings.images_parquet)
     out: dict[str, PhotoType] = {}
     unknown = 0
@@ -510,8 +511,11 @@ def guess_report(
     gallery_ids: Sequence[str],
     entity_of: Mapping[str, str],
     type_of_image: Mapping[str, PhotoType],
+    *,
+    query_sets: Sequence[str] = QUERY_SETS,
 ) -> GuessReport:
-    queries = {s: load_queries(settings, s, "tune") for s in QUERY_SETS}
+    """Train the guess on gallery images, every tune-query entity of `query_sets` left out."""
+    queries = {s: load_queries(settings, s, "tune") for s in query_sets}
     left_out = {
         e for qs in queries.values() for q in qs for e in (q.entity_id, *q.expected_entity_ids)
     }

@@ -149,6 +149,15 @@ class Settings(BaseSettings):
         """Commons photos chosen as test queries (T2, T2b, T8), with licence and author."""
         return self.data_root / "commons.parquet"
 
+    def commons_gallery_parquet(self, gallery: str) -> Path:
+        """Commons photos added as gallery images of the buildings of `gallery` (step F2)."""
+        _check_name(gallery)
+        return self.data_root / f"commons-gallery-{gallery}.parquet"
+
+    def commons_gallery_parquets(self) -> list[Path]:
+        """Every F2 table written so far, in name order."""
+        return sorted(self.data_root.glob("commons-gallery-*.parquet"))
+
     @property
     def spend_ledger(self) -> Path:
         """One JSON line per paid call (OpenRouter or Modal): what it cost, for which run.

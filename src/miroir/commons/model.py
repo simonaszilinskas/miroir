@@ -1,7 +1,9 @@
-"""Wikimedia Commons photos used as test queries (technical spec §7: T2, T2b, T8c).
+"""Wikimedia Commons photos used as test queries (technical spec §7: T2, T2b, T8c), and as
+extra gallery photos of Mérimée buildings (experiments.md F2).
 
-They are queries only: no Commons photo is ever added to a gallery. Every one is openly
-licensed, so it may go to any model service, closed ones included.
+A query photo is never added to a gallery: F2 photos come from their own table and leave out
+every query file, its near-copies and other frames of its visit (`miroir.commons.gallery`).
+Every one is openly licensed, so it may go to any model service, closed ones included.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ class CommonsSet(StrEnum):
     T8C = "T8c"
     """Not found: a French monument or work with no image in our table. Kept apart from T8,
     whose queries are collection images scored with the gallery's own vectors."""
+    GALLERY = "F2"
+    """Not a test set: an extra gallery photo of a Mérimée building (experiments.md F2)."""
 
 
 class Source(StrEnum):
@@ -63,7 +67,7 @@ class CommonsPhoto:
     url: str
     """The original file."""
     thumb_url: str
-    """A copy 960 px wide (the original when it is smaller)."""
+    """A copy 960 px wide (the original when it is smaller); 500 px for F2 gallery photos."""
     width: int
     height: int
     licence: str
@@ -83,7 +87,12 @@ class CommonsPhoto:
     """The Commons category it was found in; empty for P18."""
     view: View
     phash_distance: int | None = None
-    """T2b only: bits between its perceptual hash and the nearest image of the Joconde record."""
+    """T2b: bits between its perceptual hash and the nearest image of the Joconde record.
+    F2: bits to the nearest Commons query photo."""
+
+
+#: The sets whose photos are test queries (every member but GALLERY).
+QUERY_SETS: tuple[CommonsSet, ...] = (CommonsSet.T2, CommonsSet.T2B, CommonsSet.T8C)
 
 
 def commons_image_id(file_title: str) -> str:

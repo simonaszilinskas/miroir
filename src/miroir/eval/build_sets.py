@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from miroir.commons.model import CommonsPhoto, CommonsSet, is_commons_image
+from miroir.commons.model import QUERY_SETS, CommonsPhoto, CommonsSet, is_commons_image
 from miroir.config import SEED, Half, Settings
 from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.records.model import Collection, Record
@@ -375,7 +375,7 @@ def commons_queries(
     T2 and T2b need an image of the entity in the table; a T8c photo needs none. The Commons
     photo is never in a gallery, so there is nothing to exclude.
     """
-    queries: dict[CommonsSet, list[Query]] = {s: [] for s in CommonsSet}
+    queries: dict[CommonsSet, list[Query]] = {s: [] for s in QUERY_SETS}
     dropped = 0
     for p in photos:
         in_table = p.entity_id in index.entity_images
@@ -460,7 +460,7 @@ def build_sets(
         # Entities already in a half keep it, so no entity is in both halves across sets.
         fixed = halves_of(drawn)
         parts: list[SplitSet] = []
-        for commons_set in CommonsSet:
+        for commons_set in QUERY_SETS:
             label = commons_set.value
             split = split_following(label, by_set[commons_set], fixed, seed)
             fixed.update(halves_of([split]))

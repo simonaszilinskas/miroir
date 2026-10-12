@@ -37,7 +37,7 @@ from miroir.eval.scoring import (
 from miroir.eval.sets import Query, load_queries, read_gallery, write_gallery
 from miroir.eval.vectors import VectorSet, merge_runs, read_vectors
 from miroir.jobs.spend import SpendKind, SpendLedger
-from miroir.records.store import read_images, read_records
+from miroir.records.store import read_commons, read_images, read_records
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +110,22 @@ def _search_inputs(
     allow_sealed: bool,
     publishable_queries: bool,
 ) -> tuple[Gallery, list[SearchQuery]]:
-    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
+    entity_of = entity_map(settings)
     ids = None if gallery is None else read_gallery(settings, gallery)
     searched = Gallery.from_vectors(vectors, entity_of, ids)
     loaded = load_queries(settings, set_id, half, allow_sealed=allow_sealed)
     if publishable_queries:
         loaded = publishable_only(settings, loaded, in_gallery=ids)
     return searched, search_queries(loaded)
+
+
+def entity_map(settings: Settings) -> dict[str, str]:
+    """The entity each gallery image shows: POP images, and Commons photos added to buildings
+    (step F2, `commons-gallery-*.parquet`), which count as images of their building."""
+    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
+    for path in settings.commons_gallery_parquets():
+        entity_of.update((p.image_id, p.entity_id) for p in read_commons(path))
+    return entity_of
 
 
 def rerank_shortlists(

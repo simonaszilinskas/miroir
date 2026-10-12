@@ -114,6 +114,35 @@ def build_commons_sets(
         typer.echo(f"{sample_out}: {count} queries to check")
 
 
+@testsets_app.command("commons-gallery")
+def build_commons_gallery(
+    gallery: Annotated[str, typer.Option(help="Gallery whose Mérimée buildings get photos.")],
+) -> None:
+    """F2: add up to 5 Commons photos per building of a gallery (cached; query photos kept out).
+
+    Writes commons-gallery-<gallery>.parquet and the gallery list <gallery>+F2.
+    """
+    from miroir.commons.gallery import (  # noqa: PLC0415 (imports httpx, Pillow)
+        fetch_gallery_photos,
+        gallery_buildings,
+    )
+    from miroir.eval.sets import read_gallery  # noqa: PLC0415
+    from miroir.records.store import read_images  # noqa: PLC0415
+
+    settings = get_settings()
+    report = fetch_gallery_photos(settings, gallery)
+    typer.echo(
+        f"{gallery}: {report.photos} photos for {report.with_photos} of {report.buildings} "
+        f"buildings; {report.requests} requests sent; left out: {dict(report.rejects)}"
+    )
+    full = gallery_buildings(read_images(settings.images_parquet), read_gallery(settings, "full"))
+    requests, hours = report.estimate(len(full))
+    typer.echo(
+        f"full sample: {len(full)} buildings, about {requests} requests, "
+        f"{hours:.1f} h at Wikimedia's pace with nothing cached"
+    )
+
+
 def _echo_build(report: BuildReport) -> None:
     typer.echo(
         f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'dropped':>7} {'spec':>7}"
@@ -323,6 +352,57 @@ def eval_route(
         )
 
 
+@eval_app.command("route3")
+def eval_route3(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")],
+    step: Annotated[str, typer.Option(help="Experiment step: G, F...")] = "G",
+    option: Annotated[str, typer.Option(help="Result file label, e.g. G5-router3-A7+A3.")],
+    vectors: Annotated[list[str], typer.Option(help="Gallery run: A7 first, then A3.")],
+    query_vectors: Annotated[
+        list[str] | None,
+        typer.Option(help="Each model's query run (Commons or grey queries), same order."),
+    ] = None,
+    gallery: Annotated[str, typer.Option(help="Gallery list.")],
+    test_set: Annotated[list[str], typer.Option("--set", help="Test set to rank; repeat it.")],
+    weights: Annotated[
+        str | None,
+        typer.Option(help="Fixed A7 weights 'archive,colour,object' instead of picking them."),
+    ] = None,
+) -> None:
+    """G5: A7+A3 with one A7 weight per bucket (archive building, colour building, object)."""
+    from miroir.eval.router3 import Bucket, score_router3  # noqa: PLC0415
+
+    fixed = None
+    if weights is not None:
+        values = [float(w) for w in weights.split(",")]
+        fixed = dict(zip(Bucket, values, strict=True))
+    report = score_router3(
+        get_settings(),
+        runs=vectors,
+        query_runs=query_vectors or (),
+        set_ids=test_set,
+        gallery=gallery,
+        round_id=round_id,
+        step=step,
+        option=option,
+        fixed=fixed,
+    )
+    typer.echo(report.result.vectors.notes)
+    sets = list(report.buckets)
+    typer.echo("buckets: " + "; ".join(f"{s} {dict(b)}" for s, b in report.buckets.items()))
+    typer.echo(f"{'hit@10':<10}" + "".join(f"{s:>22}" for s in sets))
+    for p in report.policies:
+        row = "".join(f"{_pct(report.scores[p.name][s].hit_at_10):>22}" for s in sets)
+        typer.echo(f"{p.name:<10}{row}")
+    for name, by_set in report.differences.items():
+        row = "".join(
+            f"{100 * d.diff.value:>+8.1f} [{100 * d.diff.low:+.1f},{100 * d.diff.high:+.1f}]"
+            for d in by_set.values()
+        )
+        typer.echo(f"{name:<14}{row}")
+
+
 @eval_app.command("merge-vectors")
 def eval_merge_vectors(
     *,
@@ -335,6 +415,29 @@ def eval_merge_vectors(
 
     count = merge_vector_runs(get_settings(), run, out=out, gallery=gallery)
     typer.echo(f"{out}: {count} vectors")
+
+
+@eval_app.command("overlay-vectors")
+def eval_overlay_vectors(
+    *,
+    base: Annotated[str, typer.Option(help="Run whose rows are kept unless top has them.")],
+    top: Annotated[str, typer.Option(help="Run whose rows win (e.g. grey copies, F1).")],
+    out: Annotated[str, typer.Option(help="Name of the new run.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list the new run covers.")],
+) -> None:
+    """One run of a gallery's images, each from `top` when it has it, else from `base`."""
+    from miroir.eval.sets import read_gallery  # noqa: PLC0415
+    from miroir.eval.vectors import overlay_runs, read_vectors  # noqa: PLC0415
+
+    settings = get_settings()
+    done = overlay_runs(
+        settings.vectors_path(out),
+        read_vectors(settings.vectors_path(base)),
+        read_vectors(settings.vectors_path(top)),
+        ids=read_gallery(settings, gallery),
+        gallery=gallery,
+    )
+    typer.echo(f"{out}: {len(done.ids)} vectors; {done.info.notes[:120]}")
 
 
 @testsets_app.command("fetched")
@@ -543,6 +646,53 @@ def embed_modal(
             f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors, "
             f"${done.info.cost_usd:.4f}"
         )
+
+
+@embed_app.command("modal-f2")
+def embed_modal_f2(
+    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+    gallery: Annotated[str, typer.Option(help="Gallery whose F2 photos to embed.")],
+    max_usd: Annotated[
+        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
+    ] = None,
+) -> None:
+    """F2: embed the Commons photos added to a gallery's buildings (sent from the Mac)."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.supplied import open_gallery_photos  # noqa: PLC0415
+    from miroir.records.store import read_commons  # noqa: PLC0415
+
+    settings = get_settings()
+    ids = [p.image_id for p in read_commons(settings.commons_gallery_parquet(gallery))]
+    with open_gallery_photos(settings, gallery) as photos, open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        done = runner.embed_supplied(option, f"F2-{gallery}", ids, photos, max_usd=max_usd)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@embed_app.command("modal-grey")
+def embed_modal_grey(
+    option: Annotated[str, typer.Option(help="Modal option id, e.g. A3-megaloc-322.")],
+    gallery: Annotated[str, typer.Option(help="Gallery whose colour images to grey.")],
+    queries: Annotated[
+        list[str] | None, typer.Option(help="Also grey these sets' tune query images.")
+    ] = None,
+    max_usd: Annotated[
+        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
+    ] = None,
+) -> None:
+    """F1: embed grey copies of every image with colour in a gallery and the query sets."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.supplied import grey_candidates, open_grey_copies  # noqa: PLC0415
+
+    settings = get_settings()
+    with open_grey_copies(settings) as grey:
+        ids = grey.not_grey(grey_candidates(settings, gallery, queries or ()))
+        with open_modal(settings) as calls:
+            runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+            done = runner.embed_supplied(option, f"grey-{gallery}", ids, grey, max_usd=max_usd)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
 @embed_app.command("modal-images")
