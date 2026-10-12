@@ -174,6 +174,46 @@ T8 tune holds 250 queries from T1 and T5 tune (125 each) with their whole buildi
 - A top-1 cosine is a poor "not found" signal for every model. With a cut-off that answers half the in-index searches, a quarter or more of searches with no answer still get a confident wrong one. Keeping wrong answers under 5% (the spec target) leaves only 9–15% of in-index searches answered.
 - The intervals overlap: no model is clearly better at it. G3 (a learned score over several signals, R3) and a geometric re-ranker (E1) are the next things to try.
 
+### H1 and H3: ask a vision model, search its answer (2026-10-12)
+
+H belongs to R3. We pulled H1 forward because it is cheap: one question per query photo.
+
+Expected (written after the 100-photo probe of Qwen, before the full runs): the probe answers showed that most T1 archive photos are mounted on a card with a typed caption ("JÉZEAU (Hautes-Pyrénées). Eglise. Nef Sud…"), and the model copies it. So we expected H1 to beat every image model on T1 by reading, and to fail on T3, whose queries are blurred black-and-white crops of room photos with no text (checked: every T3 query is a crop, `jdp-<room>-<item>-<n>.jpg`). T5 museum objects carry labels and inventory numbers now and then; we expected a little help there.
+
+Method. `miroir vlm ask` sends each publishable query photo of T1, T3 and T5 tune (138 + 99 + 443 = 680, the same queries as R1) to a vision model, asking in French for JSON: type, likely name, commune, department, region, period or style, author, any visible text, a one-line description and a confidence from 0 to 1. Answers are kept in `~/miroir-data/vlm/<model>.jsonl`. `miroir vlm score` turns each answer into a query (name and commune said twice) and searches it with BM25 over the record text of the gallery (`screening-20k-publishable-fetched`: title, description/LEG, denomination, domain, authors, period, commune, department, region; the record model has no materials field). A record's score goes to each of its images, hidden images leave, an entity scores its best image: the same ranking as the image runs. H3 mixes H1 with A7 (EmbeddingGemma 2) as G1 does: weighted sum of min-max scores, one A7 weight for all three sets, picked from 0.3–0.9 by mean hit@10. Both pick 0.7.
+
+Models: Qwen3-VL 30B-A3B instruct (open; no batch variant on OpenRouter, so standard price) and Gemini 3.5 Flash Lite (closed) through the half-price Batch API. Cost, probes included: Qwen $0.13, Gemini $0.26, $0.39 together. The Batch API refuses images sent as data URLs and Google could not fetch 99 of 100 IIIF URLs in time, so batch requests send the asset bucket URL.
+
+Hit@10 with 95% intervals; paired difference against A7 alone on the same queries:
+
+| Run | T1 | T3 | T5 |
+|---|---|---|---|
+| A7 alone (R1) | 50.0 [43–58] | **84.8** [78–92] | 48.1 [43–53] |
+| H1 Qwen3-VL 30B-A3B | 87.0 [81–92]; +37.0 [+28.3, +44.9] | 9.1 [4–14]; −75.8 | 20.1 [17–24]; −28.0 |
+| H1 Gemini 3.5 Flash Lite (closed) | **97.1** [94–99]; +47.1 [+39.9, +54.3] | 22.2 [14–31]; −62.6 | 38.1 [34–43]; −9.9 [−15.8, −4.1] |
+| H3 A7 0.7 + H1 Qwen 0.3 | 79.7 [73–86]; +29.7 [+22.5, +37.0] | 82.8 [75–91]; −2.0 [−7.1, +3.0] | 47.0 [42–52]; −1.1 [−4.5, +2.3] |
+| H3 A7 0.7 + H1 Gemini 0.3 | 89.1 [84–94]; +39.1 [+31.2, +46.4] | 82.8 [75–90]; −2.0 [−6.1, +1.0] | **53.7** [49–59]; +5.6 [+2.0, +9.3] |
+
+What the models said (from `miroir vlm score`):
+
+| | Qwen T1 | Gemini T1 | Qwen T5 | Gemini T5 |
+|---|---|---|---|---|
+| Right commune (of 138 / 443) | 79 | 123 | 0 | 9 |
+| … of which read in the image | 76 | 113 | 0 | 2 |
+| Gave a name / name matches the record | 103 / 84 | 135 / 118 | 36 / 16 | 82 / 41 |
+| Read some text | 136 | 136 | 276 | 269 |
+| Hit@10, confidence ≥ 0.8 | 90% (134 q) | 99% (136 q) | 25% (147 q) | 69% (91 q) |
+| Hit@10, confidence < 0.5 | 0% (2 q) | 0% (2 q) | 11% (123 q) | 28% (318 q) |
+
+What we learned:
+
+- On T1, H1 wins by reading, not by knowing buildings. 113 of Gemini's 123 right communes, and 76 of Qwen's 79, were copied from the caption typed on the photo's mount. Every one of the 54 T1 queries that H3 Gemini gains over A7 has such a caption. This holds for archive prints in Mémoire; it says nothing about phone photos of a building (T2), where there is no caption.
+- H1 alone fails on T3 (no text, blurred crops) and trails A7 on T5. Mixed with A7, it costs nothing beyond the error bar on T3 and, with Gemini, gains 5.6 points on T5 [+2.0, +9.3]. 41 of those 45 T5 gains come from read text: medal legends, signatures, inventory labels, captions on the photo.
+- Gemini beats Qwen on every set beyond the error bar (H1 hit@10: T1 +10.1, T3 +13.1, T5 +18.1). By experiments.md rule 1 that is a closed model winning; Qwen still makes H3 a large T1 gain at no loss elsewhere.
+- Gemini's confidence means something on T5 (69% hit@10 when ≥ 0.8, 28% below 0.5); Qwen says 0.9 to nearly everything. A G3 score could use Gemini's confidence to decide how much to trust the text.
+- One weight for all sets is again the catch: on T1, H1 Gemini alone (97.1) beats the mix (89.1), because A7 at 0.7 drowns a sure text match. Weighting by the model's confidence, or by whether it read a place name, is the obvious next step (G3).
+- Text the model reads but our index cannot use: inventory numbers on museum labels ("2019.0.998") are not in the record model. Adding the Joconde inventory field to the records would let BM25 match them exactly.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -235,6 +275,10 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-cls | facebook/dinov2-large | 224 | cls | 443 | 29.6 [25.3, 33.6] | 36.3 [31.6, 40.9] | 39.5 [34.8, 44.2] | 33.1 [28.8, 37.0] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 443 | 26.4 [22.3, 30.5] | 37.7 [33.0, 42.2] | 42.0 [37.2, 46.5] | 32.4 [28.4, 36.5] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 443 | 27.8 [23.5, 31.8] | 36.1 [31.8, 40.6] | 39.7 [34.8, 44.7] | 31.9 [27.8, 35.9] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 138 | 86.2 [80.4, 92.0] | 96.4 [93.5, 99.3] | 97.1 [94.2, 99.3] | 90.9 [87.0, 94.8] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 138 | 75.4 [68.1, 82.6] | 89.1 [84.1, 94.2] | 89.1 [84.1, 94.2] | 81.0 [75.3, 86.5] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 138 | 65.2 [57.2, 73.2] | 82.6 [76.1, 88.4] | 87.0 [81.2, 92.0] | 72.7 [66.2, 79.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 138 | 65.2 [57.2, 73.2] | 76.1 [68.8, 83.3] | 79.7 [73.2, 86.2] | 70.7 [63.7, 77.7] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.8] | 51.4 [44.2, 59.4] | 41.3 [34.5, 48.7] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 138 | 35.5 [27.5, 42.8] | 44.2 [37.0, 52.2] | 45.7 [38.4, 53.6] | 39.8 [32.6, 47.3] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 138 | 35.5 [28.3, 43.5] | 42.8 [35.5, 50.7] | 47.8 [40.6, 55.8] | 39.8 [32.8, 47.5] |
@@ -262,7 +306,11 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 99 | 52.5 [42.4, 62.6] | 76.8 [67.7, 84.8] | 84.8 [76.8, 91.9] | 63.7 [55.8, 72.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 99 | 51.5 [42.4, 61.6] | 74.7 [65.7, 83.8] | 78.8 [70.7, 86.9] | 63.1 [55.0, 71.6] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 99 | 45.5 [35.4, 55.6] | 74.7 [65.7, 83.8] | 77.8 [69.7, 85.9] | 59.6 [51.7, 68.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 99 | 45.5 [36.4, 55.6] | 74.7 [65.7, 82.8] | 82.8 [74.7, 89.9] | 58.6 [50.9, 66.6] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 99 | 42.4 [33.3, 51.5] | 75.8 [67.7, 83.8] | 82.8 [74.7, 90.9] | 57.2 [49.7, 64.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 99 | 30.3 [21.2, 40.4] | 78.8 [70.7, 86.9] | 79.8 [71.7, 87.9] | 51.3 [44.7, 59.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 99 | 4.0 [1.0, 8.1] | 15.2 [9.1, 22.2] | 22.2 [14.1, 31.3] | 10.0 [6.2, 14.5] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 99 | 1.0 [0.0, 3.0] | 5.1 [1.0, 9.1] | 9.1 [4.0, 14.1] | 4.6 [2.2, 7.5] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.7, 44.7] | 54.4 [49.9, 58.9] | 60.5 [56.0, 64.8] | 47.1 [42.9, 50.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 443 | 38.4 [34.1, 42.7] | 51.7 [47.2, 56.2] | 56.9 [52.1, 61.4] | 45.1 [41.0, 49.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 37.9 [33.2, 42.4] | 49.9 [45.4, 54.4] | 54.9 [50.3, 59.1] | 43.8 [39.5, 47.8] |
@@ -270,13 +318,17 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.7 [30.9, 40.0] | 47.6 [42.9, 52.2] | 52.8 [48.3, 57.3] | 41.9 [37.7, 46.0] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.8 [30.5, 39.1] | 47.6 [43.1, 52.1] | 51.9 [47.6, 56.7] | 41.1 [36.9, 45.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.0 [30.5, 39.3] | 46.3 [41.5, 51.0] | 52.6 [48.1, 57.1] | 41.0 [36.9, 45.2] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 47.9 [43.1, 52.6] | 53.7 [49.2, 58.5] | 40.7 [36.7, 44.6] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3-alpha3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 35.0 [30.7, 39.1] | 45.8 [40.9, 50.1] | 51.2 [46.5, 55.8] | 40.4 [36.1, 44.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 443 | 31.2 [26.9, 35.4] | 50.3 [45.8, 54.9] | 53.7 [49.0, 58.0] | 40.0 [35.9, 43.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.4 [29.1, 37.5] | 45.8 [40.9, 50.1] | 51.0 [46.3, 55.3] | 39.1 [34.8, 42.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 45.1 [40.4, 49.7] | 49.0 [44.2, 53.5] | 39.1 [34.9, 43.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 32.5 [28.0, 36.8] | 43.8 [39.3, 48.5] | 48.1 [43.6, 52.6] | 38.1 [33.8, 42.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 443 | 26.6 [22.6, 30.7] | 41.8 [37.0, 46.3] | 43.8 [39.1, 48.3] | 33.7 [29.9, 37.6] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 443 | 25.7 [21.9, 29.6] | 40.2 [35.7, 44.7] | 47.0 [42.2, 51.5] | 33.5 [29.6, 37.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 443 | 22.6 [18.7, 26.4] | 41.5 [36.8, 46.0] | 43.3 [38.6, 47.9] | 31.2 [27.4, 34.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 443 | 15.8 [12.4, 19.4] | 30.7 [26.4, 35.0] | 38.1 [33.6, 43.1] | 23.4 [20.0, 26.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 443 | 8.8 [6.1, 11.5] | 16.3 [12.9, 19.9] | 20.1 [16.7, 23.9] | 12.5 [9.6, 15.3] |
 
 Not found (T8): confidence is the top entity's score. Lower is better for "wrong but confident", higher for "matched".
 
