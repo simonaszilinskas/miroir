@@ -214,6 +214,51 @@ What we learned:
 - One weight for all sets is again the catch: on T1, H1 Gemini alone (97.1) beats the mix (89.1), because A7 at 0.7 drowns a sure text match. Weighting by the model's confidence, or by whether it read a place name, is the obvious next step (G3).
 - Text the model reads but our index cannot use: inventory numbers on museum labels ("2019.0.998") are not in the record model. Adding the Joconde inventory field to the records would let BM25 match them exactly.
 
+### G4: weights chosen per photo by a building-or-object guess (2026-10-12)
+
+G1 gives every photo the same weight, but T1 (archive photos of buildings) wants EmbeddingGemma 2 (A7) and T5 (museum objects) wants MegaLoc (A3). G4 guesses from the photo's own vectors whether it shows a building or an object, then sets A7's weight: `p(building) × w_building + (1 − p) × w_object`, or a hard switch at p > 0.5. Run with `miroir eval route` (technical spec §7.2).
+
+Expected (written before the run): the guess should be easy, since buildings and objects look nothing alike; the gain should come on T1 and T5, where G1 lost to the best single model.
+
+**The guess.** A logistic regression on A7 vectors (no model runs; NumPy on the Mac). Labels come from the records: Joconde, Rose Valland and Mémoire photos linked to a Palissy object (PM) are objects; Mémoire photos linked to a Mérimée building (PA) are buildings; 538 Mémoire photos linked to neither are left out. Every building or object of a T1, T3, T5 or T8 tune query (826) is kept out of training, leaving 12,980 gallery images. The penalty (0.1) was picked on a fifth of the gallery's buildings and objects held out.
+
+| Guess reads | Held-out gallery, balanced | T1 (138) | T3 (99) | T5 (443) | T8 (232) |
+|---|---|---|---|---|---|
+| A7 | 98.7% | 98.6% | 100% | 99.8% | 99.6% |
+| A7 + A3 side by side | 98.7% | 98.6% | 100% | 100% | 99.6% |
+
+Adding MegaLoc's 8,448 numbers buys nothing: one more T5 photo right, at about 20 times the training time. Routing on it (`G4-router-A7+A3-guessA7A3`, weights 1.0 / 0.1) scores T1 51.4, T3 89.9, T5 62.1, within a point of the A7 guess. The rest of this section uses the A7 guess.
+
+**Ranking.** The grid (A7 weight 0 to 1 in steps of 0.1, one pair for T1, T3 and T5 together) picks A7 1.0 for buildings and 0.2 for objects; the hard switch picks 0.9 and 0.2. Hit@10, 95% interval:
+
+| Run | Weights (buildings / objects) | T1 | T3 | T5 | Mean |
+|---|---|---|---|---|---|
+| G4-switch-A7+A3 | 0.9 / 0.2, switch | **52.2** [45–60] | **89.9** [84–96] | 61.4 [57–66] | **67.8** |
+| G4-router-A7+A3 | 1.0 / 0.2, blend | 51.4 [44–59] | **89.9** [84–96] | 61.4 [57–66] | 67.6 |
+| G1-A7+A3 | 0.7 for all | 45.7 [38–54] | **89.9** [84–96] | 54.9 [50–59] | 63.5 |
+| best single (R1) | | A9 51.4 / A7 50.0 | A3 85.9 | A3 **62.5** | |
+
+Paired bootstrap, G4-router-A7+A3 minus the other run, hit@10 (the switch gives the same verdicts):
+
+| Set | − G1-A7+A3 | − best single |
+|---|---|---|
+| T1 | **+5.8** [+2.2, +10.1] | A7: +1.4 [0.0, +3.6]; A9: 0.0 [−5.1, +5.1] |
+| T3 | 0.0 [−3.0, +3.0] | A3: **+4.0** [+1.0, +9.1] |
+| T5 | **+6.5** [+3.8, +9.3] | A3: −1.1 [−3.2, +0.9] |
+
+With one building set, the building weight is in effect tuned on T1 alone, which flatters G4. A two-fold check picks the weights on half of each set's buildings and objects and scores the other half: G4 T1 50.7, T3 86.9, T5 61.2, against G1 on the same grid 46.4, 88.9, 53.0. The gain holds.
+
+**Not found (T8).** Confidence is the routed mix of the top entity's cosines. With one cut-off, 66.8% [59.9, 73.7] of T8 searches still get a confident wrong answer at 50% matched (G1: 27.6%), because A7 and A3 cosines sit on different scales and routing puts buildings on one and objects on the other. A cut-off per guessed type (each confidence replaced by its rank among in-index confidences of the same type; this is the T8 row in the summary) brings it to 42.2% [35.3, 50.4] for the blend and 36.2% [30.2, 43.5] for the switch, still worse than G1 and A7 (25.0%). Matched at 5% wrong: 14.8% and 16.5%, against G1's 15.0%.
+
+What we learned:
+
+- Our guess held: telling buildings from objects is near-perfect from A7 vectors alone (98.6–100% on tune queries).
+- G4 removes G1's compromise. It beats G1 on T1 and T5 beyond the error bar, ties it on T3, and matches the best single model on every set (beats A3 on T3). Mean hit@10 rises from 63.5 to 67.6.
+- The grid gives buildings to A7 alone and objects mostly to A3. This is the reverse of the idea that started G4 (MegaLoc for streets, EmbeddingGemma for objects): MegaLoc wins on museum objects here, EmbeddingGemma on archive building photos.
+- Blend and switch tie: the guess is almost always sure, and the top 10 differs on one query in 680. Keep the switch; it is simpler to explain.
+- The guess does not help "not found". Keep a separate confidence score (A7's or G1's cosines) for that, and leave the cut-off to G3.
+- Before R4: the guess learned from gallery images of entities that may be in sealed queries (we cannot see which). Retrain it in R4 with every sealed-query entity left out too.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -279,6 +324,9 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 138 | 75.4 [68.1, 82.6] | 89.1 [84.1, 94.2] | 89.1 [84.1, 94.2] | 81.0 [75.3, 86.5] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 138 | 65.2 [57.2, 73.2] | 82.6 [76.1, 88.4] | 87.0 [81.2, 92.0] | 72.7 [66.2, 79.1] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 138 | 65.2 [57.2, 73.2] | 76.1 [68.8, 83.3] | 79.7 [73.2, 86.2] | 70.7 [63.7, 77.7] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 38.4 [31.2, 46.4] | 48.6 [41.3, 56.5] | 51.4 [44.2, 59.4] | 43.4 [36.3, 50.9] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 38.4 [31.2, 46.4] | 48.6 [41.3, 56.5] | 51.4 [44.2, 59.4] | 43.1 [35.9, 50.7] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 38.4 [31.2, 46.4] | 47.1 [39.9, 55.1] | 52.2 [44.9, 60.1] | 42.8 [35.8, 50.4] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.8] | 51.4 [44.2, 59.4] | 41.3 [34.5, 48.7] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 138 | 35.5 [27.5, 42.8] | 44.2 [37.0, 52.2] | 45.7 [38.4, 53.6] | 39.8 [32.6, 47.3] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 138 | 35.5 [28.3, 43.5] | 42.8 [35.5, 50.7] | 47.8 [40.6, 55.8] | 39.8 [32.8, 47.5] |
@@ -297,6 +345,9 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 99 | 59.6 [50.5, 69.7] | 81.8 [73.7, 89.9] | 88.9 [82.8, 94.9] | 70.0 [62.8, 78.1] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [46.5, 65.7] | 85.9 [78.8, 92.9] | 88.9 [81.8, 94.9] | 69.0 [62.0, 76.4] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3-alpha3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 59.6 [50.5, 69.7] | 79.8 [71.7, 87.9] | 87.9 [80.8, 93.9] | 69.0 [61.6, 77.1] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.8 [61.4, 76.7] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.5 [61.2, 76.2] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 99 | 57.6 [48.5, 67.7] | 83.8 [76.7, 90.9] | 85.9 [78.8, 91.9] | 68.4 [60.5, 76.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 80.8 [72.7, 88.9] | 89.9 [83.8, 96.0] | 67.2 [59.9, 75.3] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 80.8 [72.7, 88.9] | 88.9 [82.8, 94.9] | 67.1 [59.5, 75.5] |
@@ -311,7 +362,10 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 99 | 30.3 [21.2, 40.4] | 78.8 [70.7, 86.9] | 79.8 [71.7, 87.9] | 51.3 [44.7, 59.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 99 | 4.0 [1.0, 8.1] | 15.2 [9.1, 22.2] | 22.2 [14.1, 31.3] | 10.0 [6.2, 14.5] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 99 | 1.0 [0.0, 3.0] | 5.1 [1.0, 9.1] | 9.1 [4.0, 14.1] | 4.6 [2.2, 7.5] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.4 [35.7, 44.7] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.3 [43.0, 51.2] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.4, 44.5] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.1 [42.8, 51.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.7, 44.7] | 54.4 [49.9, 58.9] | 60.5 [56.0, 64.8] | 47.1 [42.9, 50.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.5 [35.0, 44.0] | 53.7 [49.0, 58.2] | 62.1 [57.8, 66.6] | 46.9 [42.8, 51.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 443 | 38.4 [34.1, 42.7] | 51.7 [47.2, 56.2] | 56.9 [52.1, 61.4] | 45.1 [41.0, 49.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 37.9 [33.2, 42.4] | 49.9 [45.4, 54.4] | 54.9 [50.3, 59.1] | 43.8 [39.5, 47.8] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.5 [30.2, 38.8] | 50.3 [45.4, 54.9] | 55.8 [51.0, 60.3] | 42.3 [38.3, 46.3] |
@@ -338,4 +392,7 @@ Not found (T8): confidence is the top entity's score. Lower is better for "wrong
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | T1 + T5 | 581 | 232 | 27.6 [21.6, 34.1] | 15.0 [10.2, 19.4] |
 | R2 | T8 | tune | screening-20k-publishable-fetched | A-A9 | T1 + T5 | 581 | 232 | 29.7 [23.3, 35.8] | 8.8 [3.3, 17.6] |
 | R2 | T8 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322 | T1 + T5 | 581 | 232 | 30.2 [23.7, 36.2] | 11.9 [7.1, 20.7] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | T1 + T5 | 581 | 232 | 36.2 [30.2, 43.5] | 16.5 [8.6, 22.4] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | T1 + T5 | 581 | 232 | 40.1 [31.5, 47.8] | 14.8 [9.0, 19.3] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | T1 + T5 | 581 | 232 | 42.2 [35.3, 50.4] | 14.8 [7.9, 20.0] |
 <!-- summary:end -->
