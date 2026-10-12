@@ -55,6 +55,7 @@ from miroir.web.routing import (
     Guess,
     PhotoType,
     Routing,
+    read_guess,
     write_guess,
     write_routing,
 )
@@ -90,6 +91,9 @@ class IndexSpec:
     a7_query_run: str | None = None
     """Commons query photos (T2, T2b, T8c) embedded apart, scored in the report when given."""
     a3_query_run: str | None = None
+    saved_guess: str | None = None
+    """A building-or-object guess already trained on this index (`miroir index guess`), a file
+    in `Settings.index_dir`; else `build-index` trains one (slow on the full sample)."""
     a3_projection: str | None = None
     """A file under the A3 run folder holding `mean` and `components`, when MegaLoc vectors
     are stored reduced (the query vectors are then reduced the same way)."""
@@ -102,6 +106,16 @@ INDEXES: dict[str, IndexSpec] = {
         a3_run="A3-megaloc-322-screening-v2-publishable",
         a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
         a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+    ),
+    # Every image of the July exports the Modal runs could fetch (136,731 of 137,775), from
+    # the full-sample index (`miroir embed modal --all-images`); MegaLoc kept at 8,448 dims.
+    "full": IndexSpec(
+        name="full",
+        a7_run="A7-embeddinggemma-2-512-full",
+        a3_run="A3-megaloc-322-full",
+        a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
+        a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+        saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
     ),
 }
 
@@ -143,7 +157,11 @@ def build_index(settings: Settings, name: str) -> Path:
     )
 
     entity_of = {i.image_id: i.entity_id for i in data.images}
-    guess = _train_guess(settings, a7, records, entity_of, ids)
+    if spec.saved_guess is not None:
+        guess = read_guess(settings.index_dir / spec.saved_guess)
+        logger.info("type guess read from %s", spec.saved_guess)
+    else:
+        guess = _train_guess(settings, a7, records, entity_of, ids)
     write_guess(out / GUESS_FILE, guess)
 
     vectors = _Vectors.load(out)

@@ -112,7 +112,7 @@ class ModalBackend:
 @app.function(
     image=web_image,
     cpu=1.0,
-    memory=2 * _MIB,
+    memory=4 * _MIB,  # the full catalog: 137,000 images, 101,000 records
     volumes={MODAL_WEB_INDEX_MOUNT: index_volume},
     secrets=[app_secret],
     scaledown_window=WEB_IDLE_S,

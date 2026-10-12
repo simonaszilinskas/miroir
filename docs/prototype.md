@@ -6,7 +6,7 @@ A working version of the product in [functional-spec.md](functional-spec.md) §5
 
 - **Address:** https://simonaszilinskas--miroir.us-east.modal.run
 - **Password:** one shared password. It is in the main checkout's `.env` (`/Users/simonaszilinskas/miroir/.env`, line `MIROIR_APP_PASSWORD`, never committed) and in the `miroir-app` Modal secret (`APP_PASSWORD`). A login lasts a week.
-- **First search of the day:** the GPU sleeps when nobody searches. The first search wakes it, which takes about two minutes; the page says so and waits. Opening a photo or the text box wakes it in advance. Once awake, a search takes under a second; the GPU goes back to sleep after 10 minutes without a search.
+- **First search of the day:** the GPU sleeps when nobody searches. The first search wakes it, which takes one to two minutes; the page says so and waits. Opening a photo or the text box wakes it in advance. Once awake, a search takes about a second; the GPU goes back to sleep after 10 minutes without a search.
 
 What a person can do:
 
@@ -33,32 +33,34 @@ Weights, cut-offs and buckets are data (`routing.json`), not code: a third bucke
 
 ## Scores of the deployed stack
 
-Index `screening-v2`: the publishable screening gallery, 21,785 images, 19,883 records, 5,811 buildings and objects. Tune halves, the site's own ranking (from the bundle's `report.json`):
+Index `full` (since 2026-10-13): every image of the July exports the Modal runs could fetch, 136,731 images of 101,039 records, 63,085 buildings and objects, publishable or not (the site sits behind a login, functional spec §8). Vectors from the full-sample runs (`A7-embeddinggemma-2-512-full`, `A3-megaloc-322-full`, MegaLoc at 8,448 dims), type guess from `miroir index guess`. Tune halves, the site's own ranking (the bundle's `report.json`):
 
 | Set | Queries | Hit@1 | Hit@10 | "Sure" answers | Right among sure |
 |---|---|---|---|---|---|
-| T1 archive building | 138 | 37.0 | 50.7 | 32.6% | 78% |
-| T3 painting in a room (crop) | 99 | 56.6 | 89.9 | 12.1% | 33% |
-| T5 museum object, other view | 443 | 39.7 | 61.2 | 16.7% | 57% |
-| T2 phone photo of a building (Commons) | 516 | 13.8 | 24.8 | 0% | |
-| T2b museum work (Commons) | 122 with an answer in the index | 86.9 | 94.3 | 8.2% | 100% |
+| T1 archive building | 138 | 34.1 | 45.7 | 24.6% | 73% |
+| T3 painting in a room (crop) | 99 | 55.6 | 86.9 | 8.1% | 0% |
+| T5 museum object, other view | 493 | 27.2 | 43.2 | 10.3% | 22% |
+| T2 phone photo of a building (Commons) | 516 | 9.7 | 18.2 | 0% | |
+| T2b museum work (Commons) | 291 | 82.1 | 94.5 | 4.1% | 75% |
 
 | Not-found set | Searches still answered "sure" |
 |---|---|
-| T8 (in-collection photos, entity removed) | 9.5% (target: at most 10%) |
+| T8 (in-collection photos, entity removed) | 9.6% (target: at most 10%) |
 | T8c (Commons photos with no record) | 0% |
 
-Cut-offs: 0.921 for buildings (A7 cosine), 0.750 for objects (0.2 A7 + 0.8 A3).
+Cut-offs: 0.934 for buildings (A7 cosine), 0.824 for objects (0.2 A7 + 0.8 A3). The gallery is six times the screening one, so every score drops (T5 most: Saint-Omer's coin and medal series look alike) and a "sure" object is often a near twin, not the right record.
 
-End-to-end check on the deployed site (2026-10-12): photos fetched from POP and Commons and posted to `/api/search`. Collection photos find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches); Commons photos get exactly the confidence computed offline from the stored query vectors (0.914, 0.852, 0.341…), and the right record first. Text: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" first; "a still life with a dead hare" finds it second; "Pont du Gard" first.
+The first index, `screening-v2` (21,785 publishable images), scored T1 50.7, T3 89.9, T5 61.2, T2 24.8, T2b 94.3 hit@10; switch back with `WEB_INDEX = "screening-v2"`.
 
-Timings: a warm search takes 170–200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. A cold start takes about 110 s (container start, then models 21 s, gallery 2 s, BM25 1 s).
+End-to-end check on the deployed site (2026-10-13): photos fetched from POP and Commons and posted to `/api/search`. Collection photos (T1, T3, T5) find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches the gallery's); Commons photos (T2, T2b) get the confidence computed offline from their stored query vectors (0.914, 0.859, 0.55…) and the right record first or second. Words: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" and "Nature morte au lièvre" first; "Pont du Gard" first; English words do less well.
+
+Timings: a warm search takes about 200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. A cold start takes 50–110 s (container start, models about 25 s, gallery 2.5 GB to the GPU, BM25 over 101,000 records).
 
 ## Run and deploy
 
 ```sh
 uv sync --extra api
-uv run miroir web build-index   # NumPy on the Mac, about 1.5 minutes: writes ~/miroir-data/web/<index>/
+uv run miroir web build-index   # NumPy on the Mac, about 3 minutes for the full index: writes ~/miroir-data/web/<index>/
 uv run miroir web upload        # copies the bundle to the miroir-web-index volume
 uv run miroir web secret        # once: password in .env and in the miroir-app secret (--rotate for a new one)
 uv run miroir web deploy        # deploys the miroir-web app and prints the address
@@ -74,11 +76,11 @@ An L4 with 4 CPUs and 16 GB costs about $1.12 an hour while awake. Each wake-up 
 
 ## Known limits
 
-- **Index.** About 22,000 publishable images, not the 137,775 of the July exports nor all of POP. Most tester photos will find nothing until the full index is in.
-- **Phone photos of buildings.** T2: the right building is in the top 10 for a quarter of photos, and none reaches the "sure" bar. A3 does better than A7 on these photos (31.0 against 21.9 hit@10), but the router sends buildings to A7, which wins on archive photos; a third bucket for colour photos of buildings is being tuned.
-- **"Not found" is cautious.** At 10% wrong-but-confident, only a third of in-index archive photos and a sixth of objects get a "sure" answer.
+- **Index.** The 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing.
+- **Phone photos of buildings.** T2: the right building is in the top 10 for a fifth of photos, and none reaches the "sure" bar. A3 does better than A7 on these photos (31.0 against 21.9 hit@10), but the router sends buildings to A7, which wins on archive photos; a third bucket for colour photos of buildings is being tuned.
+- **"Not found" is cautious, and weak for objects.** At 10% wrong-but-confident, a quarter of in-index archive photos and a tenth of objects get a "sure" answer, and only a fifth of those objects are the right record.
 - **Word search** weights (half A7, half BM25) are not tuned: T6 and T7 do not exist yet.
 - **Period filter** for Mémoire reads the date of the photo, not of the building.
 - **No object outlines (F4) yet:** the photo screen has the hook (`detectObjects` in `static/app.js`); people draw boxes by hand.
 - **Cold start** of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
-- **Type guess** trained on the screening gallery with tune-query entities left out; retrain on the full index.
+- **Type guess** read from the index agent's full-sample file; a three-bucket router (G5) can replace the two G4 buckets in `routing.json`.

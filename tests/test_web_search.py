@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -223,3 +225,13 @@ def test_query_photos_are_shrunk_like_gallery_images() -> None:
     with PILImage.open(io.BytesIO(jpeg)) as opened:
         assert opened.format == "JPEG"
         assert opened.size == (512, 256)
+
+
+def test_a_guess_saved_by_index_guess_reads_too(tmp_path: Path) -> None:
+    from miroir.web.routing import read_guess  # noqa: PLC0415
+
+    path = tmp_path / "guess.npz"
+    np.savez(path, mean=np.zeros(3), scale=np.ones(3), coef=np.ones(3), bias=np.float32(-2.0))
+    guess = read_guess(path)
+    assert guess.bias == pytest.approx(-2.0)
+    assert guess.photo_type(np.asarray([3.0, 0.0, 0.0], dtype=np.float32))[0] is PhotoType.BUILDING

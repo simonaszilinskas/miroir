@@ -146,5 +146,5 @@ def read_guess(path: Path) -> Guess:
             mean=np.asarray(data["mean"], dtype=np.float64),
             scale=np.asarray(data["scale"], dtype=np.float64),
             coef=np.asarray(data["coef"], dtype=np.float64),
-            bias=float(data["bias"][0]),
+            bias=float(np.asarray(data["bias"]).reshape(-1)[0]),  # 0-d or 1-d
         )
