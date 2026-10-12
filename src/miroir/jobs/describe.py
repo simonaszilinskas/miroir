@@ -30,7 +30,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 from miroir.config import SEED, Settings
 from miroir.eval.run import publishable_only
 from miroir.eval.sets import load_queries, read_gallery
-from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher, iiif_url
+from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PublishableImages
 from miroir.jobs.spend import (
@@ -345,8 +345,9 @@ class Describer:
     ) -> Iterator[list[Answer]]:
         """Collect batches a stopped run left, then submit the rest, one batch at a time.
 
-        The Batch API takes public image URLs only, not data URLs (checked 2026-10-12): send
-        the IIIF service's URL for the same file, scaled on the server to LONG_SIDE.
+        The Batch API takes public image URLs only, not data URLs (checked 2026-10-12), so
+        the image goes as its asset bucket URL. Not the IIIF service's: Google's fetcher timed
+        out on 99 of 100 IIIF URLs, since IIIF resizes each image on demand.
         """
         for batch_id, ids in pending.items():
             yield self._collect(batch_id, len(ids), kind, skips)
@@ -355,7 +356,7 @@ class Describer:
             msg = f"{self.option.model} has no :batch variant on OpenRouter"
             raise OpenRouterError(msg)
         for chunk in batched(images, self._batch_size):
-            requests = {i.image_id: self._body(iiif_url(i.url)) for i in chunk}
+            requests = {i.image_id: self._body(i.url) for i in chunk}
             batch_id = self._client.submit_batch("/v1/chat/completions", model, requests)
             self._add_pending(batch_id, [i.image_id for i in chunk])
             yield self._collect(batch_id, len(chunk), kind, skips)
