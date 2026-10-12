@@ -54,7 +54,7 @@ _EXPORT_FOLDER: dict[Collection, str] = {
 }
 
 _ROUND_RE = re.compile(r"^R\d+$")
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]*$")
 
 Half = Literal["tune", "sealed"]
 

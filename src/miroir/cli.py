@@ -13,6 +13,7 @@ from miroir.config import get_settings
 
 if TYPE_CHECKING:
     from miroir.eval.results import SetScore
+    from miroir.eval.scoring import Interval
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 records_app = typer.Typer(no_args_is_help=True, help="POP records: parse the exports.")
@@ -153,6 +154,67 @@ def eval_compare(
         )
 
 
+@eval_app.command("stack")
+def eval_stack(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")],
+    step: Annotated[str, typer.Option(help="Step letter: G for fusion, E for expansion, A.")],
+    option: Annotated[str, typer.Option(help="Result file label, e.g. G1-A7+A3.")],
+    vectors: Annotated[list[str], typer.Option(help="Vector run of one model; repeat to fuse.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list, e.g. screening-20k.")],
+    test_set: Annotated[
+        list[str] | None, typer.Option("--set", help="Test set to rank, e.g. T1; repeat it.")
+    ] = None,
+    method: Annotated[
+        str | None, typer.Option(help="Fusion with 2+ runs: G1 (weighted sum) or G2 (RRF).")
+    ] = None,
+    weight: Annotated[
+        float | None,
+        typer.Option(help="First run's weight; others share the rest. Default: pick from a grid."),
+    ] = None,
+    qe_alpha: Annotated[
+        float | None, typer.Option(help="Expand queries (E5, alpha-QE) with this alpha.")
+    ] = None,
+    publishable_queries: Annotated[
+        bool,
+        typer.Option("--publishable-queries", help="Only queries a closed model may see."),
+    ] = False,
+    not_found: Annotated[
+        bool, typer.Option("--not-found", help="Also score T8, the not-found measure.")
+    ] = False,
+) -> None:
+    """Score one or more models, fused and maybe expanded, on tune halves; write one result."""
+    from miroir.eval.fusion import Method  # noqa: PLC0415
+    from miroir.eval.stack import Stack, score_stack  # noqa: PLC0415
+
+    stack = Stack(
+        runs=tuple(vectors),
+        method=None if method is None else Method(method),
+        first_weight=weight,
+        qe_alpha=qe_alpha,
+    )
+    result = score_stack(
+        get_settings(),
+        stack,
+        round_id=round_id,
+        step=step,
+        option=option,
+        set_ids=test_set or (),
+        gallery=gallery,
+        publishable_queries=publishable_queries,
+        not_found=not_found,
+    )
+    typer.echo(result.vectors.notes)
+    _echo_scores(result.scores)
+    for s in result.not_found:
+        typer.echo(
+            f"{s.test_set}/{s.half}: wrong but confident at {100 * s.match_rate:.0f}% matched "
+            f"{_pct(s.wrong_confident)}; matched at {100 * s.wrong_target:.0f}% wrong "
+            f"{_pct(s.match_rate_at_target)} ({len(s.in_index)} in index, "
+            f"{len(s.not_found)} not found)"
+        )
+
+
 @eval_app.command("summary")
 def eval_summary() -> None:
     """Rebuild the summary table in docs/results.md from every file in eval/results/."""
@@ -197,6 +259,10 @@ def amstertime_score(
 
     result = score_amstertime(get_settings(), vector_run=run, option=option)
     _echo_scores(result.scores)
+
+
+def _pct(i: Interval) -> str:
+    return f"{100 * i.value:.1f} [{100 * i.low:.1f}, {100 * i.high:.1f}]"
 
 
 def _echo_scores(scores: Sequence[SetScore]) -> None:

@@ -15,6 +15,7 @@ uv run miroir --help           # every entry point is a subcommand
 uv run miroir records build    # exports -> records.parquet + images.parquet (about 6 s)
 uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
 uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
+uv run miroir eval stack ...    # fuse models (G1, G2), expand queries (E5), score T8
 uv run miroir eval summary     # rebuild the results table in docs/results.md
 uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir embed modal --option A7-embeddinggemma-2-512 --probe   # open model on a Modal GPU

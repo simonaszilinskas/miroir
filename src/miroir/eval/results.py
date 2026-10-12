@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from miroir.config import REPO_ROOT, SEED
+from miroir.eval.notfound import MATCH_RATE, WRONG_TARGET, NotFoundScore
 from miroir.eval.scoring import (
     HIT_KS,
     RESAMPLES,
@@ -118,13 +119,16 @@ class RunResult:
     bootstrap_resamples: int
     bootstrap_seed: int
     scores: tuple[SetScore, ...]
+    not_found: tuple[NotFoundScore, ...] = ()
+    """The "not found" measure (T8), when scored."""
 
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             msg = f"schema_version {self.schema_version}, expected {SCHEMA_VERSION}"
             raise ValueError(msg)
         keys = [s.key for s in self.scores]
-        if len(set(keys)) != len(keys):
+        found_keys = [s.key for s in self.not_found]
+        if len(set(keys)) != len(keys) or len(set(found_keys)) != len(found_keys):
             msg = f"{self.step}-{self.option}: the same set, half and gallery appear twice"
             raise ValueError(msg)
 
@@ -180,9 +184,11 @@ def write_result(
     vectors: RunInfo,
     scores: Sequence[SetScore],
     today: date,
+    not_found: Sequence[NotFoundScore] = (),
 ) -> RunResult:
     """Write scores into the option's file, replacing entries with the same set, half, gallery."""
     kept: tuple[SetScore, ...] = ()
+    kept_found: tuple[NotFoundScore, ...] = ()
     if path.exists():
         old = read_result(path)
         if old.vector_run != vector_run or old.query_vector_run != query_vector_run:
@@ -193,6 +199,8 @@ def write_result(
             raise ValueError(msg)
         new_keys = {s.key for s in scores}
         kept = tuple(s for s in old.scores if s.key not in new_keys)
+        new_found = {s.key for s in not_found}
+        kept_found = tuple(s for s in old.not_found if s.key not in new_found)
     result = RunResult(
         schema_version=SCHEMA_VERSION,
         round=round_id,
@@ -205,6 +213,7 @@ def write_result(
         bootstrap_resamples=RESAMPLES,
         bootstrap_seed=SEED,
         scores=tuple(sorted((*kept, *scores), key=lambda s: s.key)),
+        not_found=tuple(sorted((*kept_found, *not_found), key=lambda s: s.key)),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_RESULT.dump_json(result, indent=1) + b"\n")
@@ -249,7 +258,44 @@ def summary_table(results: Sequence[RunResult]) -> str:
         "Each cell: value in %, then the 95% bootstrap interval "
         f"({RESAMPLES:,} resamples over queries)."
     )
-    return f"{note}\n\n{header}\n{body}" if body else f"{note}\n\n{header}"
+    table = f"{note}\n\n{header}\n{body}" if body else f"{note}\n\n{header}"
+    found = not_found_table(results)
+    return f"{table}\n\n{found}" if found else table
+
+
+def not_found_table(results: Sequence[RunResult]) -> str:
+    """Markdown table of the "not found" measure, one row per scored T8 half. Empty if none."""
+    rows: list[tuple[tuple[str, str, str, str, float], str]] = []
+    for result in results:
+        for s in result.not_found:
+            cells = [
+                result.round,
+                s.test_set,
+                s.half,
+                s.gallery,
+                f"{result.step}-{result.option}",
+                " + ".join(s.in_index_sets),
+                f"{len(s.in_index):,}",
+                f"{len(s.not_found):,}",
+                _pct(s.wrong_confident),
+                _pct(s.match_rate_at_target),
+            ]
+            sort_key = (result.round, s.test_set, s.half, s.gallery, s.wrong_confident.value)
+            rows.append((sort_key, "| " + " | ".join(cells) + " |"))
+    if not rows:
+        return ""
+    header = (
+        "| Round | Set | Half | Gallery | Run | In-index sets | In-index | Not found "
+        f"| Wrong but confident, {100 * MATCH_RATE:.0f}% matched "
+        f"| Matched, {100 * WRONG_TARGET:.0f}% wrong |\n"
+        "|---|---|---|---|---|---|---|---|---|---|"
+    )
+    note = (
+        "Not found (T8): confidence is the top entity's score. Lower is better for "
+        '"wrong but confident", higher for "matched".'
+    )
+    body = "\n".join(line for _, line in sorted(rows))
+    return f"{note}\n\n{header}\n{body}"
 
 
 def rebuild_summary(directory: Path, markdown: Path) -> int:
