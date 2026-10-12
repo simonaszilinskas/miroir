@@ -216,6 +216,18 @@ During evaluation, the query image and every other image of the same *photo reco
 | T8 Not found | Queries from T1, T2 and T5 whose whole entity has been removed from the index | 500 queries | Wrong-but-confident rate at the chosen cut-off | < 5% |
 | T9 Public benchmarks | AmsterTime (modern vs archive street photos) and Met (museum art) | as published | As in the published papers | Within 2 points of published scores, as a harness check |
 
+### 7.1 Vector contract
+
+Every embedding run, wherever it ran (OpenRouter, the Mac, a remote job), hands the harness one folder, `MIROIR_DATA_DIR/vectors/<run>/` (`Settings.vectors_path(run)`):
+
+| File | Content |
+|---|---|
+| `vectors.npy` | NumPy array, float16, shape (count, dim), C order. Every row finite and L2-normalised (norm within 0.005 of 1) |
+| `ids.txt` | `count` lines, UTF-8. Line *i* is the id of row *i*: an `image_id` from `images.parquet` for POP, any unique string without spaces for a benchmark |
+| `meta.json` | `format_version` (1), `dtype` ("float16"), `dim`, `count`, and `info`: `option` (experiments.md id, e.g. "A1"), `model` (exact model id), `resolution` (pixels on the side the model saw), `pooling` ("cls", "gem", "vlad", "api"), `gallery` (which image list: "screening-20k", "full", "amstertime"), `created` (date), `cost_usd`, `wall_time_s`, `route` ("openrouter", "mac", "hf-jobs"), `notes` |
+
+Write a run with `miroir.eval.vectors.write_vectors`: it normalises, casts to float16, checks, and writes `meta.json` last, so a folder without it is an unfinished run. Read with `read_vectors`, which checks every rule above. `uv run miroir eval check-vectors <run>` runs the same check. A run name says what it holds, e.g. `A1-dinov2-vitl14-224-screening-20k`; a finished run is never overwritten.
+
 ## 8. Website
 
 - **Stack.** SvelteKit with Tailwind, built phone-first. The camera opens through `<input type="file" accept="image/*" capture="environment">`.
