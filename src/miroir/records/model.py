@@ -53,7 +53,7 @@ class Record:
     ref: str
     collection: Collection
     entity_id: str
-    """Building or object the record shows. Mémoire: first PA/PM `LBASE` id; else `ref`."""
+    """Building or object the record shows. Mémoire: first PM `LBASE` id, else PA, else `ref`."""
     title: str
     description: str
     denomination: tuple[str, ...]

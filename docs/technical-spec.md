@@ -65,7 +65,7 @@ Every mapper turns a POP record into this shape:
 |---|---|---|
 | `ref` | keyword | `REF` |
 | `collection` | keyword | `base`: `joconde`, `memoire` or `rose-valland` |
-| `entity_id` | keyword | Mémoire: first `LBASE` value starting with `PA` (building) or `PM` (object), else `REF`. Other bases: `REF` |
+| `entity_id` | keyword | Mémoire: first `LBASE` value starting with `PM` (object), else the first starting with `PA` (building), else `REF`. When both are present the photo shows the object (1,414 records), so `PM` wins. Other bases: `REF` |
 | `title` | text | Joconde/Rose Valland `TITR`; Mémoire `EDIF`, then `LEG`. Empty for 11,760 Joconde records: show `denomination` instead |
 | `description` | text | Joconde/Rose Valland `DESC` then `HIST`; Mémoire `LEG`. Joined, first 2,000 characters |
 | `denomination` | keyword[] | `DENO`, `MCL` |

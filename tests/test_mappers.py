@@ -21,8 +21,13 @@ def _record(collection: Collection, ref: str) -> Record:
 # --- entity_id ----------------------------------------------------------------
 
 
-def test_memoire_entity_is_first_lbase_pa_even_when_a_pm_follows() -> None:
-    assert _record(M, "APMH00125797").entity_id == "PA00080616"
+def test_memoire_entity_is_the_pm_object_when_lbase_also_holds_a_pa_building() -> None:
+    # LBASE: PA00080616, PM05000292. The photo shows the object.
+    assert _record(M, "APMH00125797").entity_id == "PM05000292"
+
+
+def test_memoire_entity_is_pa_when_lbase_holds_no_pm() -> None:
+    assert _record(M, "AP2322T000470").entity_id == "PA00087673"
 
 
 def test_memoire_entity_is_pm_when_pm_comes_first() -> None:

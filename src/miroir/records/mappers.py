@@ -66,10 +66,15 @@ class FieldMap:
 
 
 def _memoire_entity_id(raw: RawRecord) -> str:
-    """First `LBASE` id pointing at a Mérimée building (PA) or Palissy object (PM), else REF."""
-    for linked in _values(raw, "LBASE"):
-        if linked.startswith(("PA", "PM")):
-            return linked
+    """First Palissy object id (PM) in `LBASE`, else first Mérimée building id (PA), else REF.
+
+    A photo linked to both shows the object, so the object wins.
+    """
+    linked = _values(raw, "LBASE")
+    for prefix in ("PM", "PA"):
+        found = next((value for value in linked if value.startswith(prefix)), None)
+        if found is not None:
+            return found
     return _ref(raw)
 
 
