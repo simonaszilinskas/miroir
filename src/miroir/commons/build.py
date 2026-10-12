@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 #: A Commons file this close to an image of its Joconde record (bits of 64) is the same picture:
 #: the museum's reproduction, not a visitor's photo.
-NEAR_COPY_BITS = 10
+NEAR_COPY_BITS = 12
 #: Subcategories (interior, details) opened per building.
 SUBCATEGORIES_PER_BUILDING = 2
 
