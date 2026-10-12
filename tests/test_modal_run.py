@@ -8,10 +8,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import pytest
 
+from miroir.commons.model import CommonsSet
 from miroir.config import Settings
 from miroir.eval import amstertime
 from miroir.eval.rerank import CandidateMatch, MatchChunk, MatchTask, QueryMatches, read_matches
-from miroir.eval.sets import write_gallery
+from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_run import ModalRunner, load_modal_probe, output_runs, run_name
@@ -24,13 +25,15 @@ from miroir.jobs.modal_spec import (
     ChunkResult,
     ModalOption,
     Resize,
+    SuppliedImage,
     option,
 )
 from miroir.jobs.privacy import PrivacyError
 from miroir.jobs.spend import BudgetError, Service, SpendKind
 from miroir.records.build import build
 from miroir.records.model import Image
-from miroir.records.store import read_records
+from miroir.records.store import read_records, write_commons
+from tests.fakes import FakeCommons, commons_photo
 
 GEMMA = "A7-embeddinggemma-2-512"
 SECONDS_PER_CALL = 100.0
@@ -52,15 +55,23 @@ class FakeCalls:
     calls: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
     fail: bool = False
 
-    def embed(self, option: ModalOption, images: Sequence[Image]) -> ChunkResult:
-        self.calls.append((option.id, len(images)))
+    supplied: list[str] = field(default_factory=list[str])
+    """Ids of the images sent as bytes."""
+
+    def embed(
+        self,
+        option: ModalOption,
+        images: Sequence[Image],
+        supplied: Sequence[SuppliedImage] = (),
+    ) -> ChunkResult:
+        self.calls.append((option.id, len(images) + len(supplied)))
+        self.supplied.extend(s.image_id for s in supplied)
         self.clock.now += SECONDS_PER_CALL
         if self.fail:
             msg = "container died"
             raise RuntimeError(msg)
-        rng = np.random.default_rng(len(images))
-        vectors = rng.normal(size=(len(images), 8)).astype(np.float32)
-        ids = tuple(i.image_id for i in images)
+        ids = (*(i.image_id for i in images), *(s.image_id for s in supplied))
+        vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
@@ -109,10 +120,15 @@ def image_ids(settings: Settings, *, publishable: bool) -> list[str]:
     return [i.image_id for r in records if r.publishable == publishable for i in r.images]
 
 
-def runner(settings: Settings, *, key_usage: float | None = None) -> tuple[ModalRunner, FakeCalls]:
+def runner(
+    settings: Settings, *, key_usage: float | None = None, commons: FakeCommons | None = None
+) -> tuple[ModalRunner, FakeCalls]:
     clock = Clock()
     calls = FakeCalls(clock)
-    return ModalRunner(settings, calls, key_usage_usd=key_usage, clock=clock), calls
+    fetcher = None if commons is None else commons.images(settings)
+    return ModalRunner(
+        settings, calls, key_usage_usd=key_usage, commons=fetcher, clock=clock
+    ), calls
 
 
 def test_options_name_their_model_and_machine() -> None:
@@ -313,3 +329,39 @@ def test_private_images_are_never_matched_on_modal(built: Settings) -> None:
     with pytest.raises(PrivacyError):
         r.match("m", [MatchTask("q", private, ())], max_usd=1.0)
     assert calls.calls == []
+
+
+def _commons_sets(settings: Settings) -> tuple[str, str, str]:
+    """T2 with a Commons photo and T5 with a private and a public image; returns their ids."""
+    photo = commons_photo("File:a.jpg", CommonsSet.T2, "E1")
+    write_commons([photo], settings.commons_parquet)
+    public = image_ids(settings, publishable=True)[0]
+    private = image_ids(settings, publishable=False)[0]
+    write_set(settings, "T2", [Query("T2-a", "T2", "E1", photo.image_id, ("E1",), ())], [])
+    t5 = [Query(f"T5-{i}", "T5", "E", i, ("E",), (i,)) for i in (public, private)]
+    write_set(settings, "T5", t5, [])
+    write_gallery(settings, "g", image_ids(settings, publishable=True))
+    return photo.image_id, public, private
+
+
+def test_query_run_sends_commons_photos_as_bytes(built: Settings) -> None:
+    photo, public, _private = _commons_sets(built)
+    commons = FakeCommons()
+    r, calls = runner(built, commons=commons)
+    r.probe(GEMMA, "g")
+
+    done = r.embed_queries(GEMMA, ["T2", "T5"])
+
+    assert set(done.ids) == {photo, public}  # the private image never went
+    assert done.info.gallery == "T2-T5-tune-queries"
+    assert calls.supplied == [photo]
+    assert len(commons.calls) == 1
+    assert r.ledger.total(SpendKind.RUN, run=run_name(OPTIONS[GEMMA], "T2-T5-tune-queries")) > 0
+
+
+def test_query_run_needs_a_commons_fetcher_for_commons_photos(built: Settings) -> None:
+    _commons_sets(built)
+    r, _calls = runner(built)
+    r.probe(GEMMA, "g")
+    with pytest.raises(ValueError, match="Commons fetcher"):
+        r.embed_queries(GEMMA, ["T2"])

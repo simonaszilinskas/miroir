@@ -1,8 +1,9 @@
 """Embedding runs on OpenRouter: probe the cost, embed a gallery or a test set's queries.
 
-The privacy rule (CLAUDE.md hard rule 7) is enforced here, in `OpenRouterEmbedder`, not by
+The privacy rule (CLAUDE.md hard rule 8) is enforced here, in `OpenRouterEmbedder`, not by
 callers: it loads `publishable` from the record store itself, takes image ids (never image
-bytes), and refuses any id whose record is not publishable.
+bytes), and refuses any id whose record is not publishable. Commons photos (T2, T2b, T8c
+queries) are openly licensed and pass; they are fetched from Wikimedia by `CommonsImages`.
 """
 
 from __future__ import annotations
@@ -15,15 +16,16 @@ from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
-from itertools import batched
+from itertools import batched, chain
 from pathlib import Path
 
 import httpx
 import numpy as np
 from numpy.typing import NDArray
 
+from miroir.commons.images import CommonsImages, split_commons
 from miroir.config import SEED, Settings
-from miroir.eval.sets import load_queries, read_gallery
+from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
 from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher
 from miroir.jobs.checkpoint import Checkpoint
@@ -99,6 +101,7 @@ class OpenRouterEmbedder:
         client: OpenRouterClient,
         fetcher: ImageFetcher,
         *,
+        commons: CommonsImages | None = None,
         request_concurrency: int = REQUEST_CONCURRENCY,
         batch_poll_s: float = 30.0,
     ) -> None:
@@ -106,6 +109,7 @@ class OpenRouterEmbedder:
         self.option = option
         self._client = client
         self._fetcher = fetcher
+        self._commons = commons
         self._concurrency = request_concurrency
         self._batch_poll_s = batch_poll_s
         self.ledger = SpendLedger(settings.spend_ledger)
@@ -140,12 +144,13 @@ class OpenRouterEmbedder:
         """
         self.check_publishable(image_ids)
         held = set(checkpoint.ids) if checkpoint else set[str]()
-        images = [self._images[i] for i in image_ids if i not in held]
+        pop, commons = split_commons(i for i in image_ids if i not in held)
+        images = [self._images[i] for i in pop]
         skips: Counter[str] = Counter()
         ids: list[str] = []
         rows: list[NDArray[np.float16]] = []  # normalised float16: half the memory
         spent = 0.0
-        chunks = self._chunks(images, skips)
+        chunks = self._chunks(images, commons, skips)
         for chunk, result in bounded_map(self._embed_chunk, chunks, workers=self._concurrency):
             spent += result.cost_usd
             self.ledger.record(
@@ -167,14 +172,23 @@ class OpenRouterEmbedder:
                 msg = f"{run}: spent ${spent:.4f}, over its ${limit_usd:.4f} limit; stopped"
                 raise BudgetError(msg)
             if len(ids) % 1000 < len(chunk):
-                logger.info("%s: %d/%d images, $%.4f", run, len(ids), len(images), spent)
+                todo = len(images) + len(commons)
+                logger.info("%s: %d/%d images, $%.4f", run, len(ids), todo, spent)
         if checkpoint is not None:
             return Embedded(checkpoint.ids, checkpoint.vectors(), spent, dict(skips))
         vectors = np.concatenate(rows) if rows else np.zeros((0, 0), dtype=np.float32)
         return Embedded(tuple(ids), vectors, spent, dict(skips))
 
-    def _chunks(self, images: Sequence[Image], skips: Counter[str]) -> Iterator[list[Fetched]]:
-        fetched = (f for f in self._fetcher.fetch_all(images) if _keep(f, skips))
+    def _chunks(
+        self, images: Sequence[Image], commons: Sequence[str], skips: Counter[str]
+    ) -> Iterator[list[Fetched]]:
+        """POP images from their URLs, then Commons photos from Wikimedia, in requests."""
+        if commons and self._commons is None:
+            msg = f"{len(commons)} Commons photo(s) to embed, but no Commons fetcher was given"
+            raise ValueError(msg)
+        from_commons = self._commons.fetch_all(commons) if self._commons else iter(())
+        both = chain(self._fetcher.fetch_all(images), from_commons)
+        fetched = (f for f in both if _keep(f, skips))
         for chunk in batched(fetched, self.option.images_per_request):
             yield list(chunk)
 
@@ -262,17 +276,17 @@ def embed_gallery(embedder: OpenRouterEmbedder, gallery: str) -> VectorSet:
     return _run_images(embedder, _gallery(embedder, gallery), gallery)
 
 
-def embed_queries(embedder: OpenRouterEmbedder, set_id: str) -> VectorSet:
-    """Embed the query images of a test set's tune half that may go to an outside service.
+def embed_queries(embedder: OpenRouterEmbedder, set_ids: Sequence[str]) -> VectorSet:
+    """Embed the query images of test sets' tune halves that may go to an outside service.
 
+    One run holds every set's queries, named after the sets ("T2-T2b-T8c-tune-queries").
     Queries whose image is not publishable are left out; score every option on the same
-    remaining queries (technical spec §7).
+    remaining queries (technical spec §7). Commons photos are openly licensed and stay.
     """
-    queries = load_queries(embedder.settings, set_id, "tune")
-    ids = list(dict.fromkeys(q.query_image_id for q in queries))
+    ids, label = tune_query_images(embedder.settings, set_ids)
     kept = embedder.publishable_only(ids)
-    logger.info("%s tune: %d of %d query images are publishable", set_id, len(kept), len(ids))
-    return _run_images(embedder, kept, f"{set_id}-tune-queries")
+    logger.info("%s: %d of %d query images may be sent", label, len(kept), len(ids))
+    return _run_images(embedder, kept, label)
 
 
 def embed_texts(embedder: OpenRouterEmbedder, name: str, texts: Mapping[str, str]) -> VectorSet:

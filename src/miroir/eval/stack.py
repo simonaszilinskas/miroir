@@ -3,7 +3,9 @@
 Every model searches the same gallery list with the same queries through
 `scoring.entity_scores`, the scorer `miroir eval run` uses. Their entity scores are fused
 (`fusion.fuse`), ranked with `scoring.rank_entities`, and written as one result file. With
-`not_found`, the same stack is also scored on T8 (`notfound`).
+`not_found`, the same stack is also scored on a set with no right answers (`notfound`): T8
+against T1 and T5, or T8c against T2 and T2b. Queries that are not gallery images (Commons
+photos) are asked with each model's query run.
 
 Fusion weights: give them, or let a small grid pick one first-model weight that does best on
 all the scored sets together (mean hit@10 over sets, each set counting once), never one per
@@ -44,9 +46,11 @@ logger = logging.getLogger(__name__)
 
 #: First-model weights tried when no weight is given.
 WEIGHT_GRID = (0.3, 0.4, 0.5, 0.6, 0.7)
+#: Each set with no right answers, and the sets whose queries stand for searches that should
+#: match: T8 draws its queries from T1 and T5; T8c is Commons photos, like T2 and T2b.
+NOT_FOUND_SETS: dict[str, tuple[str, ...]] = {"T8": ("T1", "T5"), "T8c": ("T2", "T2b")}
 NOT_FOUND_SET = "T8"
-#: Sets whose queries stand for searches that should match: T8 draws its queries from them.
-IN_INDEX_SETS = ("T1", "T5")
+IN_INDEX_SETS = NOT_FOUND_SETS[NOT_FOUND_SET]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +64,16 @@ class Stack:
     """Weight of the first run; the others share the rest. None with 2+ runs: pick from the grid."""
     qe_alpha: float | None = None
     """Expand queries with alpha-QE (E5) at this alpha. None: no expansion."""
+    query_runs: tuple[str, ...] = ()
+    """Each model's run of query images that are not in its gallery run (Commons photos),
+    in the order of `runs`. Empty: queries are asked with the gallery runs."""
 
     def __post_init__(self) -> None:
         if not self.runs or len(set(self.runs)) != len(self.runs):
             msg = f"a stack needs distinct runs, got {self.runs}"
+            raise ValueError(msg)
+        if self.query_runs and len(self.query_runs) != len(self.runs):
+            msg = f"give one query run per model: {len(self.runs)} runs, {self.query_runs}"
             raise ValueError(msg)
         if (len(self.runs) > 1) != (self.method is not None):
             msg = "give a fusion method exactly when the stack has two or more runs"
@@ -75,6 +85,8 @@ class Model:
     run: str
     vectors: VectorSet
     gallery: Gallery
+    asking: VectorSet
+    """Where its query vectors are: the query run, else the gallery run."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,12 +107,20 @@ def score_stack(
     set_ids: Sequence[str],
     gallery: str,
     publishable_queries: bool = False,
-    not_found: bool = False,
+    not_found: str | None = None,
 ) -> RunResult:
-    """Score the stack on each set's tune half (and T8 if asked); write one result file."""
+    """Score the stack on each set's tune half, and on the `not_found` set (T8, T8c) if given;
+    write one result file."""
+    if not_found is not None and not_found not in NOT_FOUND_SETS:
+        msg = f"no not-found measure for {not_found!r}; known: {', '.join(NOT_FOUND_SETS)}"
+        raise ValueError(msg)
     gallery_ids = read_gallery(settings, gallery)
     entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
-    models = tuple(load_model(settings, run, entity_of, gallery_ids) for run in stack.runs)
+    query_runs = stack.query_runs or (None,) * len(stack.runs)
+    models = tuple(
+        load_model(settings, run, entity_of, gallery_ids, query_run=asking)
+        for run, asking in zip(stack.runs, query_runs, strict=True)
+    )
 
     def queries_of(set_id: str) -> list[Query]:
         loaded = load_queries(settings, set_id, "tune")
@@ -126,19 +146,20 @@ def score_stack(
         for set_id, s in scored.items()
     ]
     found: tuple[NotFoundScore, ...] = ()
-    if not_found:
-        for set_id in IN_INDEX_SETS:
+    if not_found is not None:
+        in_index = NOT_FOUND_SETS[not_found]
+        for set_id in in_index:
             if set_id not in scored:
                 scored[set_id] = scored_set(set_id)
-        missing = _score_models(models, not_found_queries(queries_of(NOT_FOUND_SET)), stack)
+        missing = _score_models(models, not_found_queries(queries_of(not_found), not_found), stack)
         found = (
             not_found_score(
-                [c for s in IN_INDEX_SETS for c in _confidences(scored[s].parts, weights, stack)],
+                [c for s in in_index for c in _confidences(scored[s].parts, weights, stack)],
                 _confidences(missing, weights, stack),
-                test_set=NOT_FOUND_SET,
+                test_set=not_found,
                 half="tune",
                 gallery=gallery,
-                in_index_sets=IN_INDEX_SETS,
+                in_index_sets=in_index,
             ),
         )
     run_name = "+".join(stack.runs)
@@ -148,7 +169,7 @@ def score_stack(
         step=step,
         option=option,
         vector_run=run_name,
-        query_vector_run=run_name,
+        query_vector_run="+".join(stack.query_runs) if stack.query_runs else run_name,
         vectors=_info(models, stack, weights, chosen_note),
         scores=scores,
         not_found=found,
@@ -156,9 +177,18 @@ def score_stack(
     )
 
 
-def load_model(settings: Settings, run: str, entity_of: dict[str, str], ids: list[str]) -> Model:
+def load_model(
+    settings: Settings,
+    run: str,
+    entity_of: dict[str, str],
+    ids: list[str],
+    *,
+    query_run: str | None = None,
+) -> Model:
+    """A model's gallery, and where its query vectors are (`query_run`, else the gallery run)."""
     vectors = read_vectors(settings.vectors_path(run))
-    return Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids))
+    asking = vectors if query_run is None else read_vectors(settings.vectors_path(query_run))
+    return Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids), asking)
 
 
 def _score_models(
@@ -166,7 +196,7 @@ def _score_models(
 ) -> tuple[EntityScores, ...]:
     parts: list[EntityScores] = []
     for model in models:
-        asking = model.vectors
+        asking = model.asking
         if stack.qe_alpha is not None:
             asking = expand_queries(asking, model.gallery, queries, alpha=stack.qe_alpha)
         parts.append(entity_scores(asking, model.gallery, queries))
@@ -219,10 +249,10 @@ def _confidences(
     return confidences(_fused(parts, weights, stack), parts, weights)
 
 
-def not_found_queries(queries: Sequence[Query]) -> list[NotFoundQuery]:
+def not_found_queries(queries: Sequence[Query], set_id: str = NOT_FOUND_SET) -> list[NotFoundQuery]:
     with_answer = sum(1 for q in queries if q.expected_entity_ids)
     if with_answer:
-        msg = f"{with_answer} {NOT_FOUND_SET} queries have a right answer"
+        msg = f"{with_answer} {set_id} queries have a right answer"
         raise ValueError(msg)
     return [NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids) for q in queries]
 

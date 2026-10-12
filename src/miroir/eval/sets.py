@@ -55,6 +55,19 @@ def load_queries(
         return [_QUERY.validate_json(line) for line in lines if line.strip()]
 
 
+def tune_query_images(settings: Settings, set_ids: Sequence[str]) -> tuple[list[str], str]:
+    """The query image ids of the sets' tune halves, once each, and a run label naming the sets.
+
+    One vector run then holds the queries of several sets, e.g. "T2-T2b-T8c-tune-queries".
+    """
+    if not set_ids or len(set(set_ids)) != len(set_ids):
+        msg = f"give one or more distinct test sets, got {list(set_ids)}"
+        raise ValueError(msg)
+    queries = [q for s in set_ids for q in load_queries(settings, s, "tune")]
+    ids = list(dict.fromkeys(q.query_image_id for q in queries))
+    return ids, f"{'-'.join(set_ids)}-tune-queries"
+
+
 def write_gallery(settings: Settings, name: str, image_ids: Iterable[str]) -> Path:
     path = settings.gallery_path(name)
     _write_lines(path, sorted(image_ids))

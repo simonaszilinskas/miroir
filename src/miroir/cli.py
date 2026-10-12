@@ -227,8 +227,15 @@ def eval_stack(
         typer.Option("--publishable-queries", help="Only queries a closed model may see."),
     ] = False,
     not_found: Annotated[
-        bool, typer.Option("--not-found", help="Also score T8, the not-found measure.")
+        bool, typer.Option("--not-found", help="Also score the not-found measure.")
     ] = False,
+    not_found_set: Annotated[
+        str, typer.Option(help="Set for --not-found: T8 (against T1, T5) or T8c (T2, T2b).")
+    ] = "T8",
+    query_vectors: Annotated[
+        list[str] | None,
+        typer.Option(help="Query run of each --vectors model, in order (Commons queries)."),
+    ] = None,
 ) -> None:
     """Score one or more models, fused and maybe expanded, on tune halves; write one result."""
     from miroir.eval.fusion import Method  # noqa: PLC0415
@@ -239,6 +246,7 @@ def eval_stack(
         method=None if method is None else Method(method),
         first_weight=weight,
         qe_alpha=qe_alpha,
+        query_runs=tuple(query_vectors or ()),
     )
     result = score_stack(
         get_settings(),
@@ -249,7 +257,7 @@ def eval_stack(
         set_ids=test_set or (),
         gallery=gallery,
         publishable_queries=publishable_queries,
-        not_found=not_found,
+        not_found=not_found_set if not_found else None,
     )
     typer.echo(result.vectors.notes)
     _echo_scores(result.scores)
@@ -308,6 +316,53 @@ def eval_route(
             f"{s.test_set}/{s.half}: wrong but confident at {100 * s.match_rate:.0f}% matched "
             f"{_pct(s.wrong_confident)}; matched at {100 * s.wrong_target:.0f}% wrong "
             f"{_pct(s.match_rate_at_target)}"
+        )
+
+
+@eval_app.command("merge-vectors")
+def eval_merge_vectors(
+    *,
+    run: Annotated[list[str], typer.Option(help="Vector run of one model; repeat it.")],
+    out: Annotated[str, typer.Option(help="Name of the merged run.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list the merged run covers.")],
+) -> None:
+    """Join runs of one model (a gallery and what a larger gallery adds) into one run."""
+    from miroir.eval.run import merge_vector_runs  # noqa: PLC0415
+
+    count = merge_vector_runs(get_settings(), run, out=out, gallery=gallery)
+    typer.echo(f"{out}: {count} vectors")
+
+
+@testsets_app.command("fetched")
+def testsets_fetched(
+    *,
+    gallery: Annotated[str, typer.Option(help="Gallery list, e.g. screening-v2-publishable.")],
+    vectors: Annotated[list[str], typer.Option(help="Vector run to compare; repeat it.")],
+) -> None:
+    """Write <gallery>-fetched: its images that every given run holds a vector for."""
+    from miroir.eval.run import write_fetched_gallery  # noqa: PLC0415
+    from miroir.eval.sets import read_gallery  # noqa: PLC0415
+
+    settings = get_settings()
+    ids = write_fetched_gallery(settings, gallery, vectors)
+    total = len(read_gallery(settings, gallery))
+    typer.echo(f"{gallery}-fetched: {len(ids)} of {total} images")
+
+
+@eval_app.command("views")
+def eval_views(
+    result: Annotated[Path, typer.Argument(help="Result file holding a T2 score.")],
+    *,
+    test_set: Annotated[str, typer.Option("--set")] = "T2",
+    gallery: Annotated[str, typer.Option()] = "screening-v2-publishable-fetched",
+) -> None:
+    """Split a Commons set's tune score by the view each photo shows (exterior, interior...)."""
+    from miroir.eval.run import score_by_view  # noqa: PLC0415
+
+    for v in score_by_view(get_settings(), result, test_set=test_set, gallery=gallery):
+        typer.echo(
+            f"{v.view.value:9} {v.queries:4} queries  hit@1 {_pct(v.hit_at_1)}  "
+            f"hit@10 {_pct(v.hit_at_10)}"
         )
 
 
@@ -377,18 +432,19 @@ def embed_openrouter(
         str | None, typer.Option(help="Gallery, e.g. screening-20k-publishable.")
     ] = None,
     queries: Annotated[
-        str | None, typer.Option(help="Test set (tune half) whose query images to embed.")
+        list[str] | None,
+        typer.Option(help="Test set (tune half) whose query images to embed; repeat it."),
     ] = None,
     *,
     probe: Annotated[
         bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
     ] = False,
 ) -> None:
-    """Embed a gallery or a test set's query images on OpenRouter. Paid: probe first."""
+    """Embed a gallery or test sets' query images on OpenRouter. Paid: probe first."""
     from miroir.jobs import embed as jobs  # noqa: PLC0415 (keeps `miroir --help` fast)
     from miroir.jobs.factory import open_embedder  # noqa: PLC0415
 
-    if (gallery is None) == (queries is None):
+    if (gallery is None) == (not queries):
         raise typer.BadParameter("give exactly one of --gallery and --queries")
     with open_embedder(get_settings(), option) as embedder:
         if gallery is not None and probe:
@@ -404,8 +460,7 @@ def embed_openrouter(
         if gallery is not None:
             done = jobs.embed_gallery(embedder, gallery)
         else:
-            assert queries is not None
-            done = jobs.embed_queries(embedder, queries)
+            done = jobs.embed_queries(embedder, queries or [])
         typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
@@ -415,6 +470,12 @@ def embed_modal(
     gallery: Annotated[
         str, typer.Option(help="Gallery list. Only publishable images may go to Modal.")
     ] = "screening-20k-publishable",
+    queries: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Embed these test sets' tune query images instead of a gallery; repeat it."
+        ),
+    ] = None,
     *,
     probe: Annotated[
         bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
@@ -423,15 +484,27 @@ def embed_modal(
         float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
     ] = None,
 ) -> None:
-    """Embed a gallery with an open model on a Modal GPU. Paid: probe first."""
+    """Embed a gallery, or test sets' query images, with an open model on a Modal GPU.
+
+    Paid: probe first. Commons query photos are fetched on the Mac and sent as bytes.
+    """
+    from miroir.commons.images import open_commons_images  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
     from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
     from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
 
     find_option(option)  # fail before starting Modal
+    if queries and probe:
+        raise typer.BadParameter("--probe works with --gallery only")
     settings = get_settings()
-    with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    with open_commons_images(settings) as commons, open_modal(settings) as calls:
+        runner = ModalRunner(
+            settings, calls, key_usage_usd=_openrouter_key_usage(), commons=commons
+        )
+        if queries:
+            done = runner.embed_queries(option, queries, max_usd=max_usd)
+            typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+            return
         if probe:
             result, size = runner.probe(option, gallery)
             typer.echo(

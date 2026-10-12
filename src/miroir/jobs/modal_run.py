@@ -11,7 +11,8 @@ run needs a 100-image probe of the same model and size on file, and stops once i
 so a stopped run resumes without paying twice.
 
 Privacy (technical spec §9): Modal is an outside service, so only images of `publishable`
-records go there; a gallery with any other image is refused.
+records go there; a gallery with any other image is refused. Commons query photos are openly
+licensed: the Mac fetches them from Wikimedia (`CommonsImages`) and sends their bytes.
 """
 
 from __future__ import annotations
@@ -31,10 +32,11 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
+from miroir.commons.images import CommonsImages, split_commons
 from miroir.config import SEED, Settings
 from miroir.eval import amstertime
 from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
-from miroir.eval.sets import read_gallery
+from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_spec import (
@@ -56,6 +58,7 @@ from miroir.jobs.modal_spec import (
     Machine,
     ModalOption,
     Pooling,
+    SuppliedImage,
     option,
 )
 from miroir.jobs.privacy import PublishableImages
@@ -84,7 +87,12 @@ SERVICE_NAME = "Modal"
 class RemoteCalls(Protocol):
     """The calls a run makes. `miroir.jobs.modal_app.ModalCalls` sends them to Modal."""
 
-    def embed(self, option: ModalOption, images: Sequence[Image]) -> ChunkResult: ...
+    def embed(
+        self,
+        option: ModalOption,
+        images: Sequence[Image],
+        supplied: Sequence[SuppliedImage] = (),
+    ) -> ChunkResult: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
     def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
@@ -158,10 +166,13 @@ class ModalRunner:
         calls: RemoteCalls,
         *,
         key_usage_usd: float | None = None,
+        commons: CommonsImages | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self._calls = calls
+        self._commons = commons
+        """Fetches Commons query photos on the Mac; needed only to embed them."""
         self._key_usage = key_usage_usd
         """What OpenRouter says its key has spent, read once by the caller (or None)."""
         self._clock = clock
@@ -307,6 +318,99 @@ class ModalRunner:
         )
         checkpoint.remove()
         return written
+
+    def embed_queries(
+        self, option_id: str, set_ids: Sequence[str], *, max_usd: float | None = None
+    ) -> VectorSet:
+        """Embed the query images of test sets' tune halves into one vector run.
+
+        For sets whose queries are not gallery images: T2, T2b and T8c ask with Commons
+        photos, fetched here and sent as bytes. POP query images that are not publishable are
+        left out. Needs a probe of the option, like a gallery run.
+        """
+        opt = option(option_id)
+        ids, label = tune_query_images(self.settings, set_ids)
+        ids = self._store().only_publishable(ids)
+        run = run_name(opt, label)
+        out = self.settings.vectors_path(run)
+        _refuse_existing(out)
+        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
+        held = set(checkpoint.ids)
+        pop, commons = split_commons(i for i in ids if i not in held)
+        projected = check_run(
+            self.budget,
+            self.ledger,
+            self._key_usage,
+            self.probe_for(opt),
+            option=opt.id,
+            model=opt.model,
+            resolution=opt.resolution,
+            count=len(pop) + len(commons),
+        )
+        if max_usd is not None and projected > max_usd:
+            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
+            raise BudgetError(msg)
+        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
+        logger.info(
+            "%s: %d POP and %d Commons images to send (%d saved before), about $%.2f",
+            run,
+            len(pop),
+            len(commons),
+            len(held),
+            projected,
+        )
+        start = self._clock()
+        skips: dict[str, int] = {}
+        cost = 0.0
+        for images, supplied in self._query_chunks(pop, commons, skips):
+            paid = self._paid(
+                lambda images=images, supplied=supplied: self._calls.embed(opt, images, supplied),
+                machine=opt.machine,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option=opt.id,
+                run=run,
+                model=opt.model,
+                items=len(images) + len(supplied),
+            )
+            cost += paid.cost_usd
+            _keep_chunk(paid.result, opt, checkpoint, skips)
+            if cost > limit:
+                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
+                raise BudgetError(msg)
+        info = self._info(
+            opt,
+            gallery=label,
+            machine=opt.machine,
+            cost=self.ledger.total(SpendKind.RUN, run=run),
+            wall=self._clock() - start,
+            skips=skips,
+        )
+        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
+        checkpoint.remove()
+        return written
+
+    def _query_chunks(
+        self, pop: Sequence[str], commons: Sequence[str], skips: dict[str, int]
+    ) -> Iterator[tuple[list[Image], list[SuppliedImage]]]:
+        """POP images to fetch remotely, then Commons photos fetched here and sent as bytes."""
+        for chunk in _chunks(pop):
+            yield self._images(chunk), []
+        if not commons:
+            return
+        fetcher = self._commons
+        if fetcher is None:
+            msg = f"{len(commons)} Commons photo(s) to embed, but no Commons fetcher was given"
+            raise ValueError(msg)
+        for chunk in _chunks(commons):
+            supplied: list[SuppliedImage] = []
+            for fetched in fetcher.fetch_all(chunk):
+                if fetched.jpeg is None:
+                    reason = f"fetch_{fetched.skip.value if fetched.skip else 'unknown'}"
+                    skips[reason] = skips.get(reason, 0) + 1
+                else:
+                    supplied.append(SuppliedImage(fetched.image_id, fetched.jpeg))
+            yield [], supplied
 
     def probe_for(self, opt: ModalOption) -> ModalProbe | None:
         """The option's probe, else one of an option with the same model, size and resize.
@@ -532,6 +636,18 @@ def _one_pooling(info: RunInfo, pooling: Pooling, *, shared: bool) -> RunInfo:
 def _chunks(ids: Sequence[str]) -> Iterator[list[str]]:
     for chunk in batched(ids, CHUNK_IMAGES):
         yield list(chunk)
+
+
+def _keep_chunk(
+    result: ChunkResult, opt: ModalOption, checkpoint: Checkpoint, skips: dict[str, int]
+) -> None:
+    """Check one answer, save its vectors to the checkpoint, add up what it skipped."""
+    _check_chunk(result, opt)
+    if result.ids:
+        checkpoint.append(list(result.ids), _unit_float16(result.vectors))
+    for reason, n in result.skips.items():
+        skips[reason] = skips.get(reason, 0) + n
+    logger.info("%s: %d images embedded so far", opt.id, len(checkpoint.ids))
 
 
 def _check_chunk(result: ChunkResult, opt: ModalOption) -> None:

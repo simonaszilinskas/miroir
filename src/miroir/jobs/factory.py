@@ -1,4 +1,4 @@
-"""Wire OpenRouter runners from settings: API key, HTTP clients, image cache."""
+"""Wire OpenRouter runners from settings: API key, HTTP clients, image caches."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import httpx
 
+from miroir.commons.images import open_commons_images
 from miroir.config import Settings
 from miroir.images.fetch import CONCURRENCY, ImageCache, ImageFetcher
 from miroir.jobs.describe import OPTIONS as DESCRIBE_OPTIONS
@@ -27,10 +28,13 @@ def open_embedder(settings: Settings, option: str) -> Generator[OpenRouterEmbedd
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
     client = OpenRouterClient(settings.openrouter_api_key)
     cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
-    with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http:
+    with (
+        httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http,
+        open_commons_images(settings) as commons,
+    ):
         try:
             yield OpenRouterEmbedder(
-                settings, OPTIONS[option], client, ImageFetcher(images_http, cache)
+                settings, OPTIONS[option], client, ImageFetcher(images_http, cache), commons=commons
             )
         finally:
             client.close()

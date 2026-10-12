@@ -10,7 +10,7 @@ import io
 import logging
 import time
 from collections.abc import Iterable, Iterator, Sequence
-from itertools import batched
+from itertools import batched, chain
 from pathlib import Path
 from typing import Protocol
 
@@ -30,6 +30,7 @@ from miroir.jobs.modal_spec import (
     ModalOption,
     Pooling,
     Resize,
+    SuppliedImage,
 )
 from miroir.parallel import bounded_map
 from miroir.records.model import Image
@@ -212,8 +213,10 @@ class SentenceEncoder:
 # --- the two tasks ----------------------------------------------------------------------------
 
 
-def embed_images(option: ModalOption, images: Sequence[Image]) -> ChunkResult:
-    """Fetch POP images by URL (512 px, IIIF fallback) and embed them."""
+def embed_images(
+    option: ModalOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
+) -> ChunkResult:
+    """Fetch POP images by URL (512 px, IIIF fallback) and embed them, then the supplied ones."""
     model, load_s = encoder(option)
     start = time.monotonic()
     limits = httpx.Limits(max_connections=FETCH_CONCURRENCY)
@@ -221,7 +224,8 @@ def embed_images(option: ModalOption, images: Sequence[Image]) -> ChunkResult:
         cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=FETCH_CONCURRENCY)
         skips: dict[str, int] = {}
-        decoded = _decoded(fetcher.fetch_all(images), skips)
+        given = (Fetched(s.image_id, s.jpeg, None) for s in supplied)
+        decoded = _decoded(chain(fetcher.fetch_all(images), given), skips)
         ids, vectors = _embed_batches(model, decoded, option.batch_size)
     return ChunkResult(ids, vectors, skips, load_s, time.monotonic() - start)
 

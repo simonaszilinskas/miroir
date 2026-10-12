@@ -202,6 +202,42 @@ def read_meta(directory: Path) -> VectorMeta:
     return meta
 
 
+def merge_runs(directory: Path, runs: Sequence[VectorSet], *, gallery: str) -> VectorSet:
+    """Write one run holding the rows of several runs of the same model, e.g. a gallery run
+    and a run of the images a larger gallery adds, so nothing is embedded twice.
+
+    Refuses runs of different models, sizes or pooling, and an id found in two runs.
+    Cost and time are the sums of the parts.
+    """
+    if len(runs) < 2:
+        msg = "a merge needs two or more runs"
+        raise ValueError(msg)
+    first = runs[0].info
+    same = (first.option, first.model, first.resolution, first.pooling, runs[0].dim)
+    for run in runs[1:]:
+        info = run.info
+        if (info.option, info.model, info.resolution, info.pooling, run.dim) != same:
+            msg = f"cannot merge {info.model} {info.pooling} @{info.resolution} into {same}"
+            raise ValueError(msg)
+    ids = [i for run in runs for i in run.ids]
+    vectors = np.concatenate([np.asarray(run.vectors) for run in runs])
+    parts = ", ".join(f"{run.info.gallery} ({len(run.ids)})" for run in runs)
+    notes = "; ".join(n for n in (f"merged from {parts}", *(r.info.notes for r in runs)) if n)
+    info = RunInfo(
+        option=first.option,
+        model=first.model,
+        resolution=first.resolution,
+        pooling=first.pooling,
+        gallery=gallery,
+        created=max(run.info.created for run in runs),
+        cost_usd=sum(run.info.cost_usd for run in runs),
+        wall_time_s=sum(run.info.wall_time_s for run in runs),
+        route=first.route,
+        notes=notes,
+    )
+    return write_vectors(directory, ids, vectors, info)
+
+
 def meta_dict(info: RunInfo) -> dict[str, object]:
     """`RunInfo` as plain JSON values, for copying into result files."""
     return json.loads(TypeAdapter(RunInfo).dump_json(info))

@@ -1,4 +1,7 @@
-"""Fake HTTP servers for POP images and OpenRouter. No network: tests run with --disable-socket."""
+"""Fake HTTP servers for POP images, Commons and OpenRouter.
+
+No network: tests run with --disable-socket.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,10 @@ from functools import cache
 import httpx
 from PIL import Image as PILImage
 
-from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST
+from miroir.commons.client import WikimediaClient
+from miroir.commons.images import CommonsImages, commons_photos
+from miroir.commons.model import CommonsPhoto, CommonsSet, Source, View, commons_image_id
+from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST, Settings
 from miroir.http import Retry
 
 NO_WAIT = Retry(attempts=3, backoff_s=0.0, sleep=lambda _s: None)
@@ -163,3 +169,50 @@ def _embedding_answer(count: int, *, cost: bool) -> dict[str, object]:
         ],
         "usage": usage,
     }
+
+
+@dataclass
+class FakeCommons:
+    """Serves every Commons thumbnail as a 960x720 JPEG; counts the requests."""
+
+    calls: list[str] = field(default_factory=list[str])
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(str(request.url))
+        return httpx.Response(200, content=jpeg(960, 720))
+
+    def images(self, settings: Settings) -> CommonsImages:
+        http = httpx.Client(transport=httpx.MockTransport(self.handler))
+        client = WikimediaClient(http, settings.commons_cache_dir, retry=NO_WAIT, sleep=no_sleep)
+        return CommonsImages(commons_photos(settings), client)
+
+
+def no_sleep(_seconds: float) -> None:
+    return None
+
+
+def commons_photo(title: str, set_id: CommonsSet, entity: str) -> CommonsPhoto:
+    """A Commons photo as `commons.parquet` holds it, for a set and an answer."""
+    return CommonsPhoto(
+        image_id=commons_image_id(title),
+        set_id=set_id,
+        entity_id=entity,
+        wikidata_id="Q1",
+        file_title=title,
+        page_url="https://commons.wikimedia.org/wiki/" + title,
+        url="https://upload.wikimedia.org/" + title,
+        thumb_url="https://upload.wikimedia.org/thumb/960px-" + title,
+        width=4000,
+        height=3000,
+        licence="CC BY-SA 4.0",
+        licence_url="https://creativecommons.org/licenses/by-sa/4.0",
+        author="A. Visitor",
+        credit="Own work",
+        taken="2019:06:01",
+        latitude=None,
+        longitude=None,
+        camera="Apple iPhone 11",
+        source=Source.CATEGORY,
+        category="Category:X",
+        view=View.EXTERIOR,
+    )

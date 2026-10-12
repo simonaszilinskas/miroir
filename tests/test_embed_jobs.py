@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 from pydantic import SecretStr
 
+from miroir.commons.images import CommonsImages
+from miroir.commons.model import CommonsSet
 from miroir.config import Settings
 from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors
@@ -21,8 +23,15 @@ from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PrivacyError
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.records.build import build
-from miroir.records.store import read_records
-from tests.fakes import COST_PER_INPUT, NO_WAIT, FakeOpenRouter, FakePop
+from miroir.records.store import read_records, write_commons
+from tests.fakes import (
+    COST_PER_INPUT,
+    NO_WAIT,
+    FakeCommons,
+    FakeOpenRouter,
+    FakePop,
+    commons_photo,
+)
 
 
 @pytest.fixture
@@ -37,13 +46,23 @@ def image_ids(settings: Settings, *, publishable: bool) -> list[str]:
 
 
 def embedder(
-    settings: Settings, fake: FakeOpenRouter, option: str = "A9", pop: FakePop | None = None
+    settings: Settings,
+    fake: FakeOpenRouter,
+    option: str = "A9",
+    pop: FakePop | None = None,
+    commons: CommonsImages | None = None,
 ) -> OpenRouterEmbedder:
     client = OpenRouterClient(SecretStr("sk-test"), transport=fake.transport(), retry=NO_WAIT)
     cache = ImageCache(settings.image_cache_dir, 50_000_000)
     fetcher = ImageFetcher((pop or FakePop()).client(), cache, retry=NO_WAIT, concurrency=2)
     return OpenRouterEmbedder(
-        settings, OPTIONS[option], client, fetcher, request_concurrency=2, batch_poll_s=0.0
+        settings,
+        OPTIONS[option],
+        client,
+        fetcher,
+        commons=commons,
+        request_concurrency=2,
+        batch_poll_s=0.0,
     )
 
 
@@ -142,10 +161,40 @@ def test_queries_keep_only_publishable_images(built: Settings) -> None:
     e = embedder(built, fake)
     probe(e, "g")
 
-    run = embed_queries(e, "T5")
+    run = embed_queries(e, ["T5"])
 
     assert run.ids == tuple(public)
     assert run.info.gallery == "T5-tune-queries"
+
+
+def test_commons_query_photos_go_out_in_one_run_with_the_sets_queries(built: Settings) -> None:
+    public = image_ids(built, publishable=True)[0]
+    found = commons_photo("File:a.jpg", CommonsSet.T2, "E1")
+    missing = commons_photo("File:b.jpg", CommonsSet.T8C, "E2")
+    write_commons([found, missing], built.commons_parquet)
+    write_set(built, "T5", [query("T5", 0, public)], [])
+    write_set(built, "T2", [Query("T2-a", "T2", "E1", found.image_id, ("E1",), ())], [])
+    write_set(built, "T8c", [Query("T8c-b", "T8c", "E2", missing.image_id, (), ())], [])
+    write_gallery(built, "g", image_ids(built, publishable=True))
+    fake, commons = FakeOpenRouter(), FakeCommons()
+    e = embedder(built, fake, commons=commons.images(built))
+    probe(e, "g")
+
+    run = embed_queries(e, ["T5", "T2", "T8c"])
+
+    assert set(run.ids) == {public, found.image_id, missing.image_id}
+    assert run.info.gallery == "T5-T2-T8c-tune-queries"
+    assert commons.calls == [found.thumb_url, missing.thumb_url]
+    # A second run reads the photos from the cache: Wikimedia is asked once.
+    again = FakeCommons()
+    embed_queries(embedder(built, fake, commons=again.images(built)), ["T2"])
+    assert again.calls == []
+
+
+def test_an_unknown_commons_id_is_refused(built: Settings) -> None:
+    e = embedder(built, FakeOpenRouter(), commons=FakeCommons().images(built))
+    with pytest.raises(KeyError, match=r"commons\.parquet"):
+        e.embed_images(["commons-0000000000000000"], kind=SpendKind.RUN, run="r", limit_usd=1.0)
 
 
 def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:

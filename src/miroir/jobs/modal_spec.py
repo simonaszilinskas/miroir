@@ -242,6 +242,15 @@ def option(option_id: str) -> ModalOption:
 
 
 @dataclass(frozen=True, slots=True)
+class SuppliedImage:
+    """An image the Mac sends as bytes: a Commons query photo, which containers never fetch."""
+
+    image_id: str
+    jpeg: bytes
+    """At most 512 px on its long side."""
+
+
+@dataclass(frozen=True, slots=True)
 class ChunkResult:
     """What one remote call sends back."""
 

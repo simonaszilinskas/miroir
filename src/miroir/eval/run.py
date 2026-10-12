@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from miroir.commons.model import is_commons_image
+from miroir.commons.images import commons_photos
+from miroir.commons.model import View, is_commons_image
 from miroir.config import Half, Settings, eval_result_path
 from miroir.eval import amstertime
 from miroir.eval.rerank import MIX_INLIERS, SHORTLIST, Rerank, read_matches, rerank, search_times
@@ -23,15 +24,18 @@ from miroir.eval.results import (
 from miroir.eval.scoring import (
     Difference,
     Gallery,
+    Interval,
     ScoreResult,
     SearchQuery,
     Shortlist,
+    bootstrap,
+    hits,
     paired_bootstrap,
     score,
     shortlists,
 )
-from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.vectors import VectorSet, read_vectors
+from miroir.eval.sets import Query, load_queries, read_gallery, write_gallery
+from miroir.eval.vectors import VectorSet, merge_runs, read_vectors
 from miroir.jobs.spend import SpendKind, SpendLedger
 from miroir.records.store import read_images, read_records
 
@@ -255,11 +259,65 @@ def publishable_only(
         q
         for q in queries
         if q.query_image_id in public
-        # A Commons photo is openly licensed; it needs an answer a closed model may see.
-        or (is_commons_image(q.query_image_id) and set(q.expected_entity_ids) & public_entities)
+        # A Commons photo is openly licensed; it needs an answer a closed model may see, or
+        # none at all (T8c, where the right answer is "not found").
+        or (
+            is_commons_image(q.query_image_id)
+            and (not q.expected_entity_ids or set(q.expected_entity_ids) & public_entities)
+        )
     ]
     logger.info("kept %d of %d queries with a publishable image", len(kept), len(queries))
     return kept
+
+
+def merge_vector_runs(settings: Settings, runs: Sequence[str], *, out: str, gallery: str) -> int:
+    """Write run `out` holding the vectors of `runs` (one model); returns its row count."""
+    loaded = [read_vectors(settings.vectors_path(r)) for r in runs]
+    return len(merge_runs(settings.vectors_path(out), loaded, gallery=gallery).ids)
+
+
+def write_fetched_gallery(settings: Settings, gallery: str, runs: Sequence[str]) -> list[str]:
+    """Write `<gallery>-fetched`: the images of `gallery` that every run holds a vector for.
+
+    A service skips images it cannot fetch; scoring every run on this list keeps the gallery
+    the same for all of them. Returns the list, in the gallery's order.
+    """
+    if not runs:
+        msg = "give the runs to compare"
+        raise ValueError(msg)
+    held = [set(read_vectors(settings.vectors_path(r)).ids) for r in runs]
+    ids = [i for i in read_gallery(settings, gallery) if all(i in h for h in held)]
+    write_gallery(settings, f"{gallery}-fetched", ids)
+    return ids
+
+
+@dataclass(frozen=True, slots=True)
+class ViewScore:
+    """One option's scores on the queries of a Commons set that show one view."""
+
+    view: View
+    queries: int
+    hit_at_1: Interval
+    hit_at_10: Interval
+
+
+def score_by_view(
+    settings: Settings, result: Path, *, test_set: str, gallery: str
+) -> tuple[ViewScore, ...]:
+    """Split a scored tune half of a Commons set (T2) by the view each photo shows.
+
+    Views (exterior, interior, detail) are guessed from file words when the set is built.
+    """
+    scored = find_set_score(read_result(result), test_set, "tune", gallery)
+    image_of = {q.query_id: q.query_image_id for q in load_queries(settings, test_set, "tune")}
+    view_of = {i: p.view for i, p in commons_photos(settings).items()}
+    by_view: dict[View, list[int]] = {}
+    for q in scored.per_query:
+        by_view.setdefault(view_of[image_of[q.query_id]], []).append(q.rank)
+    return tuple(
+        ViewScore(view, len(ranks), bootstrap(hits(ranks, 1)), bootstrap(hits(ranks, 10)))
+        for view, ranks in sorted(by_view.items())
+    )
 
 
 def search_queries(queries: list[Query]) -> list[SearchQuery]:

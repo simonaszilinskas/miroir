@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from miroir.eval.vectors import (
     Route,
     RunInfo,
     VectorFormatError,
+    merge_runs,
     read_vectors,
     write_vectors,
 )
@@ -130,3 +132,24 @@ def test_run_info_rejects_negative_cost() -> None:
             wall_time_s=0.0,
             route=Route.OPENROUTER,
         )
+
+
+def test_merge_joins_runs_of_one_model(tmp_path: Path) -> None:
+    first = write_vectors(tmp_path / "a", ["a", "b"], np.eye(2), INFO)
+    second = write_vectors(tmp_path / "b", ["c"], np.array([[1.0, 1.0]]), replace(INFO, cost_usd=2))
+    merged = merge_runs(tmp_path / "ab", [first, second], gallery="bigger")
+    loaded = read_vectors(tmp_path / "ab")
+    assert loaded.ids == ("a", "b", "c") == merged.ids
+    assert loaded.info.gallery == "bigger"
+    assert loaded.info.cost_usd == 2
+    assert "merged from fixture (2), fixture (1)" in loaded.info.notes
+
+
+def test_merge_refuses_other_models_and_shared_ids(tmp_path: Path) -> None:
+    first = write_vectors(tmp_path / "a", ["a", "b"], np.eye(2), INFO)
+    other = write_vectors(tmp_path / "o", ["c"], np.eye(2)[:1], replace(INFO, model="other"))
+    same_id = write_vectors(tmp_path / "s", ["b"], np.eye(2)[:1], INFO)
+    with pytest.raises(ValueError, match="cannot merge other"):
+        merge_runs(tmp_path / "x", [first, other], gallery="g")
+    with pytest.raises(VectorFormatError, match="duplicate"):
+        merge_runs(tmp_path / "y", [first, same_id], gallery="g")
