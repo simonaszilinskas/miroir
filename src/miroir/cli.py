@@ -14,6 +14,8 @@ records_app = typer.Typer(no_args_is_help=True, help="POP records: parse the exp
 app.add_typer(records_app, name="records")
 eval_app = typer.Typer(no_args_is_help=True, help="Evaluation: vectors, scoring, results.")
 app.add_typer(eval_app, name="eval")
+testsets_app = typer.Typer(no_args_is_help=True, help="Test sets T1, T3, T5, T8 and galleries.")
+app.add_typer(testsets_app, name="testsets")
 
 
 @app.callback()
@@ -48,6 +50,26 @@ def eval_check_vectors(
     typer.echo(
         f"{run}: {len(loaded.ids)} vectors, dim {loaded.dim}, {info.option} {info.model} "
         f"@{info.resolution} {info.pooling}, gallery {info.gallery}: OK"
+    )
+
+
+@testsets_app.command("build")
+def testsets_build() -> None:
+    """Build the test sets and galleries from records.parquet (technical spec §7)."""
+    from miroir.eval.build_sets import build  # noqa: PLC0415
+
+    report = build(get_settings())
+    typer.echo(f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'spec':>6} {'closed-ok':>9}")
+    for s in report.sets:
+        flag = "" if s.tune + s.sealed == s.spec else "  differs from spec §7"
+        typer.echo(
+            f"{s.set_id:<4} {s.tune:>6} {s.sealed:>6} {s.tune + s.sealed:>6} {s.spec:>6}"
+            f" {s.closed_ok:>9}{flag}"
+        )
+    typer.echo(
+        f"galleries: full {report.full}, screening {report.screening} "
+        f"({report.needed} needed by queries, {report.screening - report.needed} distractors), "
+        f"screening publishable {report.screening_publishable}"
     )
 
 
