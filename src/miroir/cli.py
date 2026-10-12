@@ -25,6 +25,8 @@ amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R
 eval_app.add_typer(amstertime_app, name="amstertime")
 embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote models.")
 app.add_typer(embed_app, name="embed")
+r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
+app.add_typer(r0_app, name="r0")
 
 
 @app.callback()
@@ -149,14 +151,6 @@ def eval_summary() -> None:
     typer.echo(f"docs/results.md: summary rebuilt from {count} result file(s)")
 
 
-@amstertime_app.command("download")
-def amstertime_download() -> None:
-    """Fetch AmsterTime (0.9 GB, CC0) into the data dir's benchmarks/amstertime."""
-    from miroir.eval import amstertime  # noqa: PLC0415
-
-    amstertime.download(get_settings().amstertime_dir)
-
-
 @amstertime_app.command("score")
 def amstertime_score(
     *,
@@ -216,6 +210,76 @@ def embed_openrouter(
             assert queries is not None
             done = jobs.embed_queries(embedder, queries)
         typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@embed_app.command("modal")
+def embed_modal(
+    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+    gallery: Annotated[
+        str, typer.Option(help="Gallery list. Only publishable images may go to Modal.")
+    ] = "screening-20k-publishable",
+    *,
+    probe: Annotated[
+        bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
+    ] = False,
+) -> None:
+    """Embed a gallery with an open model on a Modal GPU. Paid: probe first."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
+
+    find_option(option)  # fail before starting Modal
+    settings = get_settings()
+    with open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        if probe:
+            result, size = runner.probe(option, gallery)
+            typer.echo(
+                f"{option} probe: {result.images} images cost ${result.cost_usd:.4f} "
+                f"({result.fixed_s:.0f} s start-up, {result.per_image_s * 1000:.0f} ms per image). "
+                f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
+            )
+            return
+        done = runner.embed_gallery(option, gallery)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@r0_app.command("run")
+def r0_run(
+    model: Annotated[
+        str, typer.Option(help="dinov2-giant-224 (expect 48.9 mAP) or dinov3-vit7b16-224 (56.5).")
+    ] = "dinov2-giant-224",
+) -> None:
+    """Download AmsterTime into a Modal volume and embed it there; vectors come back here."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+
+    settings = get_settings()
+    with open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        done = runner.r0(model)
+    run = settings.vectors_path(f"R0-{model}-amstertime").name
+    typer.echo(f"{run}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+    typer.echo(f"next: uv run miroir eval amstertime score --run {run} --option {model}")
+
+
+def _openrouter_key_usage() -> float | None:
+    """What OpenRouter says its key has spent, for the project-wide cap; None without a key."""
+    settings = get_settings()
+    if settings.openrouter_api_key is None:
+        return None
+    import httpx  # noqa: PLC0415
+
+    from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError  # noqa: PLC0415
+
+    client = OpenRouterClient(settings.openrouter_api_key)
+    try:
+        return client.key_spend().usage_usd
+    except (OpenRouterError, httpx.HTTPError):
+        typer.echo("could not read OpenRouter's spend; counting the ledger only", err=True)
+        return None
+    finally:
+        client.close()
 
 
 def main() -> None:

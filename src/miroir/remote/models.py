@@ -1,0 +1,214 @@
+# pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
+"""Load a model and turn PIL images into vectors. Runs only inside Modal containers.
+
+Type-checked in basic mode: torch and the model libraries are not installed on the Mac.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import time
+from collections.abc import Iterable, Iterator, Sequence
+from itertools import batched
+from pathlib import Path
+from typing import Protocol
+
+import httpx
+import numpy as np
+import torch
+from numpy.typing import NDArray
+from PIL import Image as PILImage
+
+from miroir.config import MODAL_IMAGE_CACHE
+from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
+from miroir.jobs.modal_spec import ChunkResult, DType, Family, ModalOption, Pooling
+from miroir.records.model import Image
+from miroir.remote.preprocess import dino_eval
+
+logger = logging.getLogger(__name__)
+
+DEVICE = "cuda"
+GEM_P = 3.0
+#: Parallel downloads per container. Higher than on the Mac: the container does nothing else.
+FETCH_CONCURRENCY = 8
+IMAGE_CACHE_BYTES = 512 * 1024 * 1024
+
+
+class Encoder(Protocol):
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]: ...
+
+
+_LOADED: dict[str, Encoder] = {}
+
+
+def encoder(option: ModalOption) -> tuple[Encoder, float]:
+    """The option's encoder, loaded once per container. Returns it and the seconds loading took."""
+    if option.id in _LOADED:
+        return _LOADED[option.id], 0.0
+    start = time.monotonic()
+    loaders = {
+        Family.DINO: DinoEncoder,
+        Family.SIGLIP2: Siglip2Encoder,
+        Family.PE_CORE: PeCoreEncoder,
+        Family.EMBEDDINGGEMMA: SentenceEncoder,
+        Family.QWEN3_VL: SentenceEncoder,
+    }
+    loaded = loaders[option.family](option)
+    _LOADED.clear()  # one model per container: free the GPU before the next
+    _LOADED[option.id] = loaded
+    took = time.monotonic() - start
+    logger.info("loaded %s in %.1f s", option.model, took)
+    return loaded, took
+
+
+# --- the families -----------------------------------------------------------------------------
+
+
+class DinoEncoder:
+    """DINOv2 and DINOv3 through transformers. CLS or GeM over patch tokens, after the LayerNorm."""
+
+    def __init__(self, option: ModalOption) -> None:
+        from transformers import AutoModel  # noqa: PLC0415
+
+        self.option = option
+        dtype = torch.float32 if option.dtype is DType.FLOAT32 else torch.bfloat16
+        self.dtype = dtype
+        self.model = AutoModel.from_pretrained(option.model, dtype=dtype).to(DEVICE).eval()
+        self.registers = int(getattr(self.model.config, "num_register_tokens", 0) or 0)
+
+    @torch.inference_mode()
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
+        pixels = np.stack([dino_eval(i, self.option.resolution) for i in images])
+        batch = torch.from_numpy(pixels).to(DEVICE, dtype=self.dtype)
+        tokens = self.model(pixel_values=batch).last_hidden_state
+        if self.option.pooling is Pooling.CLS:
+            pooled = tokens[:, 0]
+        else:
+            patches = tokens[:, 1 + self.registers :].float()
+            pooled = patches.clamp(min=1e-6).pow(GEM_P).mean(dim=1).pow(1.0 / GEM_P)
+        return pooled.float().cpu().numpy()
+
+
+class Siglip2Encoder:
+    """SigLIP 2 image tower and its attention-pooling head, through transformers."""
+
+    def __init__(self, option: ModalOption) -> None:
+        from transformers import AutoModel, AutoProcessor  # noqa: PLC0415
+
+        self.model = AutoModel.from_pretrained(option.model, dtype=torch.float32).to(DEVICE).eval()
+        self.processor = AutoProcessor.from_pretrained(option.model)
+
+    @torch.inference_mode()
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
+        inputs = self.processor(images=images, return_tensors="pt").to(DEVICE)
+        with torch.autocast(DEVICE, dtype=torch.bfloat16):
+            out = self.model.get_image_features(**inputs)
+        features = out if isinstance(out, torch.Tensor) else out.pooler_output
+        return features.float().cpu().numpy()
+
+
+class PeCoreEncoder:
+    """Perception Encoder (PE-Core) image tower through open_clip, with its own preprocessing."""
+
+    def __init__(self, option: ModalOption) -> None:
+        import open_clip  # noqa: PLC0415
+
+        model, preprocess = open_clip.create_model_from_pretrained(f"hf-hub:{option.model}")
+        self.model = model.to(DEVICE).eval()
+        self.preprocess = preprocess
+
+    @torch.inference_mode()
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
+        batch = torch.stack([self.preprocess(i) for i in images]).to(DEVICE)
+        with torch.autocast(DEVICE, dtype=torch.bfloat16):
+            features = self.model.encode_image(batch)
+        return features.float().cpu().numpy()
+
+
+class SentenceEncoder:
+    """EmbeddingGemma 2 and Qwen3-VL-Embedding through sentence-transformers, in bf16.
+
+    Images go in as PIL images, with no prompt (EmbeddingGemma 2) or the model's default
+    instruction (Qwen3-VL-Embedding). Qwen's pixel budget is capped at resolution².
+    """
+
+    def __init__(self, option: ModalOption) -> None:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+        if option.dtype is not DType.BFLOAT16:
+            msg = f"{option.id}: sentence-transformers models run in bf16 here"
+            raise ValueError(msg)
+        kwargs: dict[str, object] = {}
+        if option.family is Family.QWEN3_VL:
+            side = option.resolution
+            kwargs["processor_kwargs"] = {"min_pixels": 28 * 28, "max_pixels": side * side}
+        self.option = option
+        self.model = SentenceTransformer(
+            option.model, device=DEVICE, model_kwargs={"torch_dtype": torch.bfloat16}, **kwargs
+        )
+
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
+        vectors = self.model.encode(
+            images, batch_size=self.option.batch_size, convert_to_numpy=True
+        )
+        return np.asarray(vectors, dtype=np.float32)
+
+
+# --- the two tasks ----------------------------------------------------------------------------
+
+
+def embed_images(option: ModalOption, images: Sequence[Image]) -> ChunkResult:
+    """Fetch POP images by URL (512 px, IIIF fallback) and embed them."""
+    model, load_s = encoder(option)
+    start = time.monotonic()
+    limits = httpx.Limits(max_connections=FETCH_CONCURRENCY)
+    with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
+        cache = ImageCache(Path(MODAL_IMAGE_CACHE), IMAGE_CACHE_BYTES)
+        fetcher = ImageFetcher(http, cache, concurrency=FETCH_CONCURRENCY)
+        skips: dict[str, int] = {}
+        decoded = _decoded(fetcher.fetch_all(images), skips)
+        ids, vectors = _embed_batches(model, decoded, option.batch_size)
+    return ChunkResult(ids, vectors, skips, load_s, time.monotonic() - start)
+
+
+def embed_files(option: ModalOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
+    """Embed images read from disk (a benchmark on a Modal volume), keyed by the given ids."""
+    model, load_s = encoder(option)
+    start = time.monotonic()
+    opened = ((image_id, _open(path.read_bytes())) for image_id, path in files)
+    ids, vectors = _embed_batches(model, opened, option.batch_size)
+    return ChunkResult(ids, vectors, {}, load_s, time.monotonic() - start)
+
+
+def _decoded(
+    fetched: Iterable[Fetched], skips: dict[str, int]
+) -> Iterator[tuple[str, PILImage.Image]]:
+    for item in fetched:
+        if item.jpeg is None:
+            reason = f"fetch_{item.skip.value if item.skip else 'unknown'}"
+            skips[reason] = skips.get(reason, 0) + 1
+            continue
+        yield item.image_id, _open(item.jpeg)
+
+
+def _embed_batches(
+    model: Encoder, items: Iterable[tuple[str, PILImage.Image]], batch_size: int
+) -> tuple[tuple[str, ...], NDArray[np.float32]]:
+    ids: list[str] = []
+    rows: list[NDArray[np.float32]] = []
+    for batch in batched(items, batch_size):
+        ids.extend(image_id for image_id, _ in batch)
+        rows.append(model.encode([image for _, image in batch]))
+    if not rows:
+        return (), np.zeros((0, 0), dtype=np.float32)
+    vectors = np.concatenate(rows)
+    if not np.isfinite(vectors).all():
+        msg = "the model returned NaN or infinite values"
+        raise FloatingPointError(msg)
+    return tuple(ids), vectors
+
+
+def _open(data: bytes) -> PILImage.Image:
+    with PILImage.open(io.BytesIO(data)) as opened:
+        return opened.convert("RGB")

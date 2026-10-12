@@ -1,0 +1,414 @@
+"""Embedding runs on Modal, driven from the Mac: probe, gallery run, and R0 on AmsterTime.
+
+Money (experiments.md §1 rule 5). Modal bills by the second for GPU, CPU and memory. Each
+remote call is timed on the Mac, from the call to its answer, and costs that many seconds at
+the function's published price (`modal_spec.Machine.usd_per_s`): a little more than Modal
+bills, since the clock also runs while the call travels. The cost goes into the one project
+ledger, tagged `modal`, even when the call fails. Before every call, total spend plus the
+call's worst case (its timeout at full price) must stay inside the usable budget. A gallery
+run needs a 100-image probe of the same model and size on file, and stops once it costs
+`OVERRUN_FACTOR` times its projection.
+
+Privacy (technical spec §9): Modal is an outside service, so only images of `publishable`
+records go there; a gallery with any other image is refused.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import random
+import time
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from itertools import batched
+from pathlib import Path
+from typing import Protocol
+
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import ConfigDict, TypeAdapter, ValidationError
+
+from miroir.config import SEED, Settings
+from miroir.eval import amstertime
+from miroir.eval.sets import read_gallery
+from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
+from miroir.jobs.modal_spec import (
+    CHUNK_IMAGES,
+    CHUNK_TIMEOUT_S,
+    DOWNLOAD_MACHINE,
+    DOWNLOAD_TIMEOUT_S,
+    L4,
+    R0_MACHINE,
+    R0_OPTIONS,
+    R0_TIMEOUT_S,
+    ChunkResult,
+    Machine,
+    ModalOption,
+    option,
+)
+from miroir.jobs.privacy import PublishableImages
+from miroir.jobs.spend import (
+    PROBE_IMAGES,
+    Budget,
+    BudgetError,
+    Service,
+    SpendKind,
+    SpendLedger,
+    check_probe,
+    check_run,
+    spent_usd,
+)
+from miroir.records.model import Image
+
+logger = logging.getLogger(__name__)
+
+#: A run stops once it costs this many times its projection, plus the margin below.
+OVERRUN_FACTOR = 1.5
+#: Start-up varies more than per-image time; small runs get this much slack on top.
+OVERRUN_MARGIN_USD = 0.25
+SERVICE_NAME = "Modal"
+
+
+class RemoteCalls(Protocol):
+    """The calls a run makes. `miroir.jobs.modal_app.ModalCalls` sends them to Modal."""
+
+    def embed(self, option: ModalOption, images: Sequence[Image]) -> ChunkResult: ...
+    def amstertime_download(self) -> int: ...
+    def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ModalProbe:
+    """Time and cost of embedding about 100 gallery images with one option on Modal."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    option: str
+    model: str
+    resolution: int
+    gallery: str
+    images: int
+    fixed_s: float
+    """Seconds of the call not spent embedding: start-up, model download and load."""
+    per_image_s: float
+    usd_per_s: float
+    cost_usd: float
+    created: date
+
+    def projected_usd(self, count: int) -> float:
+        return (self.fixed_s + self.per_image_s * count) * self.usd_per_s
+
+
+_PROBE = TypeAdapter(ModalProbe)
+
+
+def save_modal_probe(path: Path, probe: ModalProbe) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_PROBE.dump_json(probe, indent=2) + b"\n")
+
+
+def load_modal_probe(path: Path) -> ModalProbe | None:
+    if not path.exists():
+        return None
+    try:
+        return _PROBE.validate_json(path.read_bytes())
+    except (ValidationError, json.JSONDecodeError) as err:
+        msg = f"{path} is not a Modal probe: {err}"
+        raise BudgetError(msg) from err
+
+
+def run_name(opt: ModalOption, gallery: str) -> str:
+    return f"{opt.id}-{gallery}"
+
+
+@dataclass(frozen=True, slots=True)
+class _Paid[T]:
+    result: T
+    cost_usd: float
+    wall_s: float
+
+
+class ModalRunner:
+    """Runs embedding jobs on Modal and logs what each call costs."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        calls: RemoteCalls,
+        *,
+        key_usage_usd: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.settings = settings
+        self._calls = calls
+        self._key_usage = key_usage_usd
+        """What OpenRouter says its key has spent, read once by the caller (or None)."""
+        self._clock = clock
+        self.ledger = SpendLedger(settings.spend_ledger)
+        self.budget = Budget.from_settings(settings)
+        self._loaded: PublishableImages | None = None
+
+    # --- the three entry points -------------------------------------------------------------
+
+    def probe(self, option_id: str, gallery: str) -> tuple[ModalProbe, int]:
+        """Embed 100 images of `gallery`, store time and cost. Returns it and the gallery size."""
+        opt = option(option_id)
+        ids = self._gallery(gallery)
+        left = check_probe(self.budget, self.ledger, self._key_usage)
+        worst = L4.usd_per_s * CHUNK_TIMEOUT_S
+        if worst > left:
+            msg = f"a probe may cost up to ${worst:.2f}; probes have ${left:.2f} left"
+            raise BudgetError(msg)
+        sample = random.Random(SEED).sample(ids, min(PROBE_IMAGES, len(ids)))
+        run = f"probe-{run_name(opt, gallery)}"
+        paid = self._paid(
+            lambda: self._calls.embed(opt, self._images(sample)),
+            machine=L4,
+            timeout_s=CHUNK_TIMEOUT_S,
+            kind=SpendKind.PROBE,
+            option=opt.id,
+            run=run,
+            model=opt.model,
+            items=len(sample),
+        )
+        done = paid.result
+        if not done.ids:
+            msg = f"probe for {opt.id}: no image could be embedded ({done.skips})"
+            raise RuntimeError(msg)
+        _check_chunk(done, opt)
+        result = ModalProbe(
+            option=opt.id,
+            model=opt.model,
+            resolution=opt.resolution,
+            gallery=gallery,
+            images=len(done.ids),
+            fixed_s=max(paid.wall_s - done.embed_s, 0.0),
+            per_image_s=done.embed_s / len(done.ids),
+            usd_per_s=L4.usd_per_s,
+            cost_usd=paid.cost_usd,
+            created=_today(),
+        )
+        save_modal_probe(self.settings.probe_path(opt.id), result)
+        logger.info(
+            "probe %s: %d images, $%.4f (load %.0f s, %.3f s per image), skipped %s",
+            opt.id,
+            result.images,
+            result.cost_usd,
+            done.load_s,
+            result.per_image_s,
+            done.skips,
+        )
+        return result, len(ids)
+
+    def embed_gallery(self, option_id: str, gallery: str) -> VectorSet:
+        """Embed every image of a gallery and write a vector run (technical spec §7.1)."""
+        opt = option(option_id)
+        run = run_name(opt, gallery)
+        out = self.settings.vectors_path(run)
+        _refuse_existing(out)
+        ids = self._gallery(gallery)
+        projected = check_run(
+            self.budget,
+            self.ledger,
+            self._key_usage,
+            load_modal_probe(self.settings.probe_path(opt.id)),
+            option=opt.id,
+            model=opt.model,
+            resolution=opt.resolution,
+            count=len(ids),
+        )
+        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
+        logger.info(
+            "%s: %d images, about $%.2f (stops past $%.2f)", run, len(ids), projected, limit
+        )
+        start = self._clock()
+        done_ids: list[str] = []
+        rows: list[NDArray[np.float16]] = []
+        skips: dict[str, int] = {}
+        cost = 0.0
+        for chunk in _chunks(ids):
+            paid = self._paid(
+                lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
+                machine=L4,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option=opt.id,
+                run=run,
+                model=opt.model,
+                items=len(chunk),
+            )
+            cost += paid.cost_usd
+            _check_chunk(paid.result, opt)
+            done_ids.extend(paid.result.ids)
+            rows.append(_unit_float16(paid.result.vectors))
+            for reason, n in paid.result.skips.items():
+                skips[reason] = skips.get(reason, 0) + n
+            logger.info("%s: %d/%d images, $%.4f", run, len(done_ids), len(ids), cost)
+            if cost > limit:
+                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
+                raise BudgetError(msg)
+        info = self._info(
+            opt, gallery=gallery, machine=L4, cost=cost, wall=self._clock() - start, skips=skips
+        )
+        return write_vectors(out, done_ids, np.concatenate(rows), info)
+
+    def r0(self, name: str) -> VectorSet:
+        """Round R0: download AmsterTime into a Modal volume, embed all 2,462 images there."""
+        if name not in R0_OPTIONS:
+            msg = f"unknown R0 model {name!r}; known: {', '.join(R0_OPTIONS)}"
+            raise ValueError(msg)
+        opt = R0_OPTIONS[name]
+        run = run_name(opt, amstertime.GALLERY)
+        out = self.settings.vectors_path(run)
+        _refuse_existing(out)
+        start = self._clock()
+        downloaded = self._paid(
+            self._calls.amstertime_download,
+            machine=DOWNLOAD_MACHINE,
+            timeout_s=DOWNLOAD_TIMEOUT_S,
+            kind=SpendKind.RUN,
+            option="R0",
+            run=f"{run}-download",
+            model="none",
+            items=0,
+        )
+        logger.info("AmsterTime on Modal: %d images", downloaded.result)
+        paid = self._paid(
+            lambda: self._calls.amstertime_embed(opt),
+            machine=R0_MACHINE,
+            timeout_s=R0_TIMEOUT_S,
+            kind=SpendKind.RUN,
+            option="R0",
+            run=run,
+            model=opt.model,
+            items=downloaded.result,
+        )
+        done = paid.result
+        _check_chunk(done, opt)
+        amstertime.check_ids(done.ids)
+        cost = downloaded.cost_usd + paid.cost_usd
+        info = self._info(
+            opt,
+            gallery=amstertime.GALLERY,
+            machine=R0_MACHINE,
+            cost=cost,
+            wall=self._clock() - start,
+            skips=done.skips,
+        )
+        logger.info(
+            "%s: $%.4f, model load %.0f s, embed %.0f s", run, cost, done.load_s, done.embed_s
+        )
+        return write_vectors(out, done.ids, done.vectors, info)
+
+    # --- helpers ----------------------------------------------------------------------------
+
+    def _paid[T](
+        self,
+        call: Callable[[], T],
+        *,
+        machine: Machine,
+        timeout_s: int,
+        kind: SpendKind,
+        option: str,
+        run: str,
+        model: str,
+        items: int,
+    ) -> _Paid[T]:
+        """Make one remote call if its worst case fits the budget; log its cost, even on failure."""
+        worst = machine.usd_per_s * timeout_s
+        spent = spent_usd(self.ledger, self._key_usage)
+        if spent + worst > self.budget.usable_usd:
+            msg = (
+                f"{run}: a call may cost up to ${worst:.2f} and ${spent:.2f} is spent; together "
+                f"that passes the ${self.budget.usable_usd:.2f} usable budget"
+            )
+            raise BudgetError(msg)
+        start = self._clock()
+        try:
+            result = call()
+        finally:
+            wall = self._clock() - start
+            self.ledger.record(
+                kind,
+                option=option,
+                run=run,
+                model=model,
+                cost_usd=wall * machine.usd_per_s,
+                items=items,
+                service=Service.MODAL,
+            )
+        return _Paid(result, wall * machine.usd_per_s, wall)
+
+    def _gallery(self, name: str) -> list[str]:
+        path = self.settings.gallery_path(name)
+        if not path.exists():
+            msg = f"no gallery {name!r} at {path}: run `miroir testsets build` first"
+            raise FileNotFoundError(msg)
+        ids = read_gallery(self.settings, name)
+        self._store().check(ids, SERVICE_NAME)
+        return ids
+
+    def _images(self, ids: Sequence[str]) -> list[Image]:
+        store = self._store()
+        store.check(ids, SERVICE_NAME)
+        return [store.images[i] for i in ids]
+
+    def _store(self) -> PublishableImages:
+        if self._loaded is None:
+            self._loaded = PublishableImages.load(self.settings)
+        return self._loaded
+
+    def _info(
+        self,
+        opt: ModalOption,
+        *,
+        gallery: str,
+        machine: Machine,
+        cost: float,
+        wall: float,
+        skips: dict[str, int],
+    ) -> RunInfo:
+        notes = f"Modal {machine.gpu}, {opt.dtype}"
+        if skips:
+            notes += f"; skipped: {skips}"
+        return RunInfo(
+            option=opt.experiment,
+            model=opt.model,
+            resolution=opt.resolution,
+            pooling=opt.pooling.value,
+            gallery=gallery,
+            created=_today(),
+            cost_usd=cost,
+            wall_time_s=wall,
+            route=Route.HOSTED,
+            notes=notes,
+        )
+
+
+def _chunks(ids: Sequence[str]) -> Iterator[list[str]]:
+    for chunk in batched(ids, CHUNK_IMAGES):
+        yield list(chunk)
+
+
+def _check_chunk(result: ChunkResult, opt: ModalOption) -> None:
+    rows = result.vectors.shape[0] if result.vectors.ndim == 2 else -1
+    if rows != len(result.ids):
+        msg = f"{opt.id}: {len(result.ids)} ids but vectors of shape {result.vectors.shape}"
+        raise ValueError(msg)
+
+
+def _unit_float16(vectors: NDArray[np.float32]) -> NDArray[np.float16]:
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return (vectors / np.where(norms == 0, 1, norms)).astype(np.float16)
+
+
+def _refuse_existing(out: Path) -> None:
+    if out.exists() and any(out.iterdir()):
+        msg = f"{out} already exists; a finished run is never overwritten"
+        raise FileExistsError(msg)
+
+
+def _today() -> date:
+    return datetime.now(UTC).date()

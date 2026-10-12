@@ -35,6 +35,17 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 #: Base URL of a record page on POP.
 POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 
+# Paths inside Modal containers (miroir.jobs.modal_app). They exist only there.
+#: Volume holding model weights (Hugging Face cache), shared by every run.
+MODAL_WEIGHTS_MOUNT = "/weights"
+#: Volume holding public benchmarks (AmsterTime), downloaded inside Modal.
+MODAL_BENCHMARKS_MOUNT = "/benchmarks"
+#: Scratch folder for resized images inside a container.
+MODAL_IMAGE_CACHE = "/root/image-cache"
+
+#: Where the Modal client keeps its token after `modal token new`.
+_MODAL_TOML = Path.home() / ".modal.toml"
+
 _EXPORT_FOLDER: dict[Collection, str] = {
     Collection.JOCONDE: "joconde",
     Collection.MEMOIRE: "memoire",
@@ -63,8 +74,15 @@ class Settings(BaseSettings):
         default=None, validation_alias="OPENROUTER_API_KEY"
     )
     hf_token: SecretStr | None = Field(default=None, validation_alias="HF_TOKEN")
+    # Modal: these two, or a profile in ~/.modal.toml (`modal token new`).
+    modal_token_id: SecretStr | None = Field(default=None, validation_alias="MODAL_TOKEN_ID")
+    modal_token_secret: SecretStr | None = Field(
+        default=None, validation_alias="MODAL_TOKEN_SECRET"
+    )
+    modal_toml: Path = _MODAL_TOML
 
-    # Money cap for all OpenRouter spend together, in dollars (experiments.md §1 rule 5).
+    # Money cap for all paid model work together (OpenRouter and Modal), in dollars
+    # (experiments.md §1 rule 5). The names predate Modal.
     # A run may not push total spend past budget minus reserve. Probes have their own cap.
     openrouter_budget_usd: float = 50.0
     openrouter_reserve_usd: float = 5.0
@@ -72,6 +90,12 @@ class Settings(BaseSettings):
 
     #: Cap on the resized-image cache, in megabytes. Oldest files go first.
     image_cache_mb: int = 1024
+
+    @property
+    def modal_configured(self) -> bool:
+        """True when Modal can authenticate: both token variables, or ~/.modal.toml."""
+        has_env = self.modal_token_id is not None and self.modal_token_secret is not None
+        return has_env or self.modal_toml.expanduser().exists()
 
     # --- inputs (read only) -------------------------------------------------
 
@@ -106,7 +130,10 @@ class Settings(BaseSettings):
 
     @property
     def spend_ledger(self) -> Path:
-        """One JSON line per paid OpenRouter call: what it cost and for which run."""
+        """One JSON line per paid call (OpenRouter or Modal): what it cost, for which run.
+
+        The file name predates Modal; it is the one project ledger.
+        """
         return self.data_root / "spend" / "openrouter.jsonl"
 
     def probe_path(self, option: str) -> Path:
@@ -122,15 +149,6 @@ class Settings(BaseSettings):
     def vectors_path(self, run: str) -> Path:
         _check_name(run)
         return self.vectors_dir / run
-
-    @property
-    def benchmarks_dir(self) -> Path:
-        """Public benchmarks (set T9), one folder each. Downloaded, never committed."""
-        return self.data_root / "benchmarks"
-
-    @property
-    def amstertime_dir(self) -> Path:
-        return self.benchmarks_dir / "amstertime"
 
     # --- test sets (technical spec §7) ----------------------------------------
 

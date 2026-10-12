@@ -29,6 +29,9 @@ openrouter = [
     "httpx>=0.28.1",
     "pillow>=12.3.0",
 ]
+modal = [
+    "modal>=1.6.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -39,7 +42,7 @@ packages = ["src/miroir"]
 
 [dependency-groups]
 dev = [
-    "miroir[openrouter]",
+    "miroir[modal,openrouter]",
     "pyarrow-stubs>=20.0.0.20260819",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
@@ -84,6 +87,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004", "S", "FBT"]
+# The one remote-only package: it runs inside Modal containers, never on the Mac, so it may
+# import model libraries. tests/test_no_models_on_the_mac.py proves nothing else pulls it in.
+"src/miroir/remote/**" = ["TID251"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
