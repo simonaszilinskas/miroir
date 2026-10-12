@@ -87,14 +87,18 @@ ban-relative-imports = "all"
 "os.path".msg = "Use pathlib, and get data paths from miroir.config."
 "os.getenv".msg = "Read settings through miroir.config."
 "os.environ".msg = "Read settings through miroir.config."
+"torch".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
+"transformers".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
+"timm".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
+"open_clip".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
+"sentence_transformers".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
+"mlx".msg = "No ML model is ever loaded or run on the Mac. Run it on a hosted service."
 
 [tool.ruff.lint.isort]
 known-first-party = ["miroir", "tests"]
 
 [tool.pyright]
 include = ["src", "tests"]
-# Imports torch, which CI does not install (it is in the `jobs` extra). Loaded via importlib.
-exclude = ["src/miroir/jobs/local_vision.py"]
 strict = ["src"]
 pythonVersion = "3.12"
 venvPath = "."

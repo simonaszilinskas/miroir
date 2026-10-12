@@ -8,7 +8,6 @@ and [docs/experiments.md](docs/experiments.md) before changing behaviour. Code r
 
 ```sh
 uv sync                        # base + dev tools (fast; no torch)
-uv sync --extra jobs           # torch, transformers: remote jobs, and the R0 AmsterTime check
 uv sync --extra api            # add fastapi, uvicorn
 make check                     # ruff format check, ruff lint, pyright strict, pytest. Must pass before commit
 make fmt                       # format and auto-fix
@@ -41,15 +40,16 @@ uv run miroir eval summary     # rebuild the results table in docs/results.md
 
 ## Hard rules
 
-1. Never write into the exports dir.
-2. Never commit data, images, Parquet, test sets or model weights. Only small text fixtures.
-3. Never read the sealed half of a test set outside round R4. Load sets with
+1. Never load or run an ML model on the Mac, not even a smoke test or a 100-image timing: it crashes the 16 GB machine. Never install the `jobs` extra here.
+2. Never write into the exports dir.
+3. Never commit data, images, Parquet, test sets or model weights. Only small text fixtures.
+4. Never read the sealed half of a test set outside round R4. Load sets with
    `miroir.eval.sets.load_queries`; only R4 code may pass it `allow_sealed=True`.
-4. Every experiment result goes to `eval/results/<round>/<step>-<option>.json`
+5. Every experiment result goes to `eval/results/<round>/<step>-<option>.json`
    (`config.eval_result_path`), and is committed.
-5. No network in unit tests (pytest runs with `--disable-socket`).
-6. Paid model runs: measure cost on 100 images first; ask before any run over €200.
-7. Only `publishable` records' images may go to outside model services.
+6. No network in unit tests (pytest runs with `--disable-socket`).
+7. Paid model runs: measure cost on 100 images first; ask before any run over €200.
+8. Only `publishable` records' images may go to outside model services.
 
 ## Before you commit
 

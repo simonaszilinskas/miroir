@@ -155,31 +155,6 @@ def amstertime_download() -> None:
     amstertime.download(get_settings().amstertime_dir)
 
 
-@amstertime_app.command("embed")
-def amstertime_embed(
-    *,
-    model: Annotated[str, typer.Option(help="Hugging Face model id.")] = "facebook/dinov2-giant",
-    option: Annotated[str, typer.Option(help="Option id from experiments.md.")] = "A1",
-    run: Annotated[str, typer.Option(help="Vector run name.")] = "R0-dinov2-giant-224-amstertime",
-) -> None:
-    """Embed AmsterTime on this machine (needs `uv sync --extra jobs`; minutes on MPS)."""
-    import importlib  # noqa: PLC0415
-
-    from miroir.eval import amstertime  # noqa: PLC0415
-
-    settings = get_settings()
-    images = settings.amstertime_dir / "images"
-    local = importlib.import_module("miroir.jobs.local_vision")
-    local.embed_files(
-        images,
-        amstertime.image_ids(images),
-        model_id=model,
-        option=option,
-        gallery="amstertime",
-        out_dir=settings.vectors_path(run),
-    )
-
-
 @amstertime_app.command("score")
 def amstertime_score(
     *,

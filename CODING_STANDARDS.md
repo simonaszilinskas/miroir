@@ -7,9 +7,8 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 1. One package, `src/miroir/`. No scripts outside it; no `if __name__ == "__main__"`.
 2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
    Group by area: `miroir records build`, `miroir jobs embed`, `miroir eval run`.
-3. No model runs on the Mac. Model calls go to OpenRouter, or to Hugging Face Jobs when
-   OpenRouter lacks the model. Code that runs inside a job may import torch; it lives in its own
-   module, and nothing in the base install imports it.
+3. No ML model is ever loaded or run on the Mac, not even for a test: ruff bans importing torch,
+   transformers, timm, open_clip, sentence_transformers and mlx. Models run on hosted services.
 4. New dependencies: base only if every command needs them. Otherwise an extra
    (`jobs` for remote-job code, `api`) in `pyproject.toml`. Dev tools go in the `dev` group.
 

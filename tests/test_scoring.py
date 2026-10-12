@@ -34,7 +34,7 @@ INFO = RunInfo(
     created=date(2026, 10, 12),
     cost_usd=0.0,
     wall_time_s=0.0,
-    route=Route.MAC,
+    route=Route.HOSTED,
 )
 
 

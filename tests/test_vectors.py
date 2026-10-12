@@ -27,7 +27,7 @@ INFO = RunInfo(
     created=date(2026, 10, 12),
     cost_usd=0.0,
     wall_time_s=1.5,
-    route=Route.MAC,
+    route=Route.HOSTED,
 )
 
 
@@ -49,7 +49,7 @@ def test_meta_json_is_readable_by_hand(tmp_path: Path) -> None:
     assert meta["format_version"] == 1
     assert meta["dtype"] == "float16"
     assert (meta["dim"], meta["count"]) == (4, 1)
-    assert meta["info"]["route"] == "mac"
+    assert meta["info"]["route"] == "hosted"
     assert meta["info"]["created"] == "2026-10-12"
 
 

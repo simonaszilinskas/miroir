@@ -12,6 +12,9 @@ The official evaluation (github.com/seyrankhademi/AmsterTime, `amstertime/eval.p
 
 It takes the top k = 128 neighbours by cosine distance; AP is 1/rank of the one match, or 0
 past rank 128. `score_amstertime` reproduces that with the MIROIR scorer.
+
+Embedding runs on a hosted service and returns a vector run (technical spec §7.1) whose ids
+are `old/NNNN.jpg` and `new/NNNN.png`. Nothing here loads a model.
 """
 
 from __future__ import annotations

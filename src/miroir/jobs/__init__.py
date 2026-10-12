@@ -1,1 +1,1 @@
-"""Model work: OpenRouter calls, remote jobs, and the few local runs (R0)."""
+"""Model work: OpenRouter calls and remote jobs. No model is ever loaded on the Mac."""
