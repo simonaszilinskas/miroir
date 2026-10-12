@@ -69,6 +69,10 @@ class Record:
     linked_refs: tuple[str, ...]
     """Refs of related records in the same base (Rose Valland `RENV`): room photo <-> artwork."""
     images: tuple[Image, ...]
+    photographers: tuple[str, ...] = ()
+    """Mémoire `AUTP`: who took the photo. Empty elsewhere."""
+    photo_date: str = ""
+    """Mémoire `DATPV` as written, mostly a year. With `photographers` it marks one photo shoot."""
 
     @property
     def cover(self) -> Image:

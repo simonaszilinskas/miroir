@@ -113,6 +113,8 @@ def test_memoire_fields() -> None:
     assert record.departement == "Hautes-Alpes"
     assert record.commune == "Saint-Martin-de-Queyrières"
     assert record.pop_url == "https://pop.culture.gouv.fr/notice/memoire/APMH00125797"
+    assert record.photographers == ("Franceschi, Gérard (1915-2001)",)
+    assert record.photo_date == "1943"
 
 
 def test_memoire_denomination_string_is_split() -> None:

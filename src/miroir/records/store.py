@@ -37,6 +37,8 @@ RECORDS_SCHEMA = pa.schema(
         pa.field("linked_refs", _STRINGS, nullable=False),
         pa.field("image_count", pa.int32(), nullable=False),
         pa.field("cover_image_id", pa.string(), nullable=False),
+        pa.field("photographers", _STRINGS, nullable=False),
+        pa.field("photo_date", pa.string(), nullable=False),
     ]
 )
 
@@ -77,6 +79,8 @@ def write_records(records: Sequence[Record], records_path: Path, images_path: Pa
             "linked_refs": list(r.linked_refs),
             "image_count": len(r.images),
             "cover_image_id": r.cover.image_id,
+            "photographers": list(r.photographers),
+            "photo_date": r.photo_date,
         }
         for r in records
     ]
@@ -139,6 +143,8 @@ def read_records(records_path: Path, images_path: Path) -> list[Record]:
             pop_url=str(row["pop_url"]),
             linked_refs=_strings(row["linked_refs"]),
             images=tuple(sorted(by_ref[str(row["ref"])], key=lambda i: i.position)),
+            photographers=_strings(row["photographers"]),
+            photo_date=str(row["photo_date"]),
         )
         for row in rows
     ]

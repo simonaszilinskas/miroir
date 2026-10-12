@@ -65,6 +65,9 @@ class FieldMap:
     """Date fields whose decade is added to `period` ("années 1940")."""
     linked: tuple[str, ...] = ()
     """Fields listing refs of related records in the same base."""
+    photographers: tuple[str, ...] = ()
+    photo_date: tuple[str, ...] = ()
+    """First non-empty value wins, kept as written."""
 
 
 def _memoire_entity_id(raw: RawRecord) -> str:
@@ -119,6 +122,8 @@ FIELD_MAPS: dict[Collection, FieldMap] = {
         images="IMG",
         publishable=_memoire_publishable,
         entity_id=_memoire_entity_id,
+        photographers=("AUTP",),
+        photo_date=("DATPV",),
     ),
     Collection.ROSE_VALLAND: FieldMap(
         title=("TITR",),
@@ -173,6 +178,8 @@ def map_record(collection: Collection, raw: RawRecord) -> MapResult:
         pop_url=f"{POP_NOTICE_URL}/{collection.mongo_collection}/{ref}",
         linked_refs=_unique(_keywords(raw, fmap.linked)),
         images=images,
+        photographers=_unique(_keywords(raw, fmap.photographers)),
+        photo_date=next(iter(_texts(raw, fmap.photo_date)), ""),
     )
     return MapResult(record=record, record_skip=None, image_skips=image_skips)
 

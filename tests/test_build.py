@@ -18,7 +18,10 @@ def test_build_writes_parquet_that_reads_back(settings: Settings) -> None:
     images = read_images(settings.images_parquet)
     assert len(images) == sum(len(r.images) for r in records)
     assert len({i.image_id for i in images}) == len(images)
-    assert {r.ref: r.images for r in records}["MNR00564"][1].image_type == "back"
+    by_ref = {r.ref: r for r in records}
+    assert by_ref["MNR00564"].images[1].image_type == "back"
+    assert by_ref["APMH00125797"].photographers == ("Franceschi, Gérard (1915-2001)",)
+    assert by_ref["APMH00125797"].photo_date == "1943"
 
 
 def test_image_ids_are_stable_across_runs(settings: Settings) -> None:
