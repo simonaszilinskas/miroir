@@ -1,9 +1,11 @@
-"""Money rules for OpenRouter (experiments.md §1 rule 5).
+"""Money rules for paid model work, OpenRouter and Modal together (experiments.md §1 rule 5).
 
-- Every paid call is appended to a ledger (`Settings.spend_ledger`) as soon as it returns.
-- Total spend is the larger of the ledger sum and what OpenRouter says the key has spent.
+- Every paid call is appended to one ledger (`Settings.spend_ledger`) as soon as it returns,
+  tagged with the service that billed it.
+- Total spend is the Modal lines plus the larger of the OpenRouter lines and what OpenRouter
+  says the key has spent.
 - A probe embeds 100 images and stores the cost per image (`Settings.probe_path`).
-  Probes together may not spend more than `probe_budget_usd`.
+  Probes together, on both services, may not spend more than `probe_budget_usd`.
 - A full run needs a probe on file for the same model and image size, and refuses to start
   if total spend plus its projected cost would pass `openrouter_budget_usd` minus
   `openrouter_reserve_usd`.
@@ -18,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
@@ -35,6 +38,13 @@ class SpendKind(StrEnum):
     """One-off calls to learn how the API behaves."""
 
 
+class Service(StrEnum):
+    """Who billed a call."""
+
+    OPENROUTER = "openrouter"
+    MODAL = "modal"
+
+
 class BudgetError(RuntimeError):
     """A paid call was refused because it could break the spending cap."""
 
@@ -50,6 +60,18 @@ class SpendLine:
     model: str
     cost_usd: float
     items: int
+    service: Service = Service.OPENROUTER
+    """Lines written before Modal arrived carry no service: they are OpenRouter's."""
+
+
+class Projection(Protocol):
+    """A probe as `check_run` reads it: what it measured and what a run would cost."""
+
+    @property
+    def model(self) -> str: ...
+    @property
+    def resolution(self) -> int: ...
+    def projected_usd(self, count: int) -> float: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,16 +101,24 @@ _PROBE = TypeAdapter(Probe)
 
 
 class SpendLedger:
-    """Append-only record of what OpenRouter calls cost. Safe to use from several threads."""
+    """Append-only record of what paid calls cost. Safe to use from several threads."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._lock = threading.Lock()
 
     def record(
-        self, kind: SpendKind, *, option: str, run: str, model: str, cost_usd: float, items: int
+        self,
+        kind: SpendKind,
+        *,
+        option: str,
+        run: str,
+        model: str,
+        cost_usd: float,
+        items: int,
+        service: Service = Service.OPENROUTER,
     ) -> None:
-        line = SpendLine(datetime.now(UTC), kind, option, run, model, cost_usd, items)
+        line = SpendLine(datetime.now(UTC), kind, option, run, model, cost_usd, items, service)
         with self._lock:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("ab") as out:
@@ -105,8 +135,12 @@ class SpendLedger:
             msg = f"{self._path} is damaged; fix it by hand before spending more: {err}"
             raise BudgetError(msg) from err
 
-    def total(self, kind: SpendKind | None = None) -> float:
-        return sum(line.cost_usd for line in self.lines() if kind is None or line.kind == kind)
+    def total(self, kind: SpendKind | None = None, service: Service | None = None) -> float:
+        return sum(
+            line.cost_usd
+            for line in self.lines()
+            if (kind is None or line.kind == kind) and (service is None or line.service == service)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +163,15 @@ class Budget:
 
 
 def spent_usd(ledger: SpendLedger, key_usage_usd: float | None) -> float:
-    """Total spent so far: the ledger, or OpenRouter's count for the key if that is higher."""
-    local = ledger.total()
-    return local if key_usage_usd is None else max(local, key_usage_usd)
+    """Total spent so far, on every service.
+
+    For OpenRouter, the ledger or the key's own count, whichever is higher; for the rest,
+    the ledger.
+    """
+    openrouter = ledger.total(service=Service.OPENROUTER)
+    if key_usage_usd is not None:
+        openrouter = max(openrouter, key_usage_usd)
+    return openrouter + ledger.total() - ledger.total(service=Service.OPENROUTER)
 
 
 def check_probe(budget: Budget, ledger: SpendLedger, key_usage_usd: float | None) -> float:
@@ -151,7 +191,7 @@ def check_run(
     budget: Budget,
     ledger: SpendLedger,
     key_usage_usd: float | None,
-    probe: Probe | None,
+    probe: Projection | None,
     *,
     option: str,
     model: str,

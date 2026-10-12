@@ -9,12 +9,14 @@ from miroir.jobs.spend import (
     Budget,
     BudgetError,
     Probe,
+    Service,
     SpendKind,
     SpendLedger,
     check_probe,
     check_run,
     load_probe,
     save_probe,
+    spent_usd,
 )
 
 BUDGET = Budget(cap_usd=50.0, reserve_usd=5.0, probe_cap_usd=2.0)
@@ -92,3 +94,22 @@ def test_probe_round_trip(tmp_path: Path) -> None:
     save_probe(tmp_path / "A9.json", PROBE)
     assert load_probe(tmp_path / "A9.json") == PROBE
     assert load_probe(tmp_path / "none.json") is None
+
+
+def test_total_spend_adds_modal_to_the_openrouter_figure(tmp_path: Path) -> None:
+    led = ledger(tmp_path, (SpendKind.RUN, 2.0))
+    led.record(
+        SpendKind.RUN, option="R0", run="r", model="m", cost_usd=1.0, items=1, service=Service.MODAL
+    )
+    assert led.total(service=Service.MODAL) == pytest.approx(1.0)
+    assert spent_usd(led, None) == pytest.approx(3.0)
+    assert spent_usd(led, 5.0) == pytest.approx(6.0)  # the key's count replaces OpenRouter's only
+
+
+def test_old_ledger_lines_count_as_openrouter(tmp_path: Path) -> None:
+    path = tmp_path / "spend.jsonl"
+    path.write_text(
+        '{"at":"2026-10-12T10:00:00Z","kind":"probe","option":"A9","run":"r","model":"m",'
+        '"cost_usd":0.5,"items":100}\n'
+    )
+    assert SpendLedger(path).total(service=Service.OPENROUTER) == pytest.approx(0.5)
