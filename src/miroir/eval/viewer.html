@@ -57,6 +57,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -131,7 +132,7 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 .card-body { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
 .ref { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border-right: 1px solid var(--rule); align-content: start; }
 .rows { overflow-x: auto; padding: 6px 14px 12px; }
-.row { display: grid; grid-template-columns: 150px auto; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--rule); min-width: max-content; }
+.row { display: grid; grid-template-columns: 172px auto; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--rule); min-width: max-content; }
 .row:last-child { border-bottom: 0; }
 .row-name { display: grid; gap: 6px; align-content: start; }
 .row-name b { font-weight: 600; overflow-wrap: anywhere; }
@@ -234,7 +235,7 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
   function frame(image, extra) {
     var src = data.images[image];
     var img = src
-      ? '<img src="' + src + '" alt="" loading="lazy" decoding="async">'
+      ? '<img src="' + src + '" alt="" decoding="async">'
       : '<span class="none">No image</span>';
     return '<div class="frame">' + img + (extra || "") + "</div>";
   }
