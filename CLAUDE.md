@@ -14,6 +14,7 @@ make check                     # ruff format check, ruff lint, pyright strict, p
 make fmt                       # format and auto-fix
 uv run miroir --help           # every entry point is a subcommand
 uv run miroir records build    # exports -> records.parquet + images.parquet (about 6 s)
+uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
 ```
 
 ## Layout
@@ -29,7 +30,8 @@ uv run miroir records build    # exports -> records.parquet + images.parquet (ab
 
 - `MIROIR_EXPORTS_DIR` (default `/Users/simonaszilinskas/Downloads/exports`): POP exports, one folder per base. Read only.
   The Rose Valland folder is spelt `rose-valand`; the collection is `rose-valland`.
-- `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `vectors/`.
+- `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `vectors/`,
+  `testsets/` (tune halves, galleries) and `testsets-sealed/` (sealed halves, kept apart).
 - Run models remotely, never on the Mac: OpenRouter if it has the model, else Hugging Face Jobs
   (`OPENROUTER_API_KEY`, `HF_TOKEN` in `.env`). The Mac builds tables and test sets and scores returned vectors.
 - Copy `.env.example` to `.env` to change them.
@@ -38,9 +40,9 @@ uv run miroir records build    # exports -> records.parquet + images.parquet (ab
 ## Hard rules
 
 1. Never write into the exports dir.
-2. Never commit data, images, Parquet or model weights. Only small text fixtures and test sets.
-3. Never read the sealed half of a test set outside round R4. Get set paths from
-   `config.eval_set_path`, which refuses otherwise.
+2. Never commit data, images, Parquet, test sets or model weights. Only small text fixtures.
+3. Never read the sealed half of a test set outside round R4. Load sets with
+   `miroir.eval.sets.load_queries`; only R4 code may pass it `allow_sealed=True`.
 4. Every experiment result goes to `eval/results/<round>/<step>-<option>.json`
    (`config.eval_result_path`), and is committed.
 5. No network in unit tests (pytest runs with `--disable-socket`).

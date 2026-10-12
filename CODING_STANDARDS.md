@@ -50,4 +50,6 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 ## Evaluation
 
 18. Results are written with `config.eval_result_path(round, step, option)` and committed.
-19. Test set halves are opened with `config.eval_set_path`; the sealed half only in R4.
+19. Test sets are read only with `miroir.eval.sets.load_queries`. Its sealed half needs
+    `allow_sealed=True`, and only R4 code may pass it. `tests/test_conventions.py` fails on any
+    other caller; the one exception is `write_set`, which writes the sealed half and never reads it.

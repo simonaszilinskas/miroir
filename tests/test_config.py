@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from miroir.config import Settings, eval_result_path, eval_set_path
+from miroir.config import Settings, eval_result_path
 from miroir.records.model import Collection
 
 
@@ -35,11 +35,13 @@ def test_eval_result_path_follows_the_rule() -> None:
     assert path.parts[-4:] == ("eval", "results", "R1", "A-dinov2-vitl14.json")
 
 
-def test_sealed_half_opens_only_in_r4() -> None:
-    assert eval_set_path("T1", "tune", round_id="R1").name == "tune.jsonl"
-    assert eval_set_path("T1", "sealed", round_id="R4").name == "sealed.jsonl"
+def test_sealed_half_needs_allow_sealed(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    tune = settings.testset_path("T1", "tune")
     with pytest.raises(PermissionError):
-        eval_set_path("T1", "sealed", round_id="R2")
+        settings.testset_path("T1", "sealed")
+    sealed = settings.testset_path("T1", "sealed", allow_sealed=True)
+    assert tune.parent != sealed.parent  # stored apart, so a glob over one misses the other
 
 
 @pytest.mark.parametrize("bad", ["../x", "a/b", ""])

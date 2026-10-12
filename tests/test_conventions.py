@@ -31,3 +31,16 @@ def test_dataclasses_are_frozen(module: Path) -> None:
     allowed = {"build.py"}  # BuildReport accumulates counts while a build runs
     if module.name not in allowed:
         assert not bare, f"{module.name}: use @dataclass(frozen=True, slots=True)"
+
+
+# Modules that may pass allow_sealed=True. Only R4 code reads the sealed half (CODING_STANDARDS
+# 19); eval/sets.py is here because write_set writes it.
+SEALED_ALLOWED = {"eval/sets.py"}
+
+
+@pytest.mark.parametrize("module", MODULES, ids=lambda p: str(p.relative_to(SRC)))
+def test_only_r4_code_opens_the_sealed_half(module: Path) -> None:
+    text = module.read_text(encoding="utf-8")
+    uses = len(re.findall(r"[(,]\s*allow_sealed\s*=\s*True", text))  # calls, not docs
+    allowed = 1 if str(module.relative_to(SRC)) in SEALED_ALLOWED else 0
+    assert uses <= allowed, f"{module.name}: only R4 code may pass allow_sealed=True"

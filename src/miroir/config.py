@@ -19,10 +19,7 @@ from miroir.records.model import Collection
 #: Seed for every random draw (sampling, splits, bootstrap). Pass it explicitly.
 SEED = 20261012
 
-#: The only round allowed to read the sealed half of a test set.
-SEALED_ROUND = "R4"
-
-#: Repository root (holds `eval/sets` and `eval/results`, which are committed).
+#: Repository root (holds `eval/results`, which is committed).
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Base URL of the POP asset bucket. Export image paths are relative to it.
@@ -95,19 +92,30 @@ class Settings(BaseSettings):
         _check_name(run)
         return self.vectors_dir / run
 
+    # --- test sets (technical spec §7) ----------------------------------------
 
-def eval_sets_dir() -> Path:
-    return REPO_ROOT / "eval" / "sets"
+    @property
+    def testsets_dir(self) -> Path:
+        """Tune halves and galleries. Sealed halves live apart, in `testsets-sealed/`."""
+        return self.data_root / "testsets"
 
+    def testset_path(self, set_id: str, half: Half, *, allow_sealed: bool = False) -> Path:
+        """One half of a test set. The sealed half needs `allow_sealed=True`: R4 code only.
 
-def eval_set_path(set_id: str, half: Half, *, round_id: str) -> Path:
-    """Path of one half of a test set. The sealed half opens only in round R4."""
-    _check_round(round_id)
-    _check_name(set_id)
-    if half == "sealed" and round_id != SEALED_ROUND:
-        msg = f"the sealed half of {set_id} is closed until {SEALED_ROUND} (asked from {round_id})"
-        raise PermissionError(msg)
-    return eval_sets_dir() / set_id / f"{half}.jsonl"
+        Read sets with `miroir.eval.sets.load_queries`, not through this path.
+        """
+        _check_name(set_id)
+        if half == "tune":
+            return self.testsets_dir / f"{set_id}.tune.jsonl"
+        if not allow_sealed:
+            msg = f"the sealed half of {set_id} is closed until round R4 (pass allow_sealed=True)"
+            raise PermissionError(msg)
+        return self.data_root / "testsets-sealed" / f"{set_id}.sealed.jsonl"
+
+    def gallery_path(self, name: str) -> Path:
+        """A gallery: one `image_id` per line (`full`, `screening-20k`, ...)."""
+        _check_name(name)
+        return self.testsets_dir / "galleries" / f"{name}.txt"
 
 
 def eval_result_path(round_id: str, step: str, option: str) -> Path:
