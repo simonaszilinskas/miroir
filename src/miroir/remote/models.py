@@ -22,10 +22,18 @@ from PIL import Image as PILImage
 
 from miroir.config import MODAL_IMAGES_MOUNT
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
-from miroir.jobs.modal_spec import ChunkResult, DType, Family, ModalOption, Pooling
+from miroir.jobs.modal_spec import (
+    MAX_ASPECT,
+    ChunkResult,
+    DType,
+    Family,
+    ModalOption,
+    Pooling,
+    Resize,
+)
 from miroir.parallel import bounded_map
 from miroir.records.model import Image
-from miroir.remote.preprocess import dino_eval, squash
+from miroir.remote.preprocess import dino_eval, dino_whole, squash
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +77,11 @@ def encoder(option: ModalOption) -> tuple[Encoder, float]:
 
 
 class DinoEncoder:
-    """DINOv2 and DINOv3 through transformers. CLS or GeM over patch tokens, after the LayerNorm."""
+    """DINOv2 and DINOv3 through transformers. CLS or GeM over patch tokens, after the LayerNorm.
+
+    Whole images (`Resize.WHOLE`) differ in shape, so each batch runs one forward pass per shape.
+    DINOv2 interpolates its position embeddings to any grid; DINOv3 uses RoPE.
+    """
 
     def __init__(self, option: ModalOption) -> None:
         from transformers import AutoModel  # noqa: PLC0415
@@ -79,18 +91,43 @@ class DinoEncoder:
         self.dtype = dtype
         self.model = AutoModel.from_pretrained(option.model, dtype=dtype).to(DEVICE).eval()
         self.registers = int(getattr(self.model.config, "num_register_tokens", 0) or 0)
+        self.patch = int(self.model.config.patch_size)
+
+    def _pixels(self, image: PILImage.Image) -> NDArray[np.float32]:
+        side = self.option.resolution
+        if self.option.resize is Resize.WHOLE:
+            return dino_whole(image, side, self.patch, MAX_ASPECT)
+        return dino_eval(image, side)
 
     @torch.inference_mode()
     def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
-        pixels = np.stack([dino_eval(i, self.option.resolution) for i in images])
-        batch = torch.from_numpy(pixels).to(DEVICE, dtype=self.dtype)
-        tokens = self.model(pixel_values=batch).last_hidden_state
+        arrays = [self._pixels(i) for i in images]
+        by_shape: dict[tuple[int, ...], list[int]] = {}
+        for i, array in enumerate(arrays):
+            by_shape.setdefault(array.shape, []).append(i)
+        out: NDArray[np.float32] | None = None
+        for rows in by_shape.values():
+            pixels = torch.from_numpy(np.stack([arrays[i] for i in rows]))
+            output = self.model(pixel_values=pixels.to(DEVICE, dtype=self.dtype))
+            pooled = self._pool(output.last_hidden_state.float())
+            if out is None:
+                out = np.empty((len(images), pooled.shape[1]), dtype=np.float32)
+            out[rows] = pooled
+        assert out is not None
+        return out
+
+    def _pool(self, tokens: torch.Tensor) -> NDArray[np.float32]:
+        cls = tokens[:, 0]
+        patches = tokens[:, 1 + self.registers :]
+        gem = patches.clamp(min=1e-6).pow(GEM_P).mean(dim=1).pow(1.0 / GEM_P)
         if self.option.pooling is Pooling.CLS:
-            pooled = tokens[:, 0]
-        else:
-            patches = tokens[:, 1 + self.registers :].float()
-            pooled = patches.clamp(min=1e-6).pow(GEM_P).mean(dim=1).pow(1.0 / GEM_P)
-        return pooled.float().cpu().numpy()
+            pooled = cls
+        elif self.option.pooling is Pooling.GEM:
+            pooled = gem
+        else:  # CLS_GEM: each unit length, so the Mac can split the row in two
+            unit = torch.nn.functional.normalize
+            pooled = torch.cat([unit(cls, dim=1), unit(gem, dim=1)], dim=1)
+        return pooled.cpu().numpy()
 
 
 class MegaLocEncoder:

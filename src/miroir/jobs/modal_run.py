@@ -21,7 +21,7 @@ import logging
 import random
 import time
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from itertools import batched
 from pathlib import Path
@@ -49,8 +49,10 @@ from miroir.jobs.modal_spec import (
     R0_OPTIONS,
     R0_TIMEOUT_S,
     ChunkResult,
+    Family,
     Machine,
     ModalOption,
+    Pooling,
     option,
 )
 from miroir.jobs.privacy import PublishableImages
@@ -127,6 +129,13 @@ def load_modal_probe(path: Path) -> ModalProbe | None:
 
 def run_name(opt: ModalOption, gallery: str) -> str:
     return f"{opt.id}-{gallery}"
+
+
+def output_runs(opt: ModalOption, gallery: str) -> dict[str, Pooling]:
+    """The vector runs a gallery run writes, with their pooling. CLS+GeM writes two."""
+    if opt.pooling is Pooling.CLS_GEM:
+        return {f"{opt.id}-{p.value}-{gallery}": p for p in (Pooling.CLS, Pooling.GEM)}
+    return {run_name(opt, gallery): opt.pooling}
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,15 +219,17 @@ class ModalRunner:
 
     def embed_gallery(
         self, option_id: str, gallery: str, *, max_usd: float | None = None
-    ) -> VectorSet:
-        """Embed every image of a gallery and write a vector run (technical spec §7.1).
+    ) -> tuple[VectorSet, ...]:
+        """Embed every image of a gallery and write its vector runs (technical spec §7.1).
 
-        `max_usd` refuses the run when the probe projects a higher cost.
+        One run, or two for CLS+GeM (`output_runs`). `max_usd` refuses the run when the probe
+        projects a higher cost.
         """
         opt = option(option_id)
         run = run_name(opt, gallery)
-        out = self.settings.vectors_path(run)
-        _refuse_existing(out)
+        outputs = output_runs(opt, gallery)
+        for name in outputs:
+            _refuse_existing(self.settings.vectors_path(name))
         ids = self._gallery(gallery)
         checkpoint = Checkpoint(self.settings.checkpoint_path(run))
         held = set(checkpoint.ids)
@@ -279,12 +290,22 @@ class ModalRunner:
             wall=self._clock() - start,
             skips=skips,
         )
-        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
+        vectors = checkpoint.vectors()
+        parts = np.split(vectors, len(outputs), axis=1)
+        written = tuple(
+            write_vectors(
+                self.settings.vectors_path(name),
+                checkpoint.ids,
+                part,
+                _one_pooling(info, pooling, shared=len(outputs) > 1),
+            )
+            for (name, pooling), part in zip(outputs.items(), parts, strict=True)
+        )
         checkpoint.remove()
         return written
 
     def probe_for(self, opt: ModalOption) -> ModalProbe | None:
-        """The option's probe, else one of an option with the same model and size.
+        """The option's probe, else one of an option with the same model, size and resize.
 
         Pooling (CLS or GeM) does not change the cost, so one probe serves both.
         """
@@ -292,7 +313,8 @@ class ModalRunner:
         if own is not None:
             return own
         for other in OPTIONS.values():
-            if other.model == opt.model and other.resolution == opt.resolution:
+            same = (other.model, other.resolution, other.resize)
+            if same == (opt.model, opt.resolution, opt.resize):
                 found = load_modal_probe(self.settings.probe_path(other.id))
                 if found is not None:
                     logger.info("%s: using the probe of %s (same model and size)", opt.id, other.id)
@@ -442,6 +464,8 @@ class ModalRunner:
         skips: dict[str, int],
     ) -> RunInfo:
         notes = f"Modal {machine.gpu}, {opt.dtype}"
+        if opt.family is Family.DINO:
+            notes += f", {opt.resize}"
         if skips:
             notes += f"; skipped: {skips}"
         return RunInfo(
@@ -456,6 +480,13 @@ class ModalRunner:
             route=Route.HOSTED,
             notes=notes,
         )
+
+
+def _one_pooling(info: RunInfo, pooling: Pooling, *, shared: bool) -> RunInfo:
+    if not shared:
+        return info
+    notes = f"{info.notes}; CLS and GeM from one pass: cost and time cover both runs"
+    return replace(info, pooling=pooling.value, notes=notes)
 
 
 def _chunks(ids: Sequence[str]) -> Iterator[list[str]]:

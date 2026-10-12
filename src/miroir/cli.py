@@ -438,8 +438,12 @@ def embed_modal(
                 f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
             )
             return
-        done = runner.embed_gallery(option, gallery, max_usd=max_usd)
-    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+        written = runner.embed_gallery(option, gallery, max_usd=max_usd)
+    for done in written:
+        typer.echo(
+            f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors, "
+            f"${done.info.cost_usd:.4f}"
+        )
 
 
 @embed_app.command("modal-images")

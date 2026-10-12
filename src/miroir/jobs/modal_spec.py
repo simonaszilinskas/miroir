@@ -55,6 +55,22 @@ class Pooling(StrEnum):
     """MegaLoc's optimal-transport aggregation of DINOv2 patch tokens."""
     HEAD = "head"
     """The model's own pooling and projection (CLIP-style towers, embedding models)."""
+    CLS_GEM = "cls+gem"
+    """CLS and GeM from one pass, each unit length, side by side. The Mac splits the run in two."""
+
+
+class Resize(StrEnum):
+    """How a DINO model sees an image. Other families use their own processor."""
+
+    CENTRE_CROP = "centre-crop"
+    """The published eval transform: shorter side to resolution x 256/224, then a centre square."""
+    WHOLE = "whole"
+    """The whole image, aspect kept: shorter side to `resolution`, each side a multiple of the
+    patch size, the longer side at most `MAX_ASPECT` times the shorter."""
+
+
+#: Longest side of a `Resize.WHOLE` image, as a multiple of its shorter side.
+MAX_ASPECT = 2.0
 
 
 class DType(StrEnum):
@@ -109,12 +125,15 @@ class ModalOption:
     model: str
     """Hugging Face model id."""
     resolution: int
-    """Side of the square the model sees (DINO crop), or the longest side sent (others)."""
+    """Side of the square the model sees (DINO crop), its shorter side (DINO whole), or the
+    longest side sent (others)."""
     pooling: Pooling
     dtype: DType
     batch_size: int
     gated: bool = False
     """Weights need an accepted licence on Hugging Face (read through the `huggingface` secret)."""
+    resize: Resize = Resize.CENTRE_CROP
+    """DINO only: crop to a square, or keep the whole image."""
 
     @property
     def machine(self) -> Machine:
@@ -135,6 +154,14 @@ _V3_HPLUS = "facebook/dinov3-vith16plus-pretrain-lvd1689m"
 _V3_7B = "facebook/dinov3-vit7b16-pretrain-lvd1689m"
 
 
+def _whole(id_: str, model: str, short: int, batch: int, *, gated: bool = True) -> ModalOption:
+    """A DINO model on the whole image, CLS and GeM in one pass, bf16 (R1 rerun, no crop)."""
+    return ModalOption(
+        id_, id_[:2], Family.DINO, model, short, Pooling.CLS_GEM, DType.BFLOAT16, batch,
+        gated=gated, resize=Resize.WHOLE,
+    )  # fmt: skip
+
+
 _ALL = (
     _dino("A1-dinov2-l-224-cls", "A1", "facebook/dinov2-large", Pooling.CLS),
     _dino("A1-dinov2-l-224-gem", "A1", "facebook/dinov2-large", Pooling.GEM),
@@ -148,6 +175,10 @@ _ALL = (
         "A2-dinov3-7b-256-cls", "A2", Family.DINO, _V3_7B,
         256, Pooling.CLS, DType.BFLOAT16, 32, gated=True,  # float32 needs a 48 GB GPU
     ),
+    _whole("A1-dinov2-g-224-nocrop", "facebook/dinov2-giant", 224, 128, gated=False),
+    _whole("A2-dinov3-l-256-nocrop", _V3_L, 256, 128),
+    _whole("A2-dinov3-hplus-256-nocrop", _V3_HPLUS, 256, 128),
+    _whole("A2-dinov3-7b-256-nocrop", _V3_7B, 256, 64),
     ModalOption(
         "A3-megaloc-322", "A3", Family.MEGALOC, "gmberton/MegaLoc",
         322, Pooling.SALAD, DType.FLOAT32, 64,

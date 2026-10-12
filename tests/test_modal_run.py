@@ -13,7 +13,7 @@ from miroir.eval import amstertime
 from miroir.eval.sets import write_gallery
 from miroir.eval.vectors import Route, read_vectors
 from miroir.jobs.checkpoint import Checkpoint
-from miroir.jobs.modal_run import ModalRunner, load_modal_probe, run_name
+from miroir.jobs.modal_run import ModalRunner, load_modal_probe, output_runs, run_name
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     L4,
@@ -21,6 +21,7 @@ from miroir.jobs.modal_spec import (
     R0_OPTIONS,
     ChunkResult,
     ModalOption,
+    Resize,
     option,
 )
 from miroir.jobs.privacy import PrivacyError
@@ -117,7 +118,7 @@ def test_probe_then_run_writes_vectors_and_logs_modal_spend(built: Settings) -> 
     assert probe.fixed_s == pytest.approx(SECONDS_PER_CALL - 60.0)
     assert load_modal_probe(built.probe_path(GEMMA)) == probe
 
-    done = r.embed_gallery(GEMMA, "g")
+    (done,) = r.embed_gallery(GEMMA, "g")
     loaded = read_vectors(built.vectors_path(run_name(OPTIONS[GEMMA], "g")))
     assert loaded.ids == done.ids
     assert loaded.info.route == Route.HOSTED
@@ -210,7 +211,7 @@ def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
     saved = np.ones((2, 8), dtype=np.float16) / np.sqrt(8)
     Checkpoint(built.checkpoint_path(run)).append(first, saved)
 
-    done = r.embed_gallery(GEMMA, "g")
+    (done,) = r.embed_gallery(GEMMA, "g")
     assert calls.calls[-1] == (GEMMA, len(ids) - 2)
     assert set(done.ids) == set(ids)
     assert not built.checkpoint_path(run).exists()
@@ -245,3 +246,29 @@ def test_cls_and_gem_share_a_probe(built: Settings) -> None:
     r.probe("A1-dinov2-l-224-cls", "g")
     r.embed_gallery("A1-dinov2-l-224-gem", "g")
     assert [c[0] for c in calls.calls] == ["A1-dinov2-l-224-cls", "A1-dinov2-l-224-gem"]
+
+
+def test_cls_gem_writes_a_cls_run_and_a_gem_run(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    r, _ = runner(built)
+    nocrop = "A2-dinov3-l-256-nocrop"
+    r.probe(nocrop, "g")
+    written = r.embed_gallery(nocrop, "g")
+    names = list(output_runs(option(nocrop), "g"))
+    assert names == [f"{nocrop}-cls-g", f"{nocrop}-gem-g"]
+    assert [w.info.pooling for w in written] == ["cls", "gem"]
+    cls, gem = (read_vectors(built.vectors_path(n)) for n in names)
+    assert cls.dim == gem.dim == 4  # the fake's 8 columns, split in two
+    assert "whole" in cls.info.notes
+    assert "one pass" in gem.info.notes
+    assert set(cls.ids) == set(ids)
+
+
+def test_a_whole_image_option_never_borrows_a_cropped_probe(built: Settings) -> None:
+    write_gallery(built, "g", image_ids(built, publishable=True))
+    r, _ = runner(built)
+    r.probe("A2-dinov3-l-256-cls", "g")
+    assert option("A2-dinov3-l-256-nocrop").resize is Resize.WHOLE
+    with pytest.raises(BudgetError):
+        r.embed_gallery("A2-dinov3-l-256-nocrop", "g")
