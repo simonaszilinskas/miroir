@@ -19,7 +19,7 @@ from miroir.records.store import read_records
 
 logger = logging.getLogger(__name__)
 
-#: Queries per set in technical spec §7. T3 takes every eligible artwork (231 planned, 198 have 2+ crops).
+#: Queries per set in technical spec §7. T3 takes every artwork with 2+ crops (231 planned).
 SPEC_SIZES: dict[str, int] = {"T1": 1_000, "T3": 198, "T5": 1_000, "T8": 500}
 
 #: Gallery for comparing models before the winners run on everything.
