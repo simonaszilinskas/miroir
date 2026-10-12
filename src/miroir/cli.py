@@ -442,6 +442,14 @@ def vlm_ask(
         bool, typer.Option("--probe", help="Ask about 100 query images; print the projection.")
     ] = False,
     max_usd: Annotated[float, typer.Option(help="Refuse or stop a run past this.")] = 1.0,
+    batch: Annotated[
+        bool,
+        typer.Option(
+            "--batch/--no-batch",
+            help="Batch API when the model has one. --no-batch: standard endpoint, full price, "
+            "for images the batch could not fetch.",
+        ),
+    ] = True,
 ) -> None:
     """Ask a vision model about each publishable query image. Paid: probe first."""
     from miroir.jobs import describe  # noqa: PLC0415
@@ -450,7 +458,7 @@ def vlm_ask(
     settings = get_settings()
     sets = tuple(test_set or DEFAULT_SETS)
     ids = describe.query_image_ids(settings, sets, gallery)
-    with open_describer(settings, model) as describer:
+    with open_describer(settings, model, batch=batch) as describer:
         if probe:
             result = describe.probe(describer, ids, "+".join(sets) + "-tune")
             typer.echo(
