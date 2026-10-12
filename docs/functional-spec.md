@@ -30,7 +30,7 @@ We fixed these numbers before seeing any score. The decision meeting at the end 
 | One painting picked out of a photo of a room full of paintings | The right record is in the top 5 | ≥ 70% |
 | User tests | Testers who found at least one thing they photographed and would use MIROIR again | ≥ 4 of 5 |
 
-[technical-spec.md](technical-spec.md#7-evaluation) describes how each test set is built.
+[technical-spec.md](technical-spec.md#7-evaluation) describes how each test set is built. [experiments.md](experiments.md) describes how we compare solutions on them. The final scores come from a sealed half of each set, opened once in week 6.
 
 ## 4. Features
 
@@ -46,7 +46,7 @@ A photo of a building, object or painting finds its record even when the photo w
 
 A person types what they see, in French or another language ("portail roman avec un tympan sculpté", "a still life with a dead hare"), and gets matching records. Words can also refine a photo search ("same, but in Toulouse").
 
-*Done when:* a hand-written set of 50 French descriptions returns a relevant record in the top 10 for most of them. We report this score but set no pass bar for it.
+*Done when:* we have scores on two sets: 50 French descriptions written by hand, and 1,000 descriptions written by an AI model for hidden images. We report these scores but set no pass bar for them.
 
 ### F3. Filters with image search
 
@@ -148,12 +148,12 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 
 | Week | Work | Demo at end of week |
 |---|---|---|
-| 1 | Load the exports, download images, pick models on the test sets, build the first index | Photo search on the 101k records from a script |
-| 2 | Search API: photo, words, filters, grouping. Measure the phone-vs-archive gap | Search API with first scores |
-| 3 | Mobile website, object outlines (F4), drawn boxes, "not found" cut-off, first fixes for the phone gap | Website on a phone |
-| 4 | Full POP export loaded and indexed, detail search (F5), further fixes for the phone gap | Full index live |
+| 1 | Load the exports, download images, build the test sets and the scoring harness, check it against published scores, compare image models (rounds R0–R1 in [experiments.md](experiments.md)) | First results table |
+| 2 | Compare re-rankers and phone-gap fixes (R2). Start comparing detectors, detail search and score fusion (R3). Search API on the current winners | Search API with scores for every option tried |
+| 3 | Finish R3. Mobile website, object outlines (F4), drawn boxes, "not found" cut-off | Website on a phone |
+| 4 | Full POP export loaded and indexed with the winning stack, detail search (F5) | Full index live |
 | 5 | User tests, fixes between sessions | Test notes |
-| 6 | Final scores, report, decision meeting | Decision |
+| 6 | Final scores on the sealed halves (R4), report, decision meeting | Decision |
 
 ## 12. Out of scope for the PoC
 
@@ -170,7 +170,8 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 | Phone photos match black-and-white archive prints poorly | The phone-photo target is missed | Measure in week 2. Then try, in order: searching in greyscale, adding modern Wikimedia Commons photos as extra views, fine-tuning the model on Commons–Mémoire pairs |
 | The full POP export arrives late | The user tests run on 101k records, and most tester photos find nothing | The project lead starts the export in week 1. If it isn't loaded by the end of week 4, testers work in places the 101k cover well (Toulouse, Besançon, Rouen) |
 | The full export holds POP bases we have not mapped yet (Mérimée, Palissy…) | Week 4 overruns | Map only the fields search needs: title, place, domain, period, author, images |
-| Images sent to an outside AI service for captions | Images not cleared for publication leave the Ministry | Skip records marked not for publication when writing captions |
+| Images sent to closed AI models (captions, experiments) | Images not cleared for publication leave the Ministry | Send only images cleared for publication, Commons photos and test queries. Testers' photos stay on our machines unless a closed model wins its place and testers agree |
+| We tune until the scores look good on the sets we tuned on | The decision meeting sees inflated numbers | Final scores come only from the sealed halves, opened once |
 | Testers photograph people | Personal data | Delete test photos at the end of the PoC. Keep no faces in reports |
 
 ## 14. Decisions
@@ -181,6 +182,7 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 | Proof of value | Measured score and five user tests |
 | Features | F1–F5, with F5 last |
 | Infrastructure | No limit for the PoC. Build so it can move to the Ministry's cloud |
+| Models | Chosen by experiment, not reputation. Open preferred, closed allowed when clearly better |
 | Time and people | 6 weeks, 1–2 people, decision meeting at the end |
 | One result is… | A building or object, with its photos grouped |
 | Access | Login only |

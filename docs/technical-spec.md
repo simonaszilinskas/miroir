@@ -27,7 +27,7 @@ flowchart LR
 
 The indexing pipeline turns POP records into one OpenSearch document per image. Each document holds image vectors and the record's text and filter fields. A second index holds vectors for image tiles, used for detail search. The search API embeds the query, runs one hybrid query (text plus vectors, with filters), groups hits by building or object, and decides between "match" and "not found".
 
-Everything runs in Docker so the stack can move to the Ministry's cloud unchanged. Models run on our own machines. OpenRouter is used only offline, to write image captions.
+Everything runs in Docker so the stack can move to the Ministry's cloud unchanged. Open models run on our own machines. Closed models, reached through OpenRouter, take part in the experiments as reference points ([experiments.md](experiments.md)).
 
 ## 2. Stack
 
@@ -97,9 +97,9 @@ Every mapper turns a POP record into this shape:
 
 ## 4. Models
 
-Pick each model in week 1 by scoring the candidates on a 1,000-query sample of the test sets (section 7).
+The models below are the starting point only. [experiments.md](experiments.md) compares them with every serious alternative: Qwen3-VL-Embedding, EmbeddingGemma 2, DINOv3, MegaLoc, SAM 3, geometric re-ranking and others. The winners replace them. Open models are preferred. A closed model enters the stack only if it wins by more than the error bar.
 
-| Job | Default | Also try | Why |
+| Job | Starting point | Also try | Why |
 |---|---|---|---|
 | Same-object matching (F1, F4, F5) | DINOv2 ViT-L/14 | DINOv3 ViT-L | Self-supervised features match the *same* object across views better than text-aligned models do |
 | Words ↔ image (F2) and a second signal for F1 | SigLIP 2 so400m | SigLIP 2 base | Multilingual text encoder, so French queries work |
@@ -108,7 +108,7 @@ Pick each model in week 1 by scoring the candidates on a 1,000-query sample of t
 
 Vectors are L2-normalised, so we score with inner product. Their size depends on the model chosen: 1,024 for DINOv2 ViT-L and 1,152 for SigLIP 2 so400m.
 
-Captions are written only for records where `publishable` is true. Query photos are never sent to OpenRouter.
+Captions are written only for records where `publishable` is true. During experiments, test queries come from the collections and Commons, so they can go to closed models. Testers' photos go to a closed model only if one wins a place in the stack and the testers agreed in writing.
 
 ## 5. Indexes
 
@@ -190,28 +190,27 @@ Target: under 3 seconds per search on CPU, detection included.
 
 ### 6.3 "Not found" cut-off
 
-Build a set of queries whose answer is *not* in the index by removing their records before searching (leave-one-out, section 7). Choose the lowest cut-off that keeps confident-but-wrong answers under 5% on that set. Then report the match rate it leaves on the in-index queries.
+Build a set of queries whose answer is *not* in the index by removing their records before searching (set T8, section 7). Choose the lowest cut-off that keeps confident-but-wrong answers under 5% on that set. Then report the match rate it leaves on the in-index queries.
 
 ## 7. Evaluation
 
-Every test set is a JSONL of `{query_image or query_text, box?, expected_entity_ids}`. `eval/run.py` scores them and writes `eval/results/<date>-<model>.json`, which is committed.
+This section defines the test sets. [experiments.md](experiments.md) says how we use them to compare options: halves, measures, error bars and rounds.
+
+Every test set is a JSONL of `{query_image or query_text, box?, expected_entity_ids}`. `eval/run.py` scores a pipeline configuration against a set and writes `eval/results/<round>/<step>-<option>.json`, which is committed.
 
 During evaluation, the query image and every other image of the same *photo record* are removed from the index, so a query cannot find itself.
 
 | Set | Built from | Size | Metric | Target |
 |---|---|---|---|---|
-| E1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,262 buildings). One photo per building is the query; the others are the answer. At most 1 query per building | 1,000 queries | Right building in top 10 | ≥ 80% |
-| E2 Phone building | Wikimedia Commons photos of buildings in E1, found through Wikidata's Mérimée ID (P380) | ≥ 300 queries | Right building in top 10 | ≥ 60% |
-| E3 Room photos | 15 Jeu de Paume room photos (Rose Valland `JDP-*`) and the 231 paintings that link to them through `RENV`. The query is the detector's box, or a hand-drawn box if the detector misses | 231 queries | Right record in top 5 | ≥ 70% |
-| E4 Details | Rose Valland `detail` images, with the record's other images left in the index | up to 1,000 queries | Right record in top 10 | Report |
-| E5 Objects, other view | Joconde records with 2+ images: one view is the query | 1,000 queries | Right record in top 10 | Report |
-| E6 Words | 50 French descriptions written by hand, judged by hand | 50 queries | Relevant record in top 10 | Report |
-
-E2 is the most important set and the riskiest. Commons photos are recent, in colour and often wide shots. Mémoire prints are old, greyscale and close. If E2 falls short, apply these fixes in order and keep each that helps:
-
-1. Embed greyscale copies of query and index images, and add a `dino_grey` vector.
-2. Add Commons photos as extra images on the matching Mémoire entity (`image_type: "commons"`), keeping E2's query photos out.
-3. Fine-tune DINOv2 with a contrastive loss on Commons–Mémoire pairs of the same building, kept apart from E2.
+| T1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,262 buildings). One photo per building is the query; the others are the answer. At most 1 query per building | 1,000 queries | Right building in top 10 | ≥ 80% |
+| T2 Phone building | Wikimedia Commons photos of buildings in T1, found through Wikidata's Mérimée ID (P380). Keep GPS from the photo metadata where present | ≥ 300 queries | Right building in top 10 | ≥ 60% |
+| T3 Room photos | 15 Jeu de Paume room photos (Rose Valland `JDP-*`) and the 231 paintings that link to them through `RENV`. Hand-drawn boxes for each painting are the reference. Detectors are scored against them | 231 queries | Right record in top 5 | ≥ 70% |
+| T4 Details | Rose Valland `detail` images, with the record's other images left in the index | up to 1,000 queries | Right record in top 10 | Report |
+| T5 Objects, other view | Joconde records with 2+ images: one view is the query | 1,000 queries | Right record in top 10 | Report |
+| T6 Words, by hand | 50 French descriptions written by hand, judged by hand | 50 queries | Relevant record in top 10 | Report |
+| T7 Words, generated | For a hidden image, a vision model writes the short French description a member of the public might type. The answer is that image's record. The writer must come from a different model family than the option being scored | 1,000 queries | Right record in top 10 | Report |
+| T8 Not found | Queries from T1, T2 and T5 whose whole entity has been removed from the index | 500 queries | Wrong-but-confident rate at the chosen cut-off | < 5% |
+| T9 Public benchmarks | AmsterTime (modern vs archive street photos) and Met (museum art) | as published | As in the published papers | Within 2 points of published scores, as a harness check |
 
 ## 8. Website
 
@@ -224,13 +223,13 @@ E2 is the most important set and the riskiest. Commons photos are recent, in col
 
 - **What we log:** each search's query (image hash, box, text, filters), returned refs and timing. Query images are stored only for logged-in testers who agreed in writing.
 - **Deletion:** test photos and logs are deleted at the end of the PoC.
-- **Third parties:** query images never leave our machines. Only `publishable` collection images go to OpenRouter.
+- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. Testers' photos stay on our machines unless the rule in §4 applies.
 
 ## 10. Repository layout
 
 ```
 miroir/
-  docs/            functional-spec.md, technical-spec.md
+  docs/            functional-spec.md, technical-spec.md, experiments.md, results.md
   pipeline/        mappers/, fetch.py, embed.py, tile.py, caption.py, index.py
   api/             FastAPI app
   web/             SvelteKit app
@@ -253,4 +252,4 @@ Data and images live outside the repository. Set their location with `MIROIR_DAT
 
 1. Which POP bases does the full export contain, and how many images? Answered when the export arrives (week 4).
 2. Is the POP asset bucket fast enough to download millions of images, or do we need a bulk copy from the POP team?
-3. Does fp16 or byte encoding of tile vectors cost too much accuracy on E4?
+3. Does fp16 or byte encoding of tile vectors cost too much accuracy on T4?
