@@ -7,7 +7,8 @@ bills, since the clock also runs while the call travels. The cost goes into the 
 ledger, tagged `modal`, even when the call fails. Before every call, total spend plus the
 call's worst case (its timeout at full price) must stay inside the usable budget. A gallery
 run needs a 100-image probe of the same model and size on file, and stops once it costs
-`OVERRUN_FACTOR` times its projection.
+`OVERRUN_FACTOR` times its projection. Each answer is saved to a checkpoint as it arrives,
+so a stopped run resumes without paying twice.
 
 Privacy (technical spec §9): Modal is an outside service, so only images of `publishable`
 records go there; a gallery with any other image is refused.
@@ -34,6 +35,7 @@ from miroir.config import SEED, Settings
 from miroir.eval import amstertime
 from miroir.eval.sets import read_gallery
 from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
+from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_spec import (
     CHUNK_IMAGES,
     CHUNK_TIMEOUT_S,
@@ -209,6 +211,9 @@ class ModalRunner:
         out = self.settings.vectors_path(run)
         _refuse_existing(out)
         ids = self._gallery(gallery)
+        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
+        held = set(checkpoint.ids)
+        todo = [i for i in ids if i not in held]
         projected = check_run(
             self.budget,
             self.ledger,
@@ -217,18 +222,21 @@ class ModalRunner:
             option=opt.id,
             model=opt.model,
             resolution=opt.resolution,
-            count=len(ids),
+            count=len(todo),
         )
         limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
         logger.info(
-            "%s: %d images, about $%.2f (stops past $%.2f)", run, len(ids), projected, limit
+            "%s: %d images to send (%d saved before), about $%.2f (stops past $%.2f)",
+            run,
+            len(todo),
+            len(held),
+            projected,
+            limit,
         )
         start = self._clock()
-        done_ids: list[str] = []
-        rows: list[NDArray[np.float16]] = []
         skips: dict[str, int] = {}
         cost = 0.0
-        for chunk in _chunks(ids):
+        for chunk in _chunks(todo):
             paid = self._paid(
                 lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
                 machine=L4,
@@ -241,18 +249,22 @@ class ModalRunner:
             )
             cost += paid.cost_usd
             _check_chunk(paid.result, opt)
-            done_ids.extend(paid.result.ids)
-            rows.append(_unit_float16(paid.result.vectors))
+            if paid.result.ids:
+                checkpoint.append(list(paid.result.ids), _unit_float16(paid.result.vectors))
             for reason, n in paid.result.skips.items():
                 skips[reason] = skips.get(reason, 0) + n
-            logger.info("%s: %d/%d images, $%.4f", run, len(done_ids), len(ids), cost)
+            logger.info("%s: %d/%d images, $%.4f", run, len(checkpoint.ids), len(ids), cost)
             if cost > limit:
                 msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
                 raise BudgetError(msg)
+        # Cost of the whole run, including the sessions before a resume.
+        total = self.ledger.total(SpendKind.RUN, run=run)
         info = self._info(
-            opt, gallery=gallery, machine=L4, cost=cost, wall=self._clock() - start, skips=skips
+            opt, gallery=gallery, machine=L4, cost=total, wall=self._clock() - start, skips=skips
         )
-        return write_vectors(out, done_ids, np.concatenate(rows), info)
+        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
+        checkpoint.remove()
+        return written
 
     def r0(self, name: str) -> VectorSet:
         """Round R0: download AmsterTime into a Modal volume, embed all 2,462 images there."""

@@ -12,6 +12,7 @@ from miroir.config import Settings
 from miroir.eval import amstertime
 from miroir.eval.sets import write_gallery
 from miroir.eval.vectors import Route, read_vectors
+from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_run import ModalRunner, load_modal_probe, run_name
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
@@ -192,3 +193,19 @@ def test_r0_options_follow_the_dinov3_paper() -> None:
     for opt in R0_OPTIONS.values():
         assert (opt.resolution, opt.pooling) == (224, "cls")
     assert R0_OPTIONS["dinov3-vit7b16-224"].gated
+
+
+def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    r, calls = runner(built)
+    r.probe(GEMMA, "g")
+    run = run_name(OPTIONS[GEMMA], "g")
+    first = sorted(ids)[:2]
+    saved = np.ones((2, 8), dtype=np.float16) / np.sqrt(8)
+    Checkpoint(built.checkpoint_path(run)).append(first, saved)
+
+    done = r.embed_gallery(GEMMA, "g")
+    assert calls.calls[-1] == (GEMMA, len(ids) - 2)
+    assert set(done.ids) == set(ids)
+    assert not built.checkpoint_path(run).exists()
