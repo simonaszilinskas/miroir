@@ -22,7 +22,16 @@ What we learned:
 - Our guess on direction was wrong: "all" is not nearest, it sits 2.2 below. Street-view queries searching the archive do score lowest, as guessed, by 8 points.
 - "all" equals the DINOv2 paper's own ViT-g figure (46.7). That may be the protocol behind the two papers' 2.2-point gap.
 
-DINOv3 7B: not run. The code is ready (`uv run miroir r0 run --model dinov3-vit7b16-224`), but the weights are gated and Meta has not yet approved access.
+DINOv3 ViT-7B/16 on Modal (L4, bf16), run `R0-dinov3-vit7b16-224-amstertime`, $0.18:
+
+| Direction | Queries | mAP | Hit@1 | vs 56.5 |
+|---|---|---|---|---|
+| new: street view → archive | 1,231 | **57.1** [54.7, 59.3] | 44.8 | +0.6, within 2: **pass** |
+| all: both pooled | 2,462 | 59.0 [57.4, 60.6] | 47.1 | +2.5 |
+| old: archive → street view | 1,231 | 61.0 [58.5, 63.4] | 49.3 | +4.5 |
+
+- Both checks pass, but not in the same direction: DINOv2 matches its figure on archive queries, DINOv3 on street-view queries. So the paper's direction stays unknown, and a 2-point bar on one direction is looser than it looks. The harness itself (preprocessing, cosine, AP cut at 128) is not in doubt: both models land within 2 points in some direction, with the expected 8–12-point gap between them.
+- DINOv3 7B beats DINOv2 g by 12–14 points in every direction, as the paper reports. It ran in bf16, not float32; that may move scores by a fraction of a point.
 
 ## R1: image models alone (step A)
 
@@ -72,13 +81,19 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 
 | Round | Set | Half | Gallery | Run | Model | Px | Pooling | Queries | Hit@1 | Hit@5 | Hit@10 | mAP |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | amstertime-all | all | amstertime | A-dinov3-vit7b16-224 | facebook/dinov3-vit7b16-pretrain-lvd1689m | 224 | cls | 2,462 | 47.1 [45.1, 49.1] | 73.6 [71.9, 75.4] | 81.1 [79.5, 82.5] | 59.0 [57.4, 60.6] |
 | R0 | amstertime-all | all | amstertime | A-dinov2-giant-224 | facebook/dinov2-giant | 224 | cls | 2,462 | 36.6 [34.7, 38.4] | 58.0 [56.2, 59.9] | 65.6 [63.9, 67.4] | 46.7 [45.0, 48.4] |
+| R0 | amstertime-new | all | amstertime | A-dinov3-vit7b16-224 | facebook/dinov3-vit7b16-pretrain-lvd1689m | 224 | cls | 1,231 | 44.8 [42.0, 47.7] | 72.2 [69.6, 74.8] | 80.0 [77.6, 82.3] | 57.1 [54.7, 59.3] |
 | R0 | amstertime-new | all | amstertime | A-dinov2-giant-224 | facebook/dinov2-giant | 224 | cls | 1,231 | 32.7 [30.0, 35.4] | 53.9 [51.0, 56.8] | 61.3 [58.5, 64.0] | 42.7 [40.2, 45.1] |
+| R0 | amstertime-old | all | amstertime | A-dinov3-vit7b16-224 | facebook/dinov3-vit7b16-pretrain-lvd1689m | 224 | cls | 1,231 | 49.3 [46.3, 52.2] | 75.1 [72.5, 77.5] | 82.1 [79.9, 84.2] | 61.0 [58.5, 63.4] |
 | R0 | amstertime-old | all | amstertime | A-dinov2-giant-224 | facebook/dinov2-giant | 224 | cls | 1,231 | 40.4 [37.6, 43.1] | 62.1 [59.5, 64.8] | 70.0 [67.6, 72.5] | 50.7 [48.4, 53.3] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A9 | google/gemini-embedding-2 | 512 | api | 138 | 33.3 [26.1, 40.6] | 45.7 [37.7, 53.6] | 51.4 [44.2, 59.4] | 38.9 [32.1, 46.0] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 138 | 29.7 [22.5, 37.7] | 35.5 [28.3, 43.5] | 40.6 [33.3, 49.3] | 33.6 [26.8, 41.4] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 138 | 23.2 [16.7, 29.7] | 32.6 [25.4, 40.6] | 35.5 [28.3, 43.5] | 27.1 [20.8, 33.9] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A9 | google/gemini-embedding-2 | 512 | api | 99 | 54.5 [44.4, 64.6] | 77.8 [69.7, 85.9] | 83.8 [75.8, 90.9] | 65.2 [57.4, 73.6] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 99 | 45.5 [35.4, 54.6] | 68.7 [59.6, 76.8] | 79.8 [70.7, 87.9] | 55.7 [47.6, 63.9] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 99 | 28.3 [20.2, 37.4] | 54.5 [45.5, 64.6] | 64.6 [55.6, 74.7] | 40.2 [32.7, 48.5] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A9 | google/gemini-embedding-2 | 512 | api | 443 | 34.8 [30.5, 39.1] | 47.0 [42.2, 51.2] | 51.2 [46.3, 55.5] | 41.0 [36.9, 45.1] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 443 | 30.7 [26.4, 34.8] | 44.2 [39.1, 49.0] | 49.7 [44.9, 54.2] | 37.5 [33.2, 41.3] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 443 | 32.1 [27.5, 36.6] | 40.6 [35.9, 45.1] | 43.6 [38.8, 48.1] | 36.5 [32.3, 40.7] |
 <!-- summary:end -->
