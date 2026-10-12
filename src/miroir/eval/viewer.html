@@ -170,7 +170,8 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 @media (max-width: 760px) {
   .card-body { grid-template-columns: minmax(0, 1fr); }
   .ref { border-right: 0; border-bottom: 1px solid var(--rule); }
-  .row { grid-template-columns: 112px auto; }
+  .row { grid-template-columns: auto; gap: 8px; }
+  .row-name { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   :root { --tile: 112px; }
   .count { margin-left: 0; width: 100%; }
 }
@@ -179,13 +180,13 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 
 <div class="page">
   <header class="intro">
-    <div class="eyebrow">MIROIR · visual search over POP records</div>
+    <div class="eyebrow">MIROIR &#xb7; visual search over POP records</div>
     <h1>Miroir Match Viewer</h1>
     <p id="about"></p>
     <ul class="models" id="models"></ul>
     <div class="legend" aria-label="Legend">
-      <span><span class="dot r" aria-hidden="true">✓</span>Right record (thick border)</span>
-      <span><span class="dot w" aria-hidden="true">✗</span>Wrong record (dashed border)</span>
+      <span><span class="dot r" aria-hidden="true">&#x2713;</span>Right record (thick border)</span>
+      <span><span class="dot w" aria-hidden="true">&#x2717;</span>Wrong record (dashed border)</span>
       <span>Similarity is cosine, 0 to 1.</span>
     </div>
   </header>
@@ -212,7 +213,7 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
     T5: "Query: one view of a museum object. Right: another view of the same object.",
     T3: "Query: one crop of an artwork from a Jeu de Paume room photo. Right: another crop of the same artwork."
   };
-  var COLLECTIONS = { joconde: "Joconde", memoire: "Mémoire", "rose-valland": "Rose Valland" };
+  var COLLECTIONS = { joconde: "Joconde", memoire: "M\u00e9moire", "rose-valland": "Rose Valland" };
   var state = { set: "all", disagree: false, misses: false };
 
   function esc(s) {
@@ -225,9 +226,9 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 
   function verdict(rank) {
     if (rank === null) return '<span class="verdict miss">No answer in gallery</span>';
-    if (rank === 1) return '<span class="verdict top1">✓ Right at 1</span>';
-    if (rank <= 5) return '<span class="verdict top5">✓ Right at ' + rank + "</span>";
-    return '<span class="verdict miss">✗ Right one at ' + rank.toLocaleString("en") + "</span>";
+    if (rank === 1) return '<span class="verdict top1">\u2713 Right at 1</span>';
+    if (rank <= 5) return '<span class="verdict top5">\u2713 Right at ' + rank + "</span>";
+    return '<span class="verdict miss">\u2717 Not in top 5 \u00b7 rank ' + rank.toLocaleString("en") + "</span>";
   }
 
   function frame(image, extra) {
@@ -240,7 +241,7 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 
   function meta(r) {
     return '<div class="meta"><span>' + esc(COLLECTIONS[r.collection] || r.collection) + "</span>" +
-      '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">POP ↗</a></div>';
+      '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">POP \u2197</a></div>';
   }
 
   function refTile(label, r) {
@@ -251,13 +252,13 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
 
   function hitTile(h, i) {
     var cls = h.right ? "right" : "wrong";
-    var badge = '<span class="badge" role="img" aria-label="' + (h.right ? "Right" : "Wrong") + '">' + (h.right ? "✓" : "✗") + "</span>";
+    var badge = '<span class="badge" role="img" aria-label="' + (h.right ? "Right" : "Wrong") + '">' + (h.right ? "\u2713" : "\u2717") + "</span>";
     var rank = '<span class="rank">' + (i + 1) + "</span>";
     return '<li class="tile ' + cls + '">' + frame(h.image, rank + badge) +
       '<div class="t" title="' + esc(h.title) + '">' + esc(h.title) + "</div>" +
       '<div class="meta"><span class="sim">' + h.similarity.toFixed(3) + "</span><span>" +
       esc(COLLECTIONS[h.collection] || h.collection) + '</span><a href="' + esc(h.url) +
-      '" target="_blank" rel="noopener">POP ↗</a></div></li>';
+      '" target="_blank" rel="noopener">POP \u2197</a></div></li>';
   }
 
   function metricCell(t) {
@@ -265,7 +266,7 @@ table.scores { border-collapse: collapse; min-width: 560px; width: 100%; backgro
     return '<td><div class="metric"><span class="v">' + pct(v) + '</span>' +
       '<span class="range" aria-hidden="true"><i style="left:' + (100 * lo) + "%;width:" + (100 * (hi - lo)) + '%"></i>' +
       '<b style="left:calc(' + (100 * v) + '% - 1px)"></b></span>' +
-      '<span class="ci">95% CI ' + (100 * lo).toFixed(1) + "–" + (100 * hi).toFixed(1) + "</span></div></td>";
+      '<span class="ci">95% CI ' + (100 * lo).toFixed(1) + "\u2013" + (100 * hi).toFixed(1) + "</span></div></td>";
   }
 
   function scoreTable(set) {

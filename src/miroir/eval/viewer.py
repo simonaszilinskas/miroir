@@ -595,7 +595,7 @@ def _data_uri(data: bytes, side: int, quality: int) -> str:
 def render(page: PageData) -> str:
     """Fill the template with the page data. `<` is escaped so the JSON cannot close its tag."""
     template = files("miroir.eval").joinpath(_TEMPLATE).read_text(encoding="utf-8")
-    payload = json.dumps(asdict(page), ensure_ascii=False, separators=(",", ":"))
+    payload = json.dumps(asdict(page), ensure_ascii=True, separators=(",", ":"))
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     if template.count(_DATA_MARK) != 1:
         msg = f"{_TEMPLATE} must hold {_DATA_MARK} exactly once"

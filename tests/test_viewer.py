@@ -126,6 +126,7 @@ def test_page_shows_each_model_top_five_on_publishable_queries(
     assert page.startswith("<title>Miroir Match Viewer</title>\n<style>")
     assert not re.search(r"<(!doctype|html|head|body|link)[\s>]", page, re.IGNORECASE)
     assert "http://" not in page
+    assert page.isascii()  # no charset trouble, whatever the host declares
     payload = _payload(page)
     public = {i.image_id for r in data if r.publishable for i in r.images}
     assert fetch.asked
