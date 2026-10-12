@@ -242,10 +242,16 @@ def score_amstertime(
     )
 
 
-def compare(a: Path, b: Path, *, test_set: str, half: str, gallery: str) -> tuple[Difference, ...]:
-    """Paired bootstrap of run a minus run b on the same queries."""
+def compare(
+    a: Path, b: Path, *, test_set: str, half: str, gallery: str, gallery_b: str | None = None
+) -> tuple[Difference, ...]:
+    """Paired bootstrap of run a minus run b on the same queries.
+
+    `gallery_b` names run b's gallery when it differs from a's, e.g. a gallery with F2
+    photos against the same gallery without them.
+    """
     score_a = find_set_score(read_result(a), test_set, half, gallery)
-    score_b = find_set_score(read_result(b), test_set, half, gallery)
+    score_b = find_set_score(read_result(b), test_set, half, gallery_b or gallery)
     return paired_bootstrap(score_a.per_query, score_b.per_query)
 
 

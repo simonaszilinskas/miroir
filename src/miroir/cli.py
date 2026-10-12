@@ -226,11 +226,14 @@ def eval_compare(
     test_set: Annotated[str, typer.Option("--set")],
     half: Annotated[str, typer.Option()] = "tune",
     gallery: Annotated[str, typer.Option()] = "screening-20k",
+    gallery_b: Annotated[
+        str | None, typer.Option(help="Gallery of run b when it differs (F2 adds images).")
+    ] = None,
 ) -> None:
     """Paired bootstrap: is a better than b on the same queries, beyond the error bar?"""
     from miroir.eval.run import compare  # noqa: PLC0415
 
-    for d in compare(a, b, test_set=test_set, half=half, gallery=gallery):
+    for d in compare(a, b, test_set=test_set, half=half, gallery=gallery, gallery_b=gallery_b):
         verdict = "a wins" if d.diff.low > 0 else "b wins" if d.diff.high < 0 else "tie"
         typer.echo(
             f"{d.metric:7} a {100 * d.a:5.1f}  b {100 * d.b:5.1f}  a-b {100 * d.diff.value:+5.1f} "

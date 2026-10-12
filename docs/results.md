@@ -398,6 +398,98 @@ Proposed filters for the T2 builder (the sets are unchanged here). Shares are of
 - No word rule catches the goose: its title, "Branta canadensis Plessis", names the place. One such photo in 70 is noise we can live with.
 - T2b needs no label filter. Its coin and sarcophagus views are hard but right; report them, do not drop them.
 
+## R2: phone photos of buildings (G5, F2, F1)
+
+T2, a visitor's colour photo of a building, sits far below its 60% target, and the router of G4 sends every building photo to EmbeddingGemma 2 (A7), the archive-print winner. Three cheap fixes, in order of cost. Gallery `screening-v2-publishable-fetched` (21,785 images) unless named; tune halves; queries a closed model may see (T1 138, T2 516, T3 99, T5 443). The label check above found T2's labels 96% right, so the gap is real.
+
+### G5: three buckets, archive building, colour building, object (2026-10-12)
+
+Expected (written before the run): T2 photos are buildings, so G4 gives them A7 weight 0.9 and loses to MegaLoc (A3) alone. A third bucket for colour building photos should take a low A7 weight, lift T2 to A3's level or a little above, and leave T1, T3 and T5 as they are.
+
+Method. `miroir eval route3` (technical spec §7.2). A building photo (G4's guess, p > 0.5) is an archive building when its chroma spread, the standard deviation of Cb and Cr over the pixels at 128 px, is under 2; else a colour building. No model: Mémoire prints are stored grey and score 0; 1% of T2 photos score under 3. One A7 weight per bucket (A3 takes the rest; min-max weighted sum, hard switch), picked from the 0–1 grid by mean hit@10 over T1, T2, T3 and T5 together. Each set is ranked once per grid weight, so G1, G4 and G5 are all read from the same rankings. The guess leaves out T2 tune buildings too.
+
+Buckets found: T1 136 archive, 2 object; T3 and T5 all object; **T2 2 archive, 209 colour building, 305 object**. The building-or-object guess, trained on grey Mémoire buildings and mostly colour museum objects, calls 59% of phone photos of buildings objects: it partly learned colour.
+
+Hit@10, 95% interval in brackets:
+
+| Run | A7 weight: archive / colour / object | T1 | T2 | T3 | T5 | Mean |
+|---|---|---|---|---|---|---|
+| **G5-router3-A7+A3** | 1.0 / 0.4 / 0.2 | **50.7** [43.5, 58.7] | **32.4** [28.7, 36.4] | 89.9 [83.8, 96.0] | 61.2 [56.4, 65.7] | **58.6** |
+| G4 (picked on the same four sets) | 0.9 / 0.9 / 0.2 | **50.7** | 28.5 [24.8, 32.6] | 89.9 | 61.2 | 57.6 |
+| G1 | 0.6 for all | 41.3 | 32.0 | **90.9** | 56.4 | 55.2 |
+| A3 alone | | 28.3 | 31.0 [27.3, 35.1] | 85.9 | **62.1** | 51.8 |
+| A7 alone | | 50.0 | 21.9 | 84.8 | 47.9 | 51.2 |
+
+The G4 grid picks its old weights (0.9 / 0.2) again with T2 added. Paired bootstrap, hit@10, G5 minus:
+
+| Set | G4 | Best single model |
+|---|---|---|
+| T1 | 0.0 [−2.2, +2.2] | A7: +0.7 [0.0, +2.2] |
+| T2 | **+3.9** [+2.1, +6.0] | A3: **+1.4** [+0.4, +2.5] |
+| T3 | 0.0 | A3: **+4.0** [+1.0, +9.1] |
+| T5 | 0.0 | A3: −0.9 [−3.2, +1.1] |
+
+Split-half check (weights picked on half the buildings and objects, scored on the other half): G5 T1 50.0, T2 31.8, T3 89.9, T5 60.5; G4 48.6, 29.7, 89.9, 60.5; G1 42.8, 31.8, 89.9, 55.3. T2 exterior photos (346): G5 34.4, A3 32.7, A7 24.0.
+
+What we learned:
+
+- The guess held in direction, not in size: a colour bucket fixes G4's T2 loss (+3.9 points) at no cost on T1, T3 or T5, and G5 now matches or beats the best single model on every set. But T2 only edges past A3 alone (+1.4): routing cannot make a phone photo easier, only stop sending it to the wrong model.
+- The grid gives colour buildings A7 0.4 and objects 0.2, so 514 of 516 T2 photos lean on MegaLoc either way. Whether the guess calls a phone photo a building or an object matters little here; it would matter for a mixed stack where objects should get a different model.
+- For the prototype: route on colour first. A grey photo of a building goes to A7 alone; anything in colour gets A7 0.2–0.4 and A3 the rest.
+
+### F1: grey query photos, then grey everything (2026-10-13)
+
+Expected (written before the run): Mémoire prints are grey, phone photos are colour; greying the query should help T2 a little, more for A7 (trained on colour pairs) than for A3. T1 should not move: its queries and answers are already grey.
+
+Method. `miroir embed modal-grey` turns every image with colour (any pixel's R, G or B more than 1 level from its luma on average) grey with Pillow on the Mac and sends the bytes to Modal: 5,162 of 22,302 images (gallery plus T1 and T2 tune queries), $0.27 for both models. Images already grey keep their vectors: greying them changes no pixel beyond JPEG noise. Query only: grey query vectors against the usual gallery (`F-F1-query-*`). Both: the gallery's colour images greyed too (`F-F1-both-*`). Baselines `F-base-A7-v2`, `F-base-A3-v2` are the same models on the same gallery and queries. Hit@10, paired difference with the baseline:
+
+| Run | T1 | T2 | T5 (side check) |
+|---|---|---|---|
+| A3, grey query | 28.3; 0.0 | **32.9; +1.9** [+0.4, +3.7] | 55.3; −6.8 |
+| A3, grey query and gallery | 28.3; 0.0 | 32.4; +1.4 [−0.2, +3.1] | 58.0; −4.1 |
+| A7, grey query | 50.0; 0.0 | 20.5; −1.4 [−2.7, 0.0] | 40.0; −7.9 |
+| A7, grey query and gallery | 49.3; −0.7 [−2.2, 0.0] | 20.2; −1.7 [−3.3, −0.4] | 44.5; −3.4 |
+
+What we learned:
+
+- Our guess was half wrong. Grey queries help MegaLoc a little on T2 (+1.9, just beyond the error bar) and hurt EmbeddingGemma 2; colour is not what keeps A7 from finding buildings in phone photos.
+- T1 does not move, as expected: its queries and answers are grey already.
+- Greying museum objects costs T5 4–8 points: colour tells objects apart. If used at all, grey only a colour building photo's MegaLoc query, never the gallery. The gain is too small to be worth a second pass in the prototype.
+
+### F2: Commons photos as gallery images of each building (2026-10-13)
+
+Expected (written before the run): a phone photo is closer to another visitor's colour photo of the same building than to a 1950s print. Adding a few Commons photos per building should lift T2 by several points, most with MegaLoc, and leave T1 and T5 alone (their queries are grey prints and museum objects).
+
+Method. `miroir testsets commons-gallery --gallery screening-v2-publishable-fetched` takes each Mérimée building of the gallery (1,840; 1,495 with one unambiguous Wikidata item), reads its P18 file and the 50 newest files of its Commons category, keeps those that pass T2's photo rules plus filters A and B of the label check (category files only), puts exteriors and new visits first, and keeps up to 5. Left out so no test query reaches the gallery: every T2, T2b and T8c photo, tune and sealed (1,107 files), any file within 12 bits of one by perceptual hash (48), any file by the author and day of a query photo of the same building (1,812), and any file within 12 bits of a POP image of the same building (none). Result: **4,588 photos for 1,208 buildings**, read as 500 px copies; 5,809 requests to Wikimedia at about 1.4 a second (70 minutes). Each counts as an image of its building (`commons-gallery-*.parquet`, gallery `screening-v2-publishable-fetched+F2`, 26,373 images). Embedded on Modal: A3 $0.11, A7 $0.15. Same queries as above.
+
+Hit@10, paired difference with the same run without F2 photos:
+
+| Run | T1 | T2 | T2 exterior (346) | T3 | T5 |
+|---|---|---|---|---|---|
+| A3 + F2 | 28.3; 0.0 | **40.5; +9.5** [+5.8, +13.0] | 42.8 (was 32.7) | | 62.1; 0.0 |
+| A7 + F2 | 50.0; 0.0 | 21.9; 0.0 [−4.5, +4.3] | 23.1 (was 24.0) | | 47.9; 0.0 |
+| **G5 + F2**, weights re-picked (1.0 / 0.0 / 0.2) | **50.7**; 0.0 | **40.5; +8.1** [+4.7, +11.8] | 42.8 (was 34.4) | 89.9 | 61.2; 0.0 |
+| G5 + F2, weights of G5 above (1.0 / 0.4 / 0.2) | 50.7; 0.0 | 38.4; +6.0 [+2.5, +10.1] | | 89.9 | 61.2; 0.0 |
+
+With F2 the grid sends colour buildings to MegaLoc alone (A7 weight 0.0). Split-half: G5 T1 50.0, T2 40.3, T3 89.9, T5 60.5.
+
+The gain sits where the photos are. Only 80 of the 193 T2 tune buildings got F2 photos: the T2 builder had already taken their best Commons files, and other frames of those visits are left out. On the 239 queries of those 80 buildings, G5 hit@10 goes **from 30.5 to 58.6**; on the 277 others it falls from 33.9 to 24.9, since 4,588 colour photos of other buildings now compete with their grey answers.
+
+T8c, against T2 and T2b tune on the F2 gallery (R1 numbers without F2 in brackets):
+
+| Run | Wrong but confident, cut-off at 50% matched | Matched, cut-off at 5% wrong |
+|---|---|---|
+| A3 + F2 | 26.7 [17.3, 34.7] (40.0) | 35.4 [29.5, 40.1] (21.5) |
+| A7 + F2 | 11.3 [6.0, 16.7] (36.0) | 31.5 [26.3, 43.1] (19.6) |
+
+What we learned:
+
+- F2 is the largest T2 gain so far: +9.5 points for MegaLoc, +8.1 for G5, beyond the error bar, at no cost on T1, T3 or T5. A building with Commons photos is found from a phone photo 59% of the time, at the 60% target.
+- A building without them loses ground, because the gallery's colour photos all belong to others. So F2 must cover every building, not some: in the full index, give every Mérimée building its Commons photos.
+- EmbeddingGemma 2 gains nothing: it ranks colour photos of the wrong building above the right one (F2 photos sit close together in its space, mean cosine 0.72 against 0.04 for MegaLoc). Phone photos of buildings belong to MegaLoc.
+- "Not found" improves for both models: right answers now match a near-identical colour photo, so their confidences rise above those of photos with no answer.
+- Full sample: 3,924 buildings, about 13,000 requests, about 2.6 hours at the pace measured here (0.9 hours at the 4-a-second cap) and about 9,800 photos; embedding them with A3 and A7 costs about $0.60.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -514,12 +606,44 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 28.3 [21.0, 35.5] | 34.8 [27.5, 42.8] | 44.2 [36.9, 52.2] | 33.3 [26.6, 40.1] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 138 | 25.4 [18.8, 32.6] | 37.7 [30.4, 45.7] | 46.4 [38.4, 53.6] | 32.1 [25.6, 39.0] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 138 | 23.2 [16.7, 30.4] | 34.1 [26.8, 42.0] | 44.9 [37.0, 52.9] | 29.6 [23.6, 36.2] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca1024 | gmberton/MegaLoc | 322 | salad | 138 | 21.0 [15.2, 27.5] | 27.5 [20.3, 35.5] | 31.2 [23.2, 38.4] | 24.7 [18.7, 31.2] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 138 | 21.0 [14.5, 27.5] | 26.8 [20.3, 34.8] | 29.7 [22.5, 37.7] | 24.3 [18.1, 30.7] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-inliers | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 138 | 20.3 [13.8, 26.8] | 26.1 [19.6, 33.3] | 29.0 [22.5, 37.0] | 23.7 [17.4, 30.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-dims8448 | gmberton/MegaLoc | 322 | salad | 138 | 20.3 [14.5, 26.8] | 26.1 [18.8, 33.3] | 29.7 [22.5, 37.0] | 23.3 [17.3, 30.0] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 138 | 20.3 [14.5, 26.8] | 23.9 [17.4, 31.2] | 27.5 [20.3, 34.8] | 22.7 [16.7, 29.3] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca512 | gmberton/MegaLoc | 322 | salad | 138 | 17.4 [11.6, 23.9] | 27.5 [21.0, 35.5] | 30.4 [23.2, 38.4] | 22.3 [16.4, 28.6] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 138 | 15.2 [9.4, 21.0] | 23.9 [17.4, 31.2] | 25.4 [18.1, 32.6] | 19.5 [14.0, 25.4] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-query-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.1] | 50.0 [42.8, 58.0] | 41.9 [35.0, 49.1] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-base-A7-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.1] | 50.0 [42.8, 58.0] | 41.9 [35.0, 49.1] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-both-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.1] | 49.3 [42.0, 57.2] | 41.8 [35.0, 49.1] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-query-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-base-A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
+| R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-both-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.1] | 50.0 [42.8, 58.0] | 41.9 [35.0, 49.1] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.6] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.2 [20.7, 28.1] | 29.3 [25.8, 33.3] | 32.4 [28.7, 36.4] | 27.1 [23.7, 30.8] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-query-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.2 [20.7, 28.1] | 28.9 [25.2, 32.9] | 32.9 [29.1, 37.0] | 26.9 [23.5, 30.6] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-both-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.0 [20.5, 27.9] | 28.7 [25.0, 32.8] | 32.4 [28.7, 36.6] | 26.7 [23.3, 30.4] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | A-A3-megaloc-322-dims8448-T2 | gmberton/MegaLoc | 322 | salad | 516 | 23.8 [20.5, 27.7] | 28.9 [25.4, 32.9] | 31.0 [27.3, 35.1] | 26.6 [23.2, 30.3] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-base-A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 23.8 [20.5, 27.7] | 28.9 [25.4, 32.9] | 31.0 [27.3, 35.1] | 26.6 [23.2, 30.3] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | G-G1-A7+A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 20.5 [17.4, 24.4] | 26.9 [23.4, 30.8] | 31.2 [27.5, 35.5] | 24.1 [21.1, 27.8] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-base-A7-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 9.1 [6.8, 11.8] | 18.2 [15.1, 21.7] | 21.9 [18.4, 25.6] | 13.6 [11.3, 16.4] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-query-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 8.7 [6.6, 11.2] | 17.6 [14.7, 21.1] | 20.5 [17.1, 24.0] | 13.1 [10.8, 15.8] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-both-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 8.3 [6.2, 10.9] | 17.4 [14.5, 20.9] | 20.2 [16.7, 23.6] | 12.7 [10.4, 15.4] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | A-A3-megaloc-322-pca1024-T2 | gmberton/MegaLoc | 322 | salad | 516 | 9.3 [7.0, 11.8] | 12.4 [9.7, 15.3] | 13.2 [10.3, 16.1] | 10.6 [8.2, 13.2] |
+| R2 | T2 | tune | screening-v2-publishable-fetched | A-A3-megaloc-322-pca512-T2 | gmberton/MegaLoc | 322 | salad | 516 | 4.1 [2.5, 5.6] | 7.0 [4.8, 9.1] | 7.9 [5.8, 10.3] | 5.5 [3.8, 7.2] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.6 [28.1, 35.7] | 38.0 [34.1, 42.2] | 40.5 [36.6, 45.0] | 34.9 [31.4, 39.0] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | gmberton/MegaLoc | 322 | salad | 516 | 31.6 [28.1, 35.7] | 38.0 [34.1, 42.2] | 40.5 [36.6, 45.0] | 34.9 [31.4, 39.0] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.2 [27.7, 35.3] | 38.6 [34.7, 42.8] | 40.5 [36.6, 45.0] | 34.6 [31.2, 38.6] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 29.8 [26.4, 33.7] | 37.0 [33.1, 41.5] | 38.4 [34.7, 42.6] | 33.1 [29.6, 36.9] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 14.3 [11.4, 17.4] | 19.4 [16.1, 22.9] | 21.9 [18.4, 25.6] | 17.1 [14.2, 20.1] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | google/embeddinggemma-2 | 512 | head | 516 | 14.3 [11.4, 17.4] | 19.4 [16.1, 22.9] | 21.9 [18.4, 25.6] | 17.1 [14.2, 20.1] |
 | R2 | T2b | tune | screening-v2-publishable-fetched | G-G1-A7+A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 90.2 [85.2, 95.9] | 95.9 [91.8, 99.2] | 98.4 [95.9, 100.0] | 92.5 [88.3, 96.8] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | google/embeddinggemma-2 | 512 | head | 122 | 86.1 [79.5, 91.8] | 92.6 [87.7, 96.7] | 97.5 [94.3, 100.0] | 89.5 [84.7, 94.1] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | gmberton/MegaLoc | 322 | salad | 122 | 82.8 [75.4, 89.3] | 92.6 [87.7, 96.7] | 92.6 [87.7, 96.7] | 87.2 [81.9, 92.3] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 72.7 [63.6, 81.8] | 92.9 [87.9, 98.0] | 92.9 [87.9, 98.0] | 82.0 [75.6, 87.9] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 71.7 [62.6, 80.8] | 91.9 [85.9, 97.0] | 91.9 [85.9, 97.0] | 80.9 [74.1, 86.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 99 | 66.7 [57.6, 75.8] | 92.9 [87.9, 97.0] | 92.9 [87.9, 97.0] | 78.7 [72.0, 84.8] |
@@ -532,29 +656,38 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.5 [61.2, 76.2] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 99 | 57.6 [48.5, 67.7] | 83.8 [76.7, 90.9] | 85.9 [78.8, 91.9] | 68.4 [60.5, 76.8] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-dims8448 | gmberton/MegaLoc | 322 | salad | 99 | 55.6 [46.5, 65.7] | 83.8 [76.7, 90.9] | 85.9 [78.8, 91.9] | 67.5 [59.8, 75.6] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 80.8 [72.7, 88.9] | 89.9 [83.8, 96.0] | 67.2 [59.9, 75.3] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 80.8 [72.7, 88.9] | 88.9 [82.8, 94.9] | 67.1 [59.5, 75.5] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 79.8 [71.7, 87.9] | 84.8 [77.8, 91.9] | 66.6 [58.6, 74.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 99 | 51.5 [41.4, 61.6] | 80.8 [72.7, 87.9] | 88.9 [82.8, 94.9] | 64.1 [56.6, 72.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca1024 | gmberton/MegaLoc | 322 | salad | 99 | 52.5 [42.4, 62.6] | 80.8 [72.7, 88.9] | 85.9 [78.8, 92.9] | 64.0 [56.4, 72.1] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 50.5 [40.4, 60.6] | 82.8 [74.7, 89.9] | 84.8 [77.8, 91.9] | 63.8 [56.2, 71.5] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 99 | 52.5 [42.4, 62.6] | 76.8 [67.7, 84.8] | 84.8 [76.8, 91.9] | 63.7 [55.8, 72.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 99 | 51.5 [42.4, 61.6] | 74.7 [65.7, 83.8] | 78.8 [70.7, 86.9] | 63.1 [55.0, 71.6] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca512 | gmberton/MegaLoc | 322 | salad | 99 | 48.5 [39.4, 58.6] | 75.8 [66.7, 83.8] | 80.8 [72.7, 88.9] | 59.7 [51.9, 68.1] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 99 | 45.5 [35.4, 55.6] | 74.7 [65.7, 83.8] | 77.8 [69.7, 85.9] | 59.6 [51.7, 68.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 99 | 45.5 [36.4, 55.6] | 74.7 [65.7, 82.8] | 82.8 [74.7, 89.9] | 58.6 [50.9, 66.6] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 99 | 42.4 [33.3, 51.5] | 75.8 [67.7, 83.8] | 82.8 [74.7, 90.9] | 57.2 [49.7, 64.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 99 | 30.3 [21.2, 40.4] | 78.8 [70.7, 86.9] | 79.8 [71.7, 87.9] | 51.3 [44.7, 59.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 99 | 4.0 [1.0, 8.1] | 15.2 [9.1, 22.2] | 22.2 [14.1, 31.3] | 10.0 [6.2, 14.5] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 99 | 1.0 [0.0, 3.0] | 5.1 [1.0, 9.1] | 9.1 [4.0, 14.1] | 4.6 [2.2, 7.5] |
+| R2 | T3 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 443 | 44.7 [40.2, 49.2] | 56.7 [51.9, 61.2] | 63.2 [58.9, 67.5] | 51.1 [46.9, 55.4] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.4 [35.7, 44.7] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.3 [43.0, 51.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.4, 44.5] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.1 [42.8, 51.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.7, 44.7] | 54.4 [49.9, 58.9] | 60.5 [56.0, 64.8] | 47.1 [42.9, 50.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.5 [35.0, 44.0] | 53.7 [49.0, 58.2] | 62.1 [57.8, 66.6] | 46.9 [42.8, 51.1] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-dims8448 | gmberton/MegaLoc | 322 | salad | 443 | 39.5 [35.0, 44.0] | 53.7 [49.0, 58.2] | 62.5 [58.5, 67.0] | 46.7 [42.5, 50.8] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 443 | 38.4 [34.1, 42.7] | 51.7 [47.2, 56.2] | 56.9 [52.1, 61.4] | 45.1 [41.0, 49.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca1024 | gmberton/MegaLoc | 322 | salad | 443 | 37.5 [33.2, 42.0] | 51.2 [46.5, 55.5] | 57.3 [52.8, 61.6] | 44.2 [40.0, 48.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 37.9 [33.2, 42.4] | 49.9 [45.4, 54.4] | 54.9 [50.3, 59.1] | 43.8 [39.5, 47.8] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 443 | 37.9 [33.4, 42.4] | 47.9 [42.9, 52.4] | 50.3 [45.6, 54.6] | 42.8 [38.4, 47.0] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.5 [30.2, 38.8] | 50.3 [45.4, 54.9] | 55.8 [51.0, 60.3] | 42.3 [38.3, 46.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.7 [30.9, 40.0] | 47.6 [42.9, 52.2] | 52.8 [48.3, 57.3] | 41.9 [37.7, 46.0] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322-pca512 | gmberton/MegaLoc | 322 | salad | 443 | 35.4 [31.1, 39.5] | 47.2 [42.4, 51.7] | 54.4 [49.9, 59.1] | 41.6 [37.6, 45.5] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-inliers | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 443 | 35.2 [30.7, 39.7] | 47.2 [42.4, 51.7] | 54.0 [49.2, 58.5] | 41.5 [37.3, 45.6] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.8 [30.5, 39.1] | 47.6 [43.1, 52.1] | 51.9 [47.6, 56.7] | 41.1 [36.9, 45.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.0 [30.5, 39.3] | 46.3 [41.5, 51.0] | 52.6 [48.1, 57.1] | 41.0 [36.9, 45.2] |
@@ -570,6 +703,17 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 443 | 22.6 [18.7, 26.4] | 41.5 [36.8, 46.0] | 43.3 [38.6, 47.9] | 31.2 [27.4, 34.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 443 | 15.8 [12.4, 19.4] | 30.7 [26.4, 35.0] | 38.1 [33.6, 43.1] | 23.4 [20.0, 26.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 443 | 8.8 [6.1, 11.5] | 16.3 [12.9, 19.9] | 20.1 [16.7, 23.9] | 12.5 [9.6, 15.3] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.8 [42.5, 50.8] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-base-A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.1 [34.5, 43.6] | 53.7 [49.0, 58.2] | 62.1 [57.8, 66.6] | 46.4 [42.2, 50.5] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-both-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 38.8 [34.3, 43.3] | 49.9 [45.4, 54.2] | 58.0 [53.7, 62.3] | 44.9 [40.9, 49.2] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-query-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 36.1 [31.8, 40.4] | 47.9 [43.6, 52.6] | 55.3 [50.8, 60.0] | 42.4 [38.5, 46.5] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-base-A7-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 43.1 [38.4, 47.6] | 47.9 [43.1, 52.4] | 38.4 [34.4, 42.5] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-both-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 38.6 [33.9, 42.9] | 44.5 [39.7, 49.2] | 32.6 [28.5, 36.6] |
+| R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-query-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.2 [22.1, 30.7] | 35.4 [31.2, 40.2] | 40.0 [35.4, 44.5] | 31.3 [27.2, 35.3] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.7 [42.5, 50.8] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.7 [42.5, 50.8] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.1 [34.5, 43.6] | 53.5 [48.8, 58.0] | 62.1 [57.8, 66.6] | 46.3 [42.1, 50.4] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 43.1 [38.4, 47.6] | 47.9 [43.1, 52.4] | 38.4 [34.4, 42.5] |
 
 Not found (T8): confidence is the top entity's score. Lower is better for "wrong but confident", higher for "matched".
 
@@ -588,4 +732,6 @@ Not found (T8): confidence is the top entity's score. Lower is better for "wrong
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | T1 + T5 | 581 | 232 | 40.1 [31.5, 47.8] | 14.8 [9.0, 19.3] |
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | T1 + T5 | 581 | 232 | 42.2 [35.3, 50.4] | 14.8 [7.9, 20.0] |
 | R2 | T8c | tune | screening-v2-publishable-fetched | G-G1-A7+A3-v2 | T2 + T2b | 638 | 150 | 35.3 [27.3, 43.3] | 21.8 [16.9, 27.6] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | T2 + T2b | 638 | 150 | 11.3 [6.0, 16.7] | 31.5 [26.3, 43.1] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | T2 + T2b | 638 | 150 | 26.7 [17.3, 34.7] | 35.4 [29.5, 40.1] |
 <!-- summary:end -->
