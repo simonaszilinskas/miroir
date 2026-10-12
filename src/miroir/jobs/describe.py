@@ -30,7 +30,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 from miroir.config import SEED, Settings
 from miroir.eval.run import publishable_only
 from miroir.eval.sets import load_queries, read_gallery
-from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher
+from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher, iiif_url
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PublishableImages
 from miroir.jobs.spend import (
@@ -46,13 +46,14 @@ from miroir.jobs.spend import (
     save_probe,
 )
 from miroir.parallel import bounded_map
+from miroir.records.model import Image
 
 logger = logging.getLogger(__name__)
 
 #: Parallel requests on the standard endpoint.
 REQUEST_CONCURRENCY = 8
-#: Requests per Batch API call: a stopped run loses at most one batch.
-BATCH_SIZE = 50
+#: Requests per Batch API call. A batch can take several minutes whatever its size.
+BATCH_SIZE = 250
 MAX_TOKENS = 700
 #: A run stops if it costs this many times its projection.
 OVERRUN_FACTOR = 1.5
@@ -279,11 +280,14 @@ class Describer:
         done = self.answers()
         todo = [self._store.images[i] for i in image_ids if i not in done]
         skips: Counter[str] = Counter()
-        fetched = (f for f in self._fetcher.fetch_all(todo) if _keep(f, skips))
-        asking = self._ask_batches if self.option.batch else self._ask_one_by_one
+        if self.option.batch:
+            asking = self._ask_batches(todo, kind, skips)
+        else:
+            fetched = (f for f in self._fetcher.fetch_all(todo) if _keep(f, skips))
+            asking = self._ask_one_by_one(fetched, kind, skips)
         spent = 0.0
         answered = 0
-        for answers in asking(fetched, kind, skips):
+        for answers in asking:
             cost = sum(a.cost_usd for a in answers)
             self.ledger.record(
                 kind,
@@ -325,19 +329,22 @@ class Describer:
 
     def _chat_one(self, fetched: Fetched) -> tuple[str, ChatAnswer | OpenRouterError]:
         try:
-            return fetched.image_id, self._client.chat(self.option.model, self._body(fetched))
+            data_url = "data:image/jpeg;base64," + base64.b64encode(fetched.jpeg or b"").decode()
+            return fetched.image_id, self._client.chat(self.option.model, self._body(data_url))
         except OpenRouterError as err:
             return fetched.image_id, err
 
     def _ask_batches(
-        self, fetched: Iterator[Fetched], kind: SpendKind, skips: Counter[str]
+        self, images: Sequence[Image], kind: SpendKind, skips: Counter[str]
     ) -> Iterator[list[Answer]]:
+        """The Batch API takes public image URLs only, not data URLs (checked 2026-10-12):
+        send the IIIF service's URL for the same file, scaled on the server to LONG_SIDE."""
         model = self._client.batch_model(self.option.model)
         if model is None:
             msg = f"{self.option.model} has no :batch variant on OpenRouter"
             raise OpenRouterError(msg)
-        for chunk in batched(fetched, self._batch_size):
-            requests = {f.image_id: self._body(f) for f in chunk}
+        for chunk in batched(images, self._batch_size):
+            requests = {i.image_id: self._body(iiif_url(i.url)) for i in chunk}
             answers, outcome = self._client.chat_batch(model, requests, poll_s=self._poll_s)
             skips["model_error"] += len(chunk) - len(answers)
             for cid, error in outcome.errors.items():
@@ -357,11 +364,10 @@ class Describer:
             share = outcome.cost_usd / len(answers)
             yield [self._answer(i, a, kind, share) for i, a in answers.items()]
 
-    def _body(self, fetched: Fetched) -> dict[str, JSON]:
-        data_url = "data:image/jpeg;base64," + base64.b64encode(fetched.jpeg or b"").decode()
+    def _body(self, image_url: str) -> dict[str, JSON]:
         content: list[JSON] = [
             {"type": "text", "text": PROMPT},
-            {"type": "image_url", "image_url": {"url": data_url}},
+            {"type": "image_url", "image_url": {"url": image_url}},
         ]
         return {
             "messages": [{"role": "user", "content": content}],

@@ -292,6 +292,8 @@ class SetReport:
     """The model's commune is a right record's commune (only queries whose records have one)."""
     with_commune: int
     """Queries whose right records hold a commune."""
+    commune_read: int
+    """Right communes the model also read in the image's text (a caption, a label)."""
     kind_right: int
     """A word of the model's "type" appears in a right record's title or denomination."""
     visible_text: int
@@ -332,7 +334,9 @@ def report(prepared: Prepared) -> list[SetReport]:
                 counts["name_right"] += sum(w in words for w in named) >= len(named) / 2
             if d.commune:
                 counts["commune_given"] += 1
-                counts["commune_right"] += fold(d.commune).strip() in communes
+                right_commune = fold(d.commune).strip() in communes
+                counts["commune_right"] += right_commune
+                counts["commune_read"] += right_commune and fold(d.commune) in fold(d.visible_text)
             kinds = set(tokens(" ".join(f"{r.title} {' '.join(r.denomination)}" for r in right)))
             counts["kind_right"] += any(w in kinds for w in tokens(d.kind))
             if d.visible_text:
@@ -360,6 +364,7 @@ _COUNT_FIELDS = (
     "commune_given",
     "commune_right",
     "with_commune",
+    "commune_read",
     "kind_right",
     "visible_text",
     "text_helped",

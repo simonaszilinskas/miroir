@@ -490,7 +490,8 @@ def vlm_score(
         typer.echo(
             f"{r.set_id}: {r.answered}/{r.queries} answered; named {r.named} "
             f"(right {r.name_right}); type right {r.kind_right}; commune given "
-            f"{r.commune_given}, right {r.commune_right} of {r.with_commune} with one; "
+            f"{r.commune_given}, right {r.commune_right} of {r.with_commune} with one "
+            f"({r.commune_read} read in the image); "
             f"visible text {r.visible_text} (top 10 gained {r.text_helped}, lost "
             f"{r.text_hurt}); hit@10 by confidence: {bands}"
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from miroir.config import Settings
+from miroir.config import POP_IIIF_IMAGE_HOST, Settings
 from miroir.images.fetch import ImageCache, ImageFetcher
 from miroir.jobs.describe import (
     OPTIONS,
@@ -118,6 +118,12 @@ def test_batch_models_go_through_the_batch_api(built: Settings) -> None:
     sent = fake.batch_bodies[0]
     assert sent["endpoint"] == "/v1/chat/completions"
     assert sent["model"] == "google/gemini-3.5-flash-lite:batch"
+    requests = sent["requests"]
+    assert isinstance(requests, list)
+    url = str(requests[0])
+    # The Batch API refuses data URLs: the image goes as its public IIIF URL.
+    assert POP_IIIF_IMAGE_HOST in url
+    assert "data:image" not in url
     assert done.answered == 3
     assert done.cost_usd == pytest.approx(COST_PER_INPUT / 2 * 3)
     assert set(d.answers()) == set(ids)
