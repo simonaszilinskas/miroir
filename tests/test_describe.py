@@ -133,3 +133,24 @@ def test_options_have_safe_slugs() -> None:
     for option in OPTIONS.values():
         assert isinstance(option, DescribeOption)
         assert option.option == f"H1-{option.slug}"
+
+
+def test_a_batch_left_by_a_stopped_run_is_collected_not_sent_again(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)[:3]
+    fake = FakeOpenRouter(batch_models=("google/gemini-3.5-flash-lite:batch",), unseen_polls=2)
+    d = describer(built, fake, "gemini-3.5-flash-lite")
+    left = ids[:2]
+    pending = d.answers_path.with_suffix(".pending")
+    pending.parent.mkdir(parents=True)
+    pending.write_text(f"batch-1\t{','.join(left)}\n", encoding="utf-8")
+    fake.batch_bodies.append(
+        {"endpoint": "/v1/chat/completions", "requests": [{"custom_id": i} for i in left]}
+    )
+
+    d.ask(ids, kind=SpendKind.RUN, limit_usd=1.0)
+
+    assert set(d.answers()) == set(ids)
+    sent = fake.batch_bodies[1]["requests"]
+    assert isinstance(sent, list)
+    assert [r["custom_id"] for r in sent] == [ids[2]]
+    assert pending.read_text(encoding="utf-8") == ""

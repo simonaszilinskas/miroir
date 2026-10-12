@@ -278,10 +278,12 @@ class Describer:
         """Ask about every image not answered yet. Stops with BudgetError past `limit_usd`."""
         self.check_publishable(image_ids)
         done = self.answers()
-        todo = [self._store.images[i] for i in image_ids if i not in done]
+        pending = self._pending()
+        waiting = {i for ids in pending.values() for i in ids}
+        todo = [self._store.images[i] for i in image_ids if i not in done and i not in waiting]
         skips: Counter[str] = Counter()
         if self.option.batch:
-            asking = self._ask_batches(todo, kind, skips)
+            asking = self._ask_batches(pending, todo, kind, skips)
         else:
             fetched = (f for f in self._fetcher.fetch_all(todo) if _keep(f, skips))
             asking = self._ask_one_by_one(fetched, kind, skips)
@@ -335,34 +337,73 @@ class Describer:
             return fetched.image_id, err
 
     def _ask_batches(
-        self, images: Sequence[Image], kind: SpendKind, skips: Counter[str]
+        self,
+        pending: Mapping[str, Sequence[str]],
+        images: Sequence[Image],
+        kind: SpendKind,
+        skips: Counter[str],
     ) -> Iterator[list[Answer]]:
-        """The Batch API takes public image URLs only, not data URLs (checked 2026-10-12):
-        send the IIIF service's URL for the same file, scaled on the server to LONG_SIDE."""
+        """Collect batches a stopped run left, then submit the rest, one batch at a time.
+
+        The Batch API takes public image URLs only, not data URLs (checked 2026-10-12): send
+        the IIIF service's URL for the same file, scaled on the server to LONG_SIDE.
+        """
+        for batch_id, ids in pending.items():
+            yield self._collect(batch_id, len(ids), kind, skips)
         model = self._client.batch_model(self.option.model)
         if model is None:
             msg = f"{self.option.model} has no :batch variant on OpenRouter"
             raise OpenRouterError(msg)
         for chunk in batched(images, self._batch_size):
             requests = {i.image_id: self._body(iiif_url(i.url)) for i in chunk}
-            answers, outcome = self._client.chat_batch(model, requests, poll_s=self._poll_s)
-            skips["model_error"] += len(chunk) - len(answers)
-            for cid, error in outcome.errors.items():
-                logger.warning("%s: %s", cid, error[:300])
-            if not answers:
-                if outcome.cost_usd:
-                    self.ledger.record(
-                        kind,
-                        option=self.option.option,
-                        run=f"{self.option.option}-{kind.value}",
-                        model=model,
-                        cost_usd=outcome.cost_usd,
-                        items=0,
-                    )
-                msg = f"batch {outcome.batch_id} {outcome.status}: no answer came back"
-                raise OpenRouterError(msg)
-            share = outcome.cost_usd / len(answers)
-            yield [self._answer(i, a, kind, share) for i, a in answers.items()]
+            batch_id = self._client.submit_batch("/v1/chat/completions", model, requests)
+            self._add_pending(batch_id, [i.image_id for i in chunk])
+            yield self._collect(batch_id, len(chunk), kind, skips)
+
+    def _collect(
+        self, batch_id: str, size: int, kind: SpendKind, skips: Counter[str]
+    ) -> list[Answer]:
+        answers, outcome = self._client.wait_chat_batch(batch_id, poll_s=self._poll_s)
+        self._drop_pending(batch_id)
+        skips["model_error"] += size - len(answers)
+        for cid, error in outcome.errors.items():
+            logger.warning("%s: %s", cid, error[:300])
+        if not answers:
+            if outcome.cost_usd:
+                self.ledger.record(
+                    kind,
+                    option=self.option.option,
+                    run=f"{self.option.option}-{kind.value}",
+                    model=self.option.model,
+                    cost_usd=outcome.cost_usd,
+                    items=0,
+                )
+            msg = f"batch {outcome.batch_id} {outcome.status}: no answer came back"
+            raise OpenRouterError(msg)
+        share = outcome.cost_usd / len(answers)
+        return [self._answer(i, a, kind, share) for i, a in answers.items()]
+
+    # Batches submitted but not collected yet: "<batch id>\t<image id>,<image id>..." per line.
+
+    @property
+    def _pending_path(self) -> Path:
+        return self.answers_path.with_suffix(".pending")
+
+    def _pending(self) -> dict[str, list[str]]:
+        if not self._pending_path.exists():
+            return {}
+        lines = self._pending_path.read_text(encoding="utf-8").splitlines()
+        return {b: ids.split(",") for b, ids in (line.split("\t") for line in lines if line)}
+
+    def _add_pending(self, batch_id: str, image_ids: Sequence[str]) -> None:
+        self._pending_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._pending_path.open("a", encoding="utf-8") as out:
+            out.write(f"{batch_id}\t{','.join(image_ids)}\n")
+
+    def _drop_pending(self, batch_id: str) -> None:
+        kept = {b: ids for b, ids in self._pending().items() if b != batch_id}
+        text = "".join(f"{b}\t{','.join(ids)}\n" for b, ids in kept.items())
+        self._pending_path.write_text(text, encoding="utf-8")
 
     def _body(self, image_url: str) -> dict[str, JSON]:
         content: list[JSON] = [

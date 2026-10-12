@@ -71,6 +71,8 @@ class FakeOpenRouter:
     polls: int = 0
     chat_bodies: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     chat_answer: str = CHAT_ANSWER
+    unseen_polls: int = 0
+    """Answer this many batch polls with 404, as a batch just submitted can."""
 
     def handler(self, request: httpx.Request) -> httpx.Response:  # noqa: PLR0911 (one per route)
         if self.fail_first > 0:
@@ -101,6 +103,9 @@ class FakeOpenRouter:
                 202, json={"id": "batch-1", "status": "validating", "error": None}
             )
         if path == "/batches/batch-1":
+            if self.unseen_polls > 0:
+                self.unseen_polls -= 1
+                return httpx.Response(404, json={"error": {"message": "not found"}})
             self.polls += 1
             if self.polls < 2:
                 return httpx.Response(200, json={"id": "batch-1", "status": "in_progress"})

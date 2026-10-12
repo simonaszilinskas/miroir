@@ -36,6 +36,11 @@ type JSON = str | int | float | bool | list[JSON] | dict[str, JSON] | None
 class OpenRouterError(RuntimeError):
     """OpenRouter refused a request or answered with something we cannot read."""
 
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        """The HTTP status, when OpenRouter answered with an error status."""
+
 
 class BatchStatus(StrEnum):
     VALIDATING = "validating"
@@ -302,12 +307,25 @@ class OpenRouterClient:
         *,
         poll_s: float = 30.0,
         timeout_s: float = 24 * 3600.0,
+        unseen_s: float = 600.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> BatchOutcome:
-        """Poll until the batch ends. Raises TimeoutError if it outlives `timeout_s`."""
-        deadline = self._clock() + timeout_s
+        """Poll until the batch ends. Raises TimeoutError if it outlives `timeout_s`.
+
+        A batch just submitted can answer 404 for a while (seen 2026-10-12); that is waited
+        out for `unseen_s`.
+        """
+        start = self._clock()
+        deadline = start + timeout_s
         while True:
-            batch = self._parse(_Batch, self._call("GET", f"/batches/{batch_id}"))
+            try:
+                batch = self._parse(_Batch, self._call("GET", f"/batches/{batch_id}"))
+            except OpenRouterError as err:
+                if err.status != 404 or self._clock() > start + unseen_s:
+                    raise
+                logger.info("batch %s not visible yet", batch_id)
+                sleep(poll_s)
+                continue
             if batch.status.finished:
                 return _outcome(batch)
             if self._clock() > deadline:
@@ -352,7 +370,7 @@ class OpenRouterClient:
         response = send(self._http, request, self._retry)
         if response.status_code >= 400:
             msg = f"{method} {path}: HTTP {response.status_code}: {_error_text(response)}"
-            raise OpenRouterError(msg)
+            raise OpenRouterError(msg, response.status_code)
         try:
             return response.json()
         except ValueError as err:
