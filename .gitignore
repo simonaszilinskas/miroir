@@ -1,11 +1,19 @@
 # Data and images stay outside the repository
 data/
 *.jsonl
+*.parquet
 *.jpg
 *.jpeg
 *.png
+*.gif
+# ...except small committed text fixtures and test sets
+!tests/fixtures/**/*.jsonl
+!eval/sets/**/*.jsonl
+
 .env
 __pycache__/
 .venv/
+.pytest_cache/
+.ruff_cache/
 node_modules/
 .DS_Store

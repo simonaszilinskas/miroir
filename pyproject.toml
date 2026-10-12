@@ -1,0 +1,104 @@
+[project]
+name = "miroir"
+version = "0.1.0"
+description = "Visual search over French heritage records (POP)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyarrow>=26.0.0",
+    "pydantic-settings>=2.15.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+miroir = "miroir.cli:main"
+
+[project.optional-dependencies]
+ml = [
+    "pillow>=12.3.0",
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
+    "transformers>=5.19.0",
+]
+api = [
+    "fastapi>=0.143.0",
+    "uvicorn>=0.54.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/miroir"]
+
+[dependency-groups]
+dev = [
+    "pyarrow-stubs>=20.0.0.20260819",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-socket>=0.8.1",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle, pyflakes
+    "I",             # import order
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "T20",           # no print
+    "N",             # naming
+    "SIM",           # simplify
+    "C4",            # comprehensions
+    "PTH",           # pathlib, not os.path
+    "RET",           # returns
+    "ARG",           # unused arguments
+    "PT",            # pytest style
+    "DTZ",           # timezone-aware datetimes
+    "ERA",           # commented-out code
+    "PL",            # pylint
+    "RUF",           # ruff-specific
+    "TID",           # banned imports
+    "S",             # bandit (security)
+    "LOG", "G",      # logging
+    "FBT",           # no boolean positional args
+]
+ignore = [
+    "PLR0913",  # many arguments: dataclass-like constructors need them
+    "PLR2004",  # magic values in comparisons
+    "S101",     # assert (used in tests)
+    "S311",     # random is fine: we do not do crypto
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S", "FBT"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"os.path".msg = "Use pathlib, and get data paths from miroir.config."
+"os.getenv".msg = "Read settings through miroir.config."
+"os.environ".msg = "Read settings through miroir.config."
+
+[tool.ruff.lint.isort]
+known-first-party = ["miroir", "tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+strict = ["src"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+reportMissingTypeStubs = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--disable-socket", "--strict-markers", "-ra"]
