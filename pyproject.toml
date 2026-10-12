@@ -42,7 +42,7 @@ packages = ["src/miroir"]
 
 [dependency-groups]
 dev = [
-    "miroir[modal,openrouter]",
+    "miroir[api,modal,openrouter]",
     "pyarrow-stubs>=20.0.0.20260819",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
@@ -78,6 +78,8 @@ select = [
     "LOG", "G",      # logging
     "FBT",           # no boolean positional args
 ]
+# French text in the website uses the typographic apostrophe.
+allowed-confusables = ["’"]
 ignore = [
     "PLR0913",  # many arguments: dataclass-like constructors need them
     "PLR2004",  # magic values in comparisons
@@ -119,7 +121,8 @@ reportUnnecessaryTypeIgnoreComment = "error"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--disable-socket", "--strict-markers", "-ra"]
+# Unix sockets stay allowed: the event loop of the web tests needs a socket pair (no network).
+addopts = ["--disable-socket", "--allow-unix-socket", "--strict-markers", "-ra"]
 
 [tool.uv.sources]
 miroir = { workspace = true }

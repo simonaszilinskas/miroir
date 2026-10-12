@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from miroir import logs
-from miroir.config import get_settings
+from miroir.config import ENV_PASSWORD_KEY, WEB_INDEX, get_settings
 
 if TYPE_CHECKING:
     from miroir.eval.build_sets import BuildReport
@@ -41,6 +41,10 @@ vlm_app = typer.Typer(
     no_args_is_help=True, help="Step H1: ask a vision model about query photos, search its answer."
 )
 app.add_typer(vlm_app, name="vlm")
+web_app = typer.Typer(
+    no_args_is_help=True, help="The prototype website: build its index, deploy it, run it locally."
+)
+app.add_typer(web_app, name="web")
 
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
@@ -942,6 +946,64 @@ def _openrouter_key_usage() -> float | None:
         return None
     finally:
         client.close()
+
+
+# --- the prototype website ---------------------------------------------------------------
+
+WebIndex = Annotated[str, typer.Option("--index", help="Index bundle name (config.WEB_INDEX).")]
+
+
+@web_app.command("build-index")
+def web_build_index(index: WebIndex = WEB_INDEX) -> None:
+    """Build the index bundle on the Mac: vectors, catalog, type guess, weights, cut-offs."""
+    from miroir.web.bundle import build_index  # noqa: PLC0415
+
+    folder = build_index(get_settings(), index)
+    typer.echo(f"bundle written to {folder}; see report.json, then `miroir web upload`")
+
+
+@web_app.command("upload")
+def web_upload(index: WebIndex = WEB_INDEX) -> None:
+    """Copy the bundle to the Modal volume the website reads."""
+    from miroir.web.ops import upload_index  # noqa: PLC0415
+
+    size = upload_index(get_settings(), index)
+    typer.echo(f"uploaded {size / 1e6:.0f} MB")
+
+
+@web_app.command("secret")
+def web_secret(
+    *,
+    rotate: Annotated[bool, typer.Option(help="Replace the password.")] = False,
+) -> None:
+    """Make the shared password: kept in .env (`ENV_PASSWORD_KEY`) and the Modal secret."""
+    from miroir.web.ops import set_secret  # noqa: PLC0415
+
+    changed = set_secret(rotate=rotate)
+    typer.echo(f"new password in .env ({ENV_PASSWORD_KEY})" if changed else "password unchanged")
+
+
+@web_app.command("deploy")
+def web_deploy() -> None:
+    """Deploy the `miroir-web` Modal app (GPU search sleeps when idle)."""
+    from miroir.web.ops import deploy  # noqa: PLC0415
+
+    typer.echo(f"deployed: {deploy()}")
+
+
+@web_app.command("dev")
+def web_dev(
+    index: WebIndex = WEB_INDEX,
+    port: Annotated[int, typer.Option(help="Local port.")] = 8000,
+    *,
+    real: Annotated[
+        bool, typer.Option(help="Search with the deployed models on Modal (costs GPU time).")
+    ] = False,
+) -> None:
+    """Run the website on this Mac with fake models (no model is loaded here)."""
+    from miroir.web.ops import serve_locally  # noqa: PLC0415
+
+    serve_locally(get_settings(), name=index, port=port, real=real)
 
 
 def main() -> None:

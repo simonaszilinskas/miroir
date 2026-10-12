@@ -68,6 +68,9 @@ _libraries = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
 )
 _CACHES = {"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf", "TORCH_HOME": f"{MODAL_WEIGHTS_MOUNT}/torch"}
 image = _libraries.env(_CACHES).add_local_python_source("miroir")
+#: The model libraries and weight caches, shared with the website's search app
+#: (`miroir.web.modal_app`) so it reuses this image's built layers.
+model_libraries, model_caches = _libraries, _CACHES
 #: Keypoint matching (step E1): LightGlue from its repository, pinned, without its own
 #: dependencies (it asks for the GUI build of OpenCV; the headless one is enough here).
 match_image = (

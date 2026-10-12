@@ -535,7 +535,7 @@ openrouter = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "miroir", extra = ["modal", "openrouter"] },
+    { name = "miroir", extra = ["api", "modal", "openrouter"] },
     { name = "pyarrow-stubs" },
     { name = "pyright" },
     { name = "pytest" },
@@ -563,7 +563,7 @@ provides-extras = ["jobs", "api", "openrouter", "modal"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "miroir", extras = ["modal", "openrouter"], editable = "." },
+    { name = "miroir", extras = ["api", "modal", "openrouter"], editable = "." },
     { name = "pyarrow-stubs", specifier = ">=20.0.0.20260819" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
