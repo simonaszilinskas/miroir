@@ -1,0 +1,4 @@
+{"query_id": "q-a", "query_image": "img-a", "expected_entity_ids": ["PA00000001"], "excluded_image_ids": ["img-a2"]}
+{"query_image": "img-b", "expected_entity_ids": ["PA00000002", "PA00000003"]}
+{"query_text": "chateau fort en ruine", "expected_entity_ids": ["PA00000004"]}
+{"query_image": "room-1", "box": [10, 20, 110, 220], "expected_entity_ids": ["MNR00001"]}
