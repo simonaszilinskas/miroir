@@ -105,6 +105,75 @@ What we learned:
 - The 14 runs cost $7.82 together; probes, the image volume and R0 make up the rest of the Modal spend. Project spend after R1: $14.74 (OpenRouter $5.55, Modal $9.18).
 - T8 is not scored: the harness refuses queries with no right answer until the not-found measure exists. T6 and T7 do not exist yet, so EmbeddingGemma 2's text side waits.
 
+## R2: fusion (step G), query expansion (E5), "not found" (T8)
+
+G belongs to R3 in experiments.md §5. We pulled it forward because it costs nothing: it only combines vectors we already have, with NumPy, on the Mac.
+
+Same gallery (`screening-20k-publishable-fetched`, 19,105 images) and queries as R1 (T1 138, T3 99, T5 443), tune halves. Run with `miroir eval stack` (technical spec §7.2). Every fusion picks one first-model weight from 0.3–0.7 by mean hit@10 over T1, T3 and T5 together, never one weight per set; with three models, the other two share the rest equally.
+
+### G1 and G2: fusing image models (2026-10-12)
+
+Hit@10, 95% interval in brackets. Best single models from R1 for reference.
+
+| Run | Weights | T1 | T3 | T5 | Mean |
+|---|---|---|---|---|---|
+| G1-A7+A3 | 0.7 / 0.3 | 45.7 [38–54] | **89.9** [84–96] | 54.9 [50–59] | **63.5** |
+| G1-A9+A3 (closed) | 0.6 / 0.4 | 41.3 [33–49] | 88.9 [82–95] | 60.5 [56–65] | 63.6 |
+| G1-A7+A3+A5 | 0.7 / 0.15 / 0.15 | 47.8 [41–56] | 88.9 [83–95] | 52.8 [48–57] | 63.2 |
+| G2-A9+A3 (closed) | 0.7 / 0.3 | 44.9 [38–53] | 88.9 [83–95] | 55.8 [51–60] | 63.2 |
+| G2-A7+A3 | 0.7 / 0.3 | 44.2 [37–52] | 89.9 [84–96] | 51.9 [48–57] | 62.0 |
+| G1-A7+A4 | 0.7 / 0.3 | **51.4** [44–59] | 84.8 [78–92] | 49.0 [44–54] | 61.8 |
+| G2-A7+A3+A5 | 0.5 / 0.25 / 0.25 | 42.0 [35–50] | 88.9 [83–95] | 52.6 [48–57] | 61.2 |
+| G2-A7+A4 | 0.6 / 0.4 | 46.4 [39–55] | 84.8 [77–92] | 48.1 [44–53] | 59.8 |
+| A9 alone (R1) | | 51.4 | 83.8 | 51.2 | 62.1 |
+| A7 alone (R1) | | 50.0 | 84.8 | 48.1 | 61.0 |
+| A3 alone (R1) | | 29.7 | 85.9 | **62.5** | 59.4 |
+
+G1-A7+A3 against the best single model on each set, paired bootstrap, hit@10:
+
+| Set | Best single | G1-A7+A3 − best |
+|---|---|---|
+| T1 | A9 51.4 (A7 50.0) | −5.8 [−10.9, −0.7] (vs A7: −4.3 [−8.7, −0.7]) |
+| T3 | A3 85.9 | +4.0 [+0.0, +9.1] |
+| T5 | A3 62.5 | −7.7 [−10.8, −4.3] |
+
+What we learned:
+
+- Fusion does not beat the best single model on any set beyond the error bar. On T3 it gains 4 points, and the interval only just touches zero. On T1 and T5 it loses to the best single model, beyond the error bar.
+- Averaged over the three sets, G1-A7+A3 (63.5) edges out every single model (A9 62.1), because no one model is best on every set. The gain is a compromise, not a step up.
+- One weight for all sets is the catch: T1 wants EmbeddingGemma 2, T5 wants MegaLoc. The grid picks the weight at its edge (0.7) for most pairs, so a higher weight might score a little better, but it would only move closer to A7 alone.
+- G1 beats G2 on every pair. Min-max sums keep how far ahead a model's top answer is; ranks throw that away.
+- Adding PE-Core L (A5) or swapping MegaLoc for SigLIP 2 (A4) does not help.
+
+### E5: query expansion (2026-10-12)
+
+The query plus its top 3 images (hidden images never used), weighted by similarity to the power alpha, then searched again. Alpha 0 is a plain average, as experiments.md words it; alpha 3 is the usual α-QE setting. Paired against the same stack without expansion, hit@10:
+
+| Stack | Alpha | T1 | T3 | T5 |
+|---|---|---|---|---|
+| A7 | 0 | −5.1 [−8.7, −1.4] | −7.1 [−12.1, −2.0] | −4.7 [−7.0, −2.9] |
+| A7 | 3 | −4.3 [−8.0, −0.7] | −6.1 [−11.1, −2.0] | −4.3 [−6.3, −2.5] |
+| A3 | 0 | −4.3 [−8.7, −0.7] | −6.1 [−11.1, −2.0] | −8.8 [−11.7, −6.1] |
+| A3 | 3 | −2.2 [−5.1, 0.0] | 0.0 | −5.6 [−8.1, −3.4] |
+| G1-A7+A3 | 0 | −2.2 [−6.5, +1.5] | −5.1 [−9.1, −1.0] | −3.8 [−6.1, −1.8] |
+| G1-A7+A3 | 3 | −1.4 [−5.8, +2.2] | −2.0 [−5.1, 0.0] | −3.6 [−5.9, −1.6] |
+
+- Expansion hurts, or at best does nothing, on every stack and set. With only about a third of top-1 answers right, the top 3 hits are mostly wrong, and the second search follows them. Drop E5 unless a re-ranker first makes the top hits right.
+
+### T8: "not found" (2026-10-12)
+
+T8 tune holds 250 queries from T1 and T5 tune (125 each) with their whole building or object taken out of the gallery, so any answer is wrong; 232 have a publishable image in the gallery list. In-index queries are the 581 T1 and T5 tune queries (138 + 443). Confidence is the top entity's cosine; for fusion, the weighted cosines of the entity fusion put first.
+
+| Run | Wrong but confident, cut-off at 50% matched | Matched, cut-off at 5% wrong |
+|---|---|---|
+| A7 | **25.0** [18.5, 31.5] | 12.4 [8.6, 17.9] |
+| G1-A7+A3 | 27.6 [21.6, 34.1] | **15.0** [10.2, 19.4] |
+| A9 (closed) | 29.7 [23.3, 35.8] | 8.8 [3.3, 17.6] |
+| A3 | 30.2 [23.7, 36.2] | 11.9 [7.1, 20.7] |
+
+- A top-1 cosine is a poor "not found" signal for every model. With a cut-off that answers half the in-index searches, a quarter or more of searches with no answer still get a confident wrong one. Keeping wrong answers under 5% (the spec target) leaves only 9–15% of in-index searches answered.
+- The intervals overlap: no model is clearly better at it. G3 (a learned score over several signals, R3) and a geometric re-ranker (E1) are the next things to try.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -166,4 +235,55 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-cls | facebook/dinov2-large | 224 | cls | 443 | 29.6 [25.3, 33.6] | 36.3 [31.6, 40.9] | 39.5 [34.8, 44.2] | 33.1 [28.8, 37.0] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 443 | 26.4 [22.3, 30.5] | 37.7 [33.0, 42.2] | 42.0 [37.2, 46.5] | 32.4 [28.4, 36.5] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 443 | 27.8 [23.5, 31.8] | 36.1 [31.8, 40.6] | 39.7 [34.8, 44.7] | 31.9 [27.8, 35.9] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.8] | 51.4 [44.2, 59.4] | 41.3 [34.5, 48.7] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 138 | 35.5 [27.5, 42.8] | 44.2 [37.0, 52.2] | 45.7 [38.4, 53.6] | 39.8 [32.6, 47.3] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 138 | 35.5 [28.3, 43.5] | 42.8 [35.5, 50.7] | 47.8 [40.6, 55.8] | 39.8 [32.8, 47.5] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 138 | 34.1 [26.1, 41.3] | 44.2 [37.0, 52.2] | 44.9 [37.7, 52.9] | 38.9 [31.8, 46.5] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3-alpha3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 35.5 [27.5, 43.5] | 41.3 [33.3, 49.3] | 44.2 [37.0, 52.2] | 38.6 [31.0, 46.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 34.8 [26.8, 42.0] | 40.6 [32.6, 49.3] | 43.5 [36.2, 51.4] | 37.8 [30.6, 45.3] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 32.6 [25.4, 40.6] | 40.6 [33.3, 48.6] | 45.7 [38.4, 54.3] | 37.6 [30.4, 45.0] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 138 | 29.7 [22.5, 37.0] | 42.0 [34.8, 50.0] | 46.4 [39.1, 55.1] | 36.0 [29.4, 43.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 138 | 29.7 [22.5, 37.7] | 37.0 [29.7, 44.2] | 44.9 [37.7, 52.9] | 34.2 [27.4, 41.7] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 138 | 29.7 [22.5, 37.7] | 37.0 [29.7, 44.9] | 41.3 [33.3, 49.3] | 33.8 [27.2, 41.4] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 138 | 29.0 [22.5, 36.2] | 36.2 [29.0, 44.2] | 42.0 [34.8, 50.0] | 33.5 [26.8, 40.8] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 28.3 [21.0, 35.5] | 34.8 [27.5, 42.8] | 44.2 [36.9, 52.2] | 33.3 [26.6, 40.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 138 | 20.3 [14.5, 26.8] | 23.9 [17.4, 31.2] | 27.5 [20.3, 34.8] | 22.7 [16.7, 29.3] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 138 | 15.2 [9.4, 21.0] | 23.9 [17.4, 31.2] | 25.4 [18.1, 32.6] | 19.5 [14.0, 25.4] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 60.6 [51.5, 70.7] | 83.8 [76.8, 90.9] | 89.9 [83.8, 96.0] | 71.5 [64.2, 79.3] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 99 | 59.6 [50.5, 69.7] | 81.8 [73.7, 89.9] | 88.9 [82.8, 94.9] | 70.0 [62.8, 78.1] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [46.5, 65.7] | 85.9 [78.8, 92.9] | 88.9 [81.8, 94.9] | 69.0 [62.0, 76.4] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3-alpha3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 59.6 [50.5, 69.7] | 79.8 [71.7, 87.9] | 87.9 [80.8, 93.9] | 69.0 [61.6, 77.1] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 99 | 57.6 [48.5, 67.7] | 83.8 [76.7, 90.9] | 85.9 [78.8, 91.9] | 68.4 [60.5, 76.8] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 80.8 [72.7, 88.9] | 89.9 [83.8, 96.0] | 67.2 [59.9, 75.3] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 80.8 [72.7, 88.9] | 88.9 [82.8, 94.9] | 67.1 [59.5, 75.5] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 79.8 [71.7, 87.9] | 84.8 [77.8, 91.9] | 66.6 [58.6, 74.8] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 99 | 51.5 [41.4, 61.6] | 80.8 [72.7, 87.9] | 88.9 [82.8, 94.9] | 64.1 [56.6, 72.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 50.5 [40.4, 60.6] | 82.8 [74.7, 89.9] | 84.8 [77.8, 91.9] | 63.8 [56.2, 71.5] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 99 | 52.5 [42.4, 62.6] | 76.8 [67.7, 84.8] | 84.8 [76.8, 91.9] | 63.7 [55.8, 72.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 99 | 51.5 [42.4, 61.6] | 74.7 [65.7, 83.8] | 78.8 [70.7, 86.9] | 63.1 [55.0, 71.6] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 99 | 45.5 [35.4, 55.6] | 74.7 [65.7, 83.8] | 77.8 [69.7, 85.9] | 59.6 [51.7, 68.0] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 99 | 30.3 [21.2, 40.4] | 78.8 [70.7, 86.9] | 79.8 [71.7, 87.9] | 51.3 [44.7, 59.0] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.7, 44.7] | 54.4 [49.9, 58.9] | 60.5 [56.0, 64.8] | 47.1 [42.9, 50.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 443 | 38.4 [34.1, 42.7] | 51.7 [47.2, 56.2] | 56.9 [52.1, 61.4] | 45.1 [41.0, 49.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 37.9 [33.2, 42.4] | 49.9 [45.4, 54.4] | 54.9 [50.3, 59.1] | 43.8 [39.5, 47.8] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.5 [30.2, 38.8] | 50.3 [45.4, 54.9] | 55.8 [51.0, 60.3] | 42.3 [38.3, 46.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.7 [30.9, 40.0] | 47.6 [42.9, 52.2] | 52.8 [48.3, 57.3] | 41.9 [37.7, 46.0] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.8 [30.5, 39.1] | 47.6 [43.1, 52.1] | 51.9 [47.6, 56.7] | 41.1 [36.9, 45.1] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.0 [30.5, 39.3] | 46.3 [41.5, 51.0] | 52.6 [48.1, 57.1] | 41.0 [36.9, 45.2] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3-alpha3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 35.0 [30.7, 39.1] | 45.8 [40.9, 50.1] | 51.2 [46.5, 55.8] | 40.4 [36.1, 44.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 443 | 31.2 [26.9, 35.4] | 50.3 [45.8, 54.9] | 53.7 [49.0, 58.0] | 40.0 [35.9, 43.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.4 [29.1, 37.5] | 45.8 [40.9, 50.1] | 51.0 [46.3, 55.3] | 39.1 [34.8, 42.9] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 45.1 [40.4, 49.7] | 49.0 [44.2, 53.5] | 39.1 [34.9, 43.2] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 32.5 [28.0, 36.8] | 43.8 [39.3, 48.5] | 48.1 [43.6, 52.6] | 38.1 [33.8, 42.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 443 | 26.6 [22.6, 30.7] | 41.8 [37.0, 46.3] | 43.8 [39.1, 48.3] | 33.7 [29.9, 37.6] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 443 | 22.6 [18.7, 26.4] | 41.5 [36.8, 46.0] | 43.3 [38.6, 47.9] | 31.2 [27.4, 34.9] |
+
+Not found (T8): confidence is the top entity's score. Lower is better for "wrong but confident", higher for "matched".
+
+| Round | Set | Half | Gallery | Run | In-index sets | In-index | Not found | Wrong but confident, 50% matched | Matched, 5% wrong |
+|---|---|---|---|---|---|---|---|---|---|
+| R2 | T8 | tune | screening-20k-publishable-fetched | A-A7-embeddinggemma-2-512 | T1 + T5 | 581 | 232 | 25.0 [18.5, 31.5] | 12.4 [8.6, 17.9] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | T1 + T5 | 581 | 232 | 27.6 [21.6, 34.1] | 15.0 [10.2, 19.4] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | A-A9 | T1 + T5 | 581 | 232 | 29.7 [23.3, 35.8] | 8.8 [3.3, 17.6] |
+| R2 | T8 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322 | T1 + T5 | 581 | 232 | 30.2 [23.7, 36.2] | 11.9 [7.1, 20.7] |
 <!-- summary:end -->
