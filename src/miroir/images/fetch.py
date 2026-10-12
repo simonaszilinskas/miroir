@@ -188,7 +188,8 @@ class ImageFetcher:
     def _convert(self, image_id: str, data: bytes) -> Fetched:
         try:
             return Fetched(image_id, to_jpeg(data), None)
-        except (UnidentifiedImageError, OSError) as err:
+        except (UnidentifiedImageError, OSError, PILImage.DecompressionBombError) as err:
+            # A scan over Pillow's pixel limit (about 179 million) is skipped like a broken file.
             logger.warning("%s: cannot decode image: %s", image_id, err)
             return Fetched(image_id, None, FetchSkip.UNREADABLE)
 

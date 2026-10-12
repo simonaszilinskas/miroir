@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import pytest
 from PIL import Image as PILImage
 
 from miroir.http import send
@@ -77,6 +78,16 @@ def test_missing_everywhere_is_skipped_not_raised(tmp_path: Path) -> None:
     result = fetcher(pop, tmp_path).fetch(image())
     assert result.jpeg is None
     assert result.skip == FetchSkip.MISSING
+
+
+def test_an_image_over_the_pixel_limit_is_skipped_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FakePop serves 1024 x 512 images; past twice the limit Pillow raises, not warns.
+    monkeypatch.setattr(PILImage, "MAX_IMAGE_PIXELS", 100_000)
+    result = fetcher(FakePop(), tmp_path).fetch(image())
+    assert result.jpeg is None
+    assert result.skip == FetchSkip.UNREADABLE
 
 
 def test_fetch_all_keeps_input_order(tmp_path: Path) -> None:
