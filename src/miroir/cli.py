@@ -99,6 +99,12 @@ def eval_run(
     gallery: Annotated[
         str | None, typer.Option(help="Gallery list, e.g. screening-20k (default: whole run).")
     ] = None,
+    publishable_queries: Annotated[
+        bool,
+        typer.Option(
+            "--publishable-queries", help="Only queries a closed model may see (publishable)."
+        ),
+    ] = False,
 ) -> None:
     """Score a vector run on one test set half; write eval/results/<round>/<step>-<option>.json."""
     from miroir.eval.run import score_test_set  # noqa: PLC0415
@@ -118,6 +124,7 @@ def eval_run(
         query_vector_run=query_vectors,
         gallery=gallery,
         allow_sealed=round_id == "R4",
+        publishable_queries=publishable_queries,
     )
     _echo_scores([scored])
 
