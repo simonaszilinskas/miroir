@@ -17,19 +17,22 @@ Finding the right heritage record from a photo is a research problem before it i
 
 ### A. Image to vector (photo → photo search)
 
-| ID | Option | Open? | Why it's in the list |
-|---|---|---|---|
-| A1 | DINOv2 ViT-L/14 and ViT-g/14 | yes | The current default. Everything else is measured against it |
-| A2 | DINOv3 ViT-L and larger distilled sizes | yes | Published results beat DINOv2 clearly on Met (museum art) and AmsterTime (modern vs archive photos of Amsterdam) |
-| A3 | MegaLoc (DINOv2 + SALAD) | yes | Built to recognise places from any angle |
-| A4 | SigLIP 2 so400m and giant | yes | Text and image in one space |
-| A5 | Meta Perception Encoder, PE-Core L and G | yes | A strong rival to SigLIP 2 |
-| A6 | MetaCLIP 2 | yes | Trained on many languages |
-| A7 | EmbeddingGemma 2 (740M, 768-d) | yes | Small, multimodal, runs on a phone |
-| A8 | Qwen3-VL-Embedding 2B and 8B | yes | Top of MMEB-V2 among open models |
-| A9 | Gemini Embedding 2 | no | Closed reference point |
-| A10 | Voyage multimodal 3.5, Nemotron Embed VL 1B v2 | no / yes | More reference points, both on OpenRouter |
-| A11 | RootSIFT + VLAD, and perceptual hash | yes | Classic floor. The hash also flags exact duplicates |
+| ID | Option | Open? | Route | Why it's in the list |
+|---|---|---|---|---|
+| A1 | DINOv2 ViT-L/14 and ViT-g/14 | yes | hosted (TBD) | The current default. Everything else is measured against it |
+| A2 | DINOv3 ViT-L and ViT-H+ (the largest distilled size); the 7B teacher | yes (custom licence, gated) | L, H+: hosted (TBD). 7B: deferred | The paper's clear gains over DINOv2 on Met and AmsterTime are for the 7B only (AmsterTime mAP 56.5 vs 48.9). For distilled ViT-L it reports only Oxford-H. The 7B does not fit on a 16 GB machine |
+| A3 | MegaLoc (DINOv2 + SALAD) | yes | hosted (TBD) | Built to recognise places from any angle |
+| A4 | SigLIP 2 so400m and giant | yes | hosted (TBD) | Text and image in one space |
+| A5 | Meta Perception Encoder, PE-Core L and G | yes | hosted (TBD) | A strong rival to SigLIP 2 |
+| A6 | MetaCLIP 2 | weights open, CC-BY-NC 4.0 | hosted (TBD) | Trained on many languages. Non-commercial licence: a point of comparison only, unless the Ministry's lawyers clear it |
+| A7 | EmbeddingGemma 2 (740M, 768-d) | yes | hosted (TBD) | Small, multimodal, runs on a phone |
+| A8 | Qwen3-VL-Embedding 2B and 8B | yes | hosted (TBD); 8B may be deferred | Strong on MMEB-V2 among open models |
+| A8b | Tencent WeMM-Embedding 2B and 9B | yes (Apache-2.0) | hosted (TBD) | Released August 2026; ahead of Qwen3-VL-Embedding-8B on MMEB-V2, as its authors report (9B 80.6, 2B 77.9, against 77.8) |
+| A9 | Gemini Embedding 2 | no | OpenRouter | Closed reference point. The OpenRouter `:batch` endpoint refuses images, so image runs pay the standard price ($0.12 per 1,000 images) |
+| A10 | Voyage multimodal 3.5; Nemotron Embed VL (`nvidia/llama-nemotron-embed-vl-1b-v2`, 1.7B despite the name) | no / yes | OpenRouter | More reference points. Nemotron is on OpenRouter only as a free variant, capped at 20 requests a minute and 1,000 a day: about 138 days for every image at one per request. It was trained on document pages, not photos |
+| A11 | RootSIFT + VLAD, and perceptual hash | yes | hosted (TBD) | Classic floor. The hash also flags exact duplicates |
+
+Routes: **OpenRouter** where it serves the model. **hosted (TBD)**: open models, to run on a hosted service still being chosen; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
 
 For A1–A3, also compare three ways to turn an image into one vector: the class token, GeM pooling over patch tokens, and VLAD over patch tokens (as in AnyLoc).
 
@@ -39,7 +42,7 @@ For A1–A3, also compare three ways to turn an image into one vector: the class
 |---|---|
 | B1 | The text tower of A4–A6, searching image vectors directly |
 | B2 | The unified embedders A7–A9, searching image vectors directly |
-| B3 | Caption first: a vision model writes a French description of every collection image. We search those with BM25 plus a text embedder (EmbeddingGemma 2 text or Qwen3-Embedding). Captioners to compare: Qwen3-VL 8B and 32B on our machines, and one closed model through OpenRouter |
+| B3 | Caption first: a vision model writes a French description of every collection image. We search those with BM25 plus a text embedder (EmbeddingGemma 2 text or Qwen3-Embedding). Captioners to compare: Qwen3-VL 8B and 30B-A3B through OpenRouter (Qwen3-VL-32B is not on OpenRouter), and one closed model through OpenRouter |
 | B4 | BM25 on POP text fields only (the floor) |
 | B5 | An AI model rewrites the query into filters and search terms before B1–B4 |
 
@@ -76,7 +79,7 @@ Scored on: T4, plus index size and search time. Run on Rose Valland first. Exten
 | E1 | SuperPoint or ALIKED keypoints, LightGlue matching, RANSAC. Score = number of matches that agree on one geometry |
 | E2 | Dense matching with RoMa or MASt3R |
 | E3 | Qwen3-VL-Reranker 2B and 8B |
-| E4 | A vision model as judge on the top 10 pairs: Qwen3-VL 32B (open) against one closed model |
+| E4 | A vision model as judge on the top 10 pairs: Qwen3-VL 30B-A3B (open, on OpenRouter; the 32B is not) against one closed model |
 | E5 | Query expansion: average the query with its top 3 hits and search again (α-QE) |
 
 Scored on: T1, T2, T3, T5, plus time added per search.
@@ -107,7 +110,7 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 
 | ID | Option |
 |---|---|
-| H1 | Ask a vision model "what is this monument or artwork, and where is it?" and look its answer up in POP with BM25. Qwen3-VL 32B against one closed model |
+| H1 | Ask a vision model "what is this monument or artwork, and where is it?" and look its answer up in POP with BM25. Qwen3-VL 30B-A3B (on OpenRouter) against one closed model |
 | H2 | Use the photo's GPS position to keep only records within 2 km. Tested on T2 photos that carry GPS. Needs coordinates for records (POP coordinates where present, else the commune centre) |
 | H3 | H1 or H2 as one more signal into G3 |
 
@@ -136,5 +139,9 @@ As a guide to what counts as a real difference, an interval on 231 queries spans
 | R2 | Week 2 | E and F on top of the R1 winners | Best re-ranker; best phone-gap fix |
 | R3 | Week 2–3 | C, D, G and H on the R2 winners | The full stack for the website and the full POP index |
 | R4 | Week 6 | The chosen stack and the two runners-up on the sealed halves, once | Final scores for the decision meeting |
+
+**Screening first.** Every A option is scored on the screening gallery (`screening-20k`: every image a query needs, plus seeded random distractors up to 20,000; technical spec §7). Only the top 3 embed the full collection. A screening run costs about a seventh of a full one. Closed models search `screening-20k-publishable` only, and are compared with open ones on the queries both can answer.
+
+**Why T9 is AmsterTime only.** Met cannot serve as a 2-point check here: its database is 29.7 GB, its score comes from a kNN classifier with tuning and PCA-whitening that MIROIR never uses, and the DINOv2 and DINOv3 papers report GAP 36.8 and 44.6 for the *same* model. AmsterTime is 2,462 images (0.9 GB, CC0), and the DINOv3 paper writes down its preprocessing. AnyLoc does not report AmsterTime.
 
 Before each round, write in `docs/results.md` what we expect to see and why. Comparing that guess with the result is how we learn.

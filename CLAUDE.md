@@ -8,13 +8,15 @@ and [docs/experiments.md](docs/experiments.md) before changing behaviour. Code r
 
 ```sh
 uv sync                        # base + dev tools (fast; no torch)
-uv sync --extra jobs           # torch, transformers: for code that runs inside remote jobs only
+uv sync --extra jobs           # torch, transformers: remote jobs, and the R0 AmsterTime check
 uv sync --extra api            # add fastapi, uvicorn
 make check                     # ruff format check, ruff lint, pyright strict, pytest. Must pass before commit
 make fmt                       # format and auto-fix
 uv run miroir --help           # every entry point is a subcommand
 uv run miroir records build    # exports -> records.parquet + images.parquet (about 6 s)
 uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
+uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
+uv run miroir eval summary     # rebuild the results table in docs/results.md
 ```
 
 ## Layout
@@ -23,7 +25,7 @@ uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries
 - `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
 - `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
-- `src/miroir/eval/`: test sets, scoring. Results go to `eval/results/`.
+- `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to `eval/results/`.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
 
 ## Where data lives

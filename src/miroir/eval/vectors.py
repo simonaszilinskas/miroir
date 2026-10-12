@@ -48,8 +48,10 @@ class Route(StrEnum):
     """Where an embedding run computed its vectors."""
 
     OPENROUTER = "openrouter"
-    MAC = "mac"
+    HOSTED = "hosted"
+    """Any other hosted model service; name it in `RunInfo.notes`."""
     HF_JOBS = "hf-jobs"
+    MAC = "mac"
 
 
 @dataclass(frozen=True, slots=True)
