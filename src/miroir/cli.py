@@ -162,6 +162,30 @@ def eval_summary() -> None:
     typer.echo(f"docs/results.md: summary rebuilt from {count} result file(s)")
 
 
+@eval_app.command("viewer")
+def eval_viewer(
+    *,
+    out: Annotated[Path, typer.Option(help="HTML file to write.")],
+    run: Annotated[
+        list[str] | None,
+        typer.Option(help="Gallery vector run to show; repeat it. Default: every model found."),
+    ] = None,
+    per_set: Annotated[int, typer.Option(help="Queries shown per set.")] = 20,
+) -> None:
+    """Write one HTML page showing each model's top 5 for sample queries of T1, T5 and T3."""
+    from miroir.eval.viewer import build_page, find_model_runs, pop_images  # noqa: PLC0415
+
+    settings = get_settings()
+    models = find_model_runs(settings, run or ())
+    with pop_images(settings) as fetch:
+        page = build_page(settings, models, fetch, per_set=per_set)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(page, encoding="utf-8")
+    size = out.stat().st_size
+    labels = ", ".join(m.label for m in models)
+    typer.echo(f"{out}: {size / 1e6:.1f} MB, models: {labels}")
+
+
 @amstertime_app.command("score")
 def amstertime_score(
     *,
