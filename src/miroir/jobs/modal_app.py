@@ -314,9 +314,19 @@ class ModalCalls:
     ) -> ChunkResult:
         return FAMILY_FUNCTIONS[option.family].remote(option, list(images), list(supplied))
 
+    def scale(self, option: ModalOption, containers: int) -> None:
+        """Let the option's function run `containers` containers at once, for this app run."""
+        FAMILY_FUNCTIONS[option.family].update_autoscaler(max_containers=containers)
+
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
         totals: dict[str, int] = {}
-        for counts in fill_images.map([list(c) for c in chunks]):
+        # A chunk that fails is counted, not fatal: what the others fetched is kept, and a
+        # rerun skips images already in the volume.
+        for counts in fill_images.map([list(c) for c in chunks], return_exceptions=True):
+            if isinstance(counts, BaseException):
+                logger.warning("image volume: a chunk failed: %s", counts)
+                totals["chunk_failed"] = totals.get("chunk_failed", 0) + 1
+                continue
             for key, n in counts.items():
                 totals[key] = totals.get(key, 0) + n
         return totals

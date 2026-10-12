@@ -43,8 +43,8 @@ class PublishableImages:
         publishable = frozenset(i.image_id for r in records if r.publishable for i in r.images)
         return cls(images, publishable, frozenset(commons_photos(settings)))
 
-    def check(self, image_ids: Sequence[str], service: str) -> None:
-        """Raise unless every id is a known Commons photo, or a known and publishable image."""
+    def check_known(self, image_ids: Sequence[str]) -> None:
+        """Raise unless every id is in images.parquet or commons.parquet (publishable or not)."""
         unknown = [i for i in image_ids if i not in self.images and i not in self._commons]
         if unknown:
             msg = (
@@ -52,6 +52,10 @@ class PublishableImages:
                 f"e.g. {unknown[0]}"
             )
             raise KeyError(msg)
+
+    def check(self, image_ids: Sequence[str], service: str) -> None:
+        """Raise unless every id is a known Commons photo, or a known and publishable image."""
+        self.check_known(image_ids)
         private = [i for i in image_ids if i not in self._publishable and i not in self._commons]
         if private:
             msg = (

@@ -33,6 +33,10 @@ rerank_app = typer.Typer(no_args_is_help=True, help="Step E1: re-rank shortlists
 app.add_typer(rerank_app, name="rerank")
 r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
 app.add_typer(r0_app, name="r0")
+index_app = typer.Typer(
+    no_args_is_help=True, help="Full-sample index for the website: PCA, the guess, upload."
+)
+app.add_typer(index_app, name="index")
 vlm_app = typer.Typer(
     no_args_is_help=True, help="Step H1: ask a vision model about query photos, search its answer."
 )
@@ -483,6 +487,20 @@ def embed_modal(
     max_usd: Annotated[
         float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
     ] = None,
+    workers: Annotated[
+        int, typer.Option(help="Chunks sent at once, each to its own GPU container.")
+    ] = 1,
+    reuse: Annotated[
+        list[str] | None,
+        typer.Option(help="Vector run of the same model and settings to take vectors from."),
+    ] = None,
+    all_images: Annotated[
+        bool,
+        typer.Option(
+            "--all-images",
+            help="Also images of records that are not publishable (full-sample index only).",
+        ),
+    ] = False,
 ) -> None:
     """Embed a gallery, or test sets' query images, with an open model on a Modal GPU.
 
@@ -499,7 +517,11 @@ def embed_modal(
     settings = get_settings()
     with open_commons_images(settings) as commons, open_modal(settings) as calls:
         runner = ModalRunner(
-            settings, calls, key_usage_usd=_openrouter_key_usage(), commons=commons
+            settings,
+            calls,
+            key_usage_usd=_openrouter_key_usage(),
+            commons=commons,
+            all_images=all_images,
         )
         if queries:
             done = runner.embed_queries(option, queries, max_usd=max_usd)
@@ -513,7 +535,9 @@ def embed_modal(
                 f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
             )
             return
-        written = runner.embed_gallery(option, gallery, max_usd=max_usd)
+        written = runner.embed_gallery(
+            option, gallery, max_usd=max_usd, workers=workers, reuse=reuse or ()
+        )
     for done in written:
         typer.echo(
             f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors, "
@@ -524,6 +548,14 @@ def embed_modal(
 @embed_app.command("modal-images")
 def embed_modal_images(
     gallery: Annotated[str, typer.Option(help="Gallery list.")] = "screening-20k-publishable",
+    *,
+    all_images: Annotated[
+        bool,
+        typer.Option(
+            "--all-images",
+            help="Also images of records that are not publishable (full-sample index only).",
+        ),
+    ] = False,
 ) -> None:
     """Fetch a gallery's images once into the Modal image volume, so model runs read them there."""
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
@@ -531,9 +563,10 @@ def embed_modal_images(
 
     settings = get_settings()
     with open_modal(settings) as calls:
-        counts = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage()).fill_images(
-            gallery
+        runner = ModalRunner(
+            settings, calls, key_usage_usd=_openrouter_key_usage(), all_images=all_images
         )
+        counts = runner.fill_images(gallery)
     typer.echo(f"{gallery}: {counts}")
 
 
@@ -685,6 +718,61 @@ def eval_rerank(
         gallery=gallery,
     )
     _echo_scores(scores)
+
+
+@index_app.command("pca")
+def index_pca(
+    *,
+    fit: Annotated[str, typer.Option(help="Vector run to fit on: gallery vectors only.")],
+    dims: Annotated[int, typer.Option(help="Dimensions to keep.")],
+    apply: Annotated[
+        list[str] | None, typer.Option(help="Vector run to project; repeat. Writes <run>-pca<N>.")
+    ] = None,
+) -> None:
+    """Fit PCA on a run's vectors, save it to the index dir, project runs with it."""
+    from miroir.eval.vectors import read_vectors  # noqa: PLC0415
+    from miroir.index.pca import fit_pca, save_pca, write_projected  # noqa: PLC0415
+
+    settings = get_settings()
+    pca = fit_pca(read_vectors(settings.vectors_path(fit)), dims, fit)
+    path = settings.index_dir / f"pca{dims}-{fit}.npz"
+    save_pca(path, pca)
+    typer.echo(f"{path}: {100 * pca.explained.sum():.1f}% of variance in {dims} dims")
+    for run in apply or ():
+        out = f"{run}-pca{dims}"
+        done = write_projected(
+            pca, read_vectors(settings.vectors_path(run)), settings.vectors_path(out)
+        )
+        typer.echo(f"{out}: {len(done.ids)} vectors of dim {done.dim}")
+
+
+@index_app.command("guess")
+def index_guess(
+    vectors: Annotated[str, typer.Option(help="EmbeddingGemma 2 (A7) run of the full sample.")],
+) -> None:
+    """Train the G4 building-or-object guess on a run; save it to the index dir as .npz."""
+    from miroir.index.guess import train_and_save  # noqa: PLC0415
+
+    settings = get_settings()
+    saved = train_and_save(settings, vectors, settings.index_dir / f"guess-{vectors}.npz")
+    report = saved.report
+    typer.echo(
+        f"{saved.path}: trained on {report.trained_on:,} images, held-out balanced accuracy "
+        f"{100 * report.held_out_accuracy:.1f}%"
+    )
+    for set_id, count, share in report.query_accuracy:
+        typer.echo(f"  {set_id} tune: {100 * share:.1f}% of {count} queries guessed right")
+
+
+@index_app.command("upload")
+def index_upload(
+    runs: Annotated[list[str], typer.Option("--run", help="Vector run to copy; repeat.")],
+) -> None:
+    """Copy vector runs and the full-sample .npz files into the `miroir-index` Modal volume."""
+    from miroir.index.upload import upload  # noqa: PLC0415 (imports the modal client)
+
+    for line in upload(get_settings(), runs):
+        typer.echo(line)
 
 
 def _openrouter_key_usage() -> float | None:

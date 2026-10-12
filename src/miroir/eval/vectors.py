@@ -125,27 +125,37 @@ class VectorFormatError(ValueError):
 def write_vectors(
     directory: Path, ids: Sequence[str], vectors: NDArray[np.floating], info: RunInfo
 ) -> VectorSet:
-    """Normalise, cast to float16 and write one run. Refuses to overwrite a finished run."""
+    """Normalise, cast to float16 and write one run. Refuses to overwrite a finished run.
+
+    Works in blocks of rows, so a large run (MegaLoc on every image: 8,448 x 138,000) never
+    needs a float32 copy of the whole matrix in memory.
+    """
     if (directory / META_FILE).exists():
         msg = f"{directory} already holds a run; pick a new run name"
         raise FileExistsError(msg)
-    matrix = np.asarray(vectors, dtype=np.float32)
-    if matrix.ndim != 2 or matrix.shape[0] != len(ids) or matrix.shape[1] == 0:
-        msg = f"vectors shape {matrix.shape} does not match {len(ids)} ids"
+    if vectors.ndim != 2 or vectors.shape[0] != len(ids) or vectors.shape[1] == 0:
+        msg = f"vectors shape {vectors.shape} does not match {len(ids)} ids"
         raise VectorFormatError(msg)
     _check_ids(tuple(ids))
-    if not np.isfinite(matrix).all():
-        msg = "vectors hold NaN or infinite values"
-        raise VectorFormatError(msg)
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    if (norms == 0).any():
-        msg = f"{int((norms == 0).sum())} zero vector(s): cannot normalise"
-        raise VectorFormatError(msg)
-    stored = (matrix / norms).astype(np.float16)
+    directory.mkdir(parents=True, exist_ok=True)
+    out = np.lib.format.open_memmap(
+        directory / VECTORS_FILE, mode="w+", dtype=np.float16, shape=vectors.shape
+    )
+    block = max(1, _CHUNK_ROWS * 64 // vectors.shape[1])
+    for start in range(0, vectors.shape[0], block):
+        matrix = np.asarray(vectors[start : start + block], dtype=np.float32)
+        if not np.isfinite(matrix).all():
+            msg = "vectors hold NaN or infinite values"
+            raise VectorFormatError(msg)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        if (norms == 0).any():
+            msg = f"{int((norms == 0).sum())} zero vector(s): cannot normalise"
+            raise VectorFormatError(msg)
+        out[start : start + block] = (matrix / norms).astype(np.float16)
+    out.flush()
+    stored: Vectors = out
     _check_rows(stored)
 
-    directory.mkdir(parents=True, exist_ok=True)
-    np.save(directory / VECTORS_FILE, stored, allow_pickle=False)
     (directory / IDS_FILE).write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
     meta = VectorMeta(
         format_version=FORMAT_VERSION,

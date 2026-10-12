@@ -74,6 +74,9 @@ class FakeCalls:
         vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
+    def scale(self, option: ModalOption, containers: int) -> None:
+        self.calls.append((f"scale {option.id}", containers))
+
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
         self.calls.append(("fill", sum(len(c) for c in chunks)))
         self.clock.now += SECONDS_PER_CALL
@@ -365,3 +368,38 @@ def test_query_run_needs_a_commons_fetcher_for_commons_photos(built: Settings) -
     r.probe(GEMMA, "g")
     with pytest.raises(ValueError, match="Commons fetcher"):
         r.embed_queries(GEMMA, ["T2"])
+
+
+def test_parallel_chunks_reuse_earlier_vectors_and_may_send_private_images(
+    built: Settings,
+) -> None:
+    ids = image_ids(built, publishable=True) + image_ids(built, publishable=False)
+    write_gallery(built, "g", ids)
+    write_gallery(built, "old", ids[:3])
+    clock = Clock()
+    calls = FakeCalls(clock)
+    r = ModalRunner(built, calls, clock=clock, all_images=True)
+    r.probe(GEMMA, "g")
+    (old,) = r.embed_gallery(GEMMA, "old")
+
+    (done,) = r.embed_gallery(GEMMA, "g", workers=2, reuse=[run_name(OPTIONS[GEMMA], "old")])
+    assert (f"scale {GEMMA}", 2) in calls.calls
+    assert calls.calls[-1] == (GEMMA, len(ids) - 3)  # the three old ones are not sent again
+    assert set(done.ids) == set(ids)
+    row = {i: n for n, i in enumerate(done.ids)}
+    for n, i in enumerate(old.ids):
+        assert np.array_equal(done.vectors[row[i]], old.vectors[n])
+    assert "reused" in done.info.notes
+
+
+def test_vectors_of_another_model_are_never_reused(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    r, _ = runner(built)
+    r.probe(GEMMA, "g")
+    (old,) = r.embed_gallery(GEMMA, "g")
+    megaloc = "A3-megaloc-322"
+    r.probe(megaloc, "g")
+    with pytest.raises(ValueError, match="not reused"):
+        r.embed_gallery(megaloc, "g", reuse=[run_name(OPTIONS[GEMMA], "g")])
+    assert old.ids

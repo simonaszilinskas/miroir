@@ -13,6 +13,9 @@ so a stopped run resumes without paying twice.
 Privacy (technical spec §9): Modal is an outside service, so only images of `publishable`
 records go there; a gallery with any other image is refused. Commons query photos are openly
 licensed: the Mac fetches them from Wikimedia (`CommonsImages`) and sends their bytes.
+The full-sample index is an exception (`all_images=True`): open models on our own
+Modal account may see every image, publishable or not (decided 2026-10-12 for the
+prototype). It never applies to OpenRouter.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import logging
 import random
 import time
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from itertools import batched
@@ -37,7 +41,7 @@ from miroir.config import SEED, Settings
 from miroir.eval import amstertime
 from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
 from miroir.eval.sets import read_gallery, tune_query_images
-from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
+from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_spec import (
     CHUNK_IMAGES,
@@ -93,6 +97,7 @@ class RemoteCalls(Protocol):
         images: Sequence[Image],
         supplied: Sequence[SuppliedImage] = (),
     ) -> ChunkResult: ...
+    def scale(self, option: ModalOption, containers: int) -> None: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
     def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
@@ -168,8 +173,11 @@ class ModalRunner:
         key_usage_usd: float | None = None,
         commons: CommonsImages | None = None,
         clock: Callable[[], float] = time.monotonic,
+        all_images: bool = False,
     ) -> None:
         self.settings = settings
+        self._all_images = all_images
+        """Send images of records that are not publishable too (full-sample index only)."""
         self._calls = calls
         self._commons = commons
         """Fetches Commons query photos on the Mac; needed only to embed them."""
@@ -233,12 +241,20 @@ class ModalRunner:
         return result, len(ids)
 
     def embed_gallery(
-        self, option_id: str, gallery: str, *, max_usd: float | None = None
+        self,
+        option_id: str,
+        gallery: str,
+        *,
+        max_usd: float | None = None,
+        workers: int = 1,
+        reuse: Sequence[str] = (),
     ) -> tuple[VectorSet, ...]:
         """Embed every image of a gallery and write its vector runs (technical spec §7.1).
 
         One run, or two for CLS+GeM (`output_runs`). `max_usd` refuses the run when the probe
-        projects a higher cost.
+        projects a higher cost. `workers` sends that many chunks at once, each to its own
+        container. `reuse` names vector runs of the same model and settings whose vectors are
+        taken as they are instead of being paid for again.
         """
         opt = option(option_id)
         run = run_name(opt, gallery)
@@ -248,17 +264,21 @@ class ModalRunner:
         ids = self._gallery(gallery)
         checkpoint = Checkpoint(self.settings.checkpoint_path(run))
         held = set(checkpoint.ids)
+        reused = {name: self._reuse(opt, name, set(ids), held, checkpoint) for name in reuse}
         todo = [i for i in ids if i not in held]
+        probe = self.probe_for(opt)
         projected = check_run(
             self.budget,
             self.ledger,
             self._key_usage,
-            self.probe_for(opt),
+            probe,
             option=opt.id,
             model=opt.model,
             resolution=opt.resolution,
             count=len(todo),
         )
+        if probe is not None and workers > 1:  # each extra container starts up once
+            projected += (workers - 1) * probe.fixed_s * probe.usd_per_s
         if max_usd is not None and projected > max_usd:
             msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
             raise BudgetError(msg)
@@ -274,17 +294,7 @@ class ModalRunner:
         start = self._clock()
         skips: dict[str, int] = {}
         cost = 0.0
-        for chunk in _chunks(todo):
-            paid = self._paid(
-                lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
-                machine=opt.machine,
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option=opt.id,
-                run=run,
-                model=opt.model,
-                items=len(chunk),
-            )
+        for paid in self._embed_chunks(opt, run, todo, workers):
             cost += paid.cost_usd
             _check_chunk(paid.result, opt)
             if paid.result.ids:
@@ -305,6 +315,9 @@ class ModalRunner:
             wall=self._clock() - start,
             skips=skips,
         )
+        if reused:
+            kept = ", ".join(f"{n} ({c})" for n, c in reused.items())
+            info = replace(info, notes=f"{info.notes}; vectors reused from {kept}, not counted")
         vectors = checkpoint.vectors()
         parts = np.split(vectors, len(outputs), axis=1)
         written = tuple(
@@ -411,6 +424,64 @@ class ModalRunner:
                 else:
                     supplied.append(SuppliedImage(fetched.image_id, fetched.jpeg))
             yield [], supplied
+
+    def _embed_chunks(
+        self, opt: ModalOption, run: str, todo: Sequence[str], workers: int
+    ) -> Iterator[_Paid[ChunkResult]]:
+        """Send `todo` in chunks, `workers` at a time; yield each answer as it arrives."""
+
+        def send(chunk: list[str]) -> _Paid[ChunkResult]:
+            return self._paid(
+                lambda: self._calls.embed(opt, self._images(chunk)),
+                machine=opt.machine,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option=opt.id,
+                run=run,
+                model=opt.model,
+                items=len(chunk),
+            )
+
+        if workers <= 1:
+            for chunk in _chunks(todo):
+                yield send(chunk)
+            return
+        self._calls.scale(opt, workers)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures: list[Future[_Paid[ChunkResult]]] = [
+                pool.submit(send, chunk) for chunk in _chunks(todo)
+            ]
+            try:
+                for future in as_completed(futures):
+                    yield future.result()
+            finally:
+                for future in futures:
+                    future.cancel()
+
+    def _reuse(
+        self, opt: ModalOption, name: str, wanted: set[str], held: set[str], checkpoint: Checkpoint
+    ) -> int:
+        """Copy the vectors of an earlier run into the checkpoint. Returns how many were taken.
+
+        Refused unless the run used the same model, size, pooling and number type on Modal.
+        """
+        done = read_vectors(self.settings.vectors_path(name))
+        info = done.info
+        same = (info.model, info.resolution, info.pooling) == (
+            opt.model,
+            opt.resolution,
+            opt.pooling.value,
+        ) and f"Modal {opt.machine.gpu}, {opt.dtype}" in info.notes
+        if not same:
+            msg = f"{name} was not embedded with the settings of {opt.id}; not reused"
+            raise ValueError(msg)
+        rows = [n for n, i in enumerate(done.ids) if i in wanted and i not in held]
+        for block in batched(rows, CHUNK_IMAGES * 10):
+            picked = [done.ids[n] for n in block]
+            checkpoint.append(picked, np.asarray(done.vectors[list(block)], dtype=np.float16))
+            held.update(picked)
+        logger.info("%s: reused %d vectors from %s", opt.id, len(rows), name)
+        return len(rows)
 
     def probe_for(self, opt: ModalOption) -> ModalProbe | None:
         """The option's probe, else one of an option with the same model, size and resize.
@@ -584,13 +655,18 @@ class ModalRunner:
             msg = f"no gallery {name!r} at {path}: run `miroir testsets build` first"
             raise FileNotFoundError(msg)
         ids = read_gallery(self.settings, name)
-        self._store().check(ids, SERVICE_NAME)
+        self._check(ids)
         return ids
 
     def _images(self, ids: Sequence[str]) -> list[Image]:
-        store = self._store()
-        store.check(ids, SERVICE_NAME)
-        return [store.images[i] for i in ids]
+        self._check(ids)
+        return [self._store().images[i] for i in ids]
+
+    def _check(self, ids: Sequence[str]) -> None:
+        if self._all_images:
+            self._store().check_known(ids)
+        else:
+            self._store().check(ids, SERVICE_NAME)
 
     def _store(self) -> PublishableImages:
         if self._loaded is None:

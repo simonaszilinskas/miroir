@@ -431,10 +431,10 @@ def score_router(
         raise ValueError(msg)
     gallery_ids = read_gallery(settings, gallery)
     entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
-    type_of_image = _types(settings)
+    type_of_image = photo_types(settings)
     models = tuple(load_model(settings, run, entity_of, gallery_ids) for run in runs)
     guessing = tuple(read_vectors(settings.vectors_path(r)) for r in guess_runs)
-    report = _guess(settings, guessing, gallery_ids, entity_of, type_of_image)
+    report = guess_report(settings, guessing, gallery_ids, entity_of, type_of_image)
 
     def queries_of(set_id: str) -> list[Query]:
         loaded = load_queries(settings, set_id, "tune")
@@ -490,7 +490,7 @@ def score_router(
     return RouterReport(result=result, guess=report, route=route, cross=cross)
 
 
-def _types(settings: Settings) -> dict[str, PhotoType]:
+def photo_types(settings: Settings) -> dict[str, PhotoType]:
     records = read_records(settings.records_parquet, settings.images_parquet)
     out: dict[str, PhotoType] = {}
     unknown = 0
@@ -504,7 +504,7 @@ def _types(settings: Settings) -> dict[str, PhotoType]:
     return out
 
 
-def _guess(
+def guess_report(
     settings: Settings,
     guessing: Sequence[VectorSet],
     gallery_ids: Sequence[str],

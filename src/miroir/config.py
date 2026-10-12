@@ -178,6 +178,12 @@ class Settings(BaseSettings):
         return self.data_root / "matches" / f"{name}.jsonl"
 
     @property
+    def index_dir(self) -> Path:
+        """What the website needs beside the vectors: PCA matrices and the building-or-object
+        guess, as small .npz files (technical spec §7.3)."""
+        return self.data_root / "index"
+
+    @property
     def vectors_dir(self) -> Path:
         """Vectors that remote jobs send back, one folder per model run."""
         return self.data_root / "vectors"
