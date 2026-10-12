@@ -102,7 +102,8 @@ def eval_run(
     publishable_queries: Annotated[
         bool,
         typer.Option(
-            "--publishable-queries", help="Only queries a closed model may see (publishable)."
+            "--publishable-queries",
+            help="Only queries a closed model may see: publishable, and in --gallery if given.",
         ),
     ] = False,
 ) -> None:

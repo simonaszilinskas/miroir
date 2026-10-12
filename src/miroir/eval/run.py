@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def score_test_set(
     searched = Gallery.from_vectors(vectors, entity_of, ids)
     loaded = load_queries(settings, set_id, half, allow_sealed=allow_sealed)
     if publishable_queries:
-        loaded = publishable_only(settings, loaded)
+        loaded = publishable_only(settings, loaded, in_gallery=ids)
     queries = search_queries(loaded)
     scored = set_score(
         score(asking, searched, queries),
@@ -115,10 +116,18 @@ def compare(a: Path, b: Path, *, test_set: str, half: str, gallery: str) -> tupl
     return paired_bootstrap(score_a.per_query, score_b.per_query)
 
 
-def publishable_only(settings: Settings, queries: list[Query]) -> list[Query]:
-    """Queries whose image comes from a publishable record (technical spec §7, closed models)."""
+def publishable_only(
+    settings: Settings, queries: list[Query], *, in_gallery: Sequence[str] | None = None
+) -> list[Query]:
+    """Queries whose image comes from a publishable record (technical spec §7, closed models).
+
+    With `in_gallery`, also drop queries whose image is not in that list (images a service
+    could not fetch are left out of the list, so every option answers the same queries).
+    """
     records = read_records(settings.records_parquet, settings.images_parquet)
     public = {i.image_id for r in records if r.publishable for i in r.images}
+    if in_gallery is not None:
+        public &= set(in_gallery)
     kept = [q for q in queries if q.query_image_id in public]
     logger.info("kept %d of %d queries with a publishable image", len(kept), len(queries))
     return kept

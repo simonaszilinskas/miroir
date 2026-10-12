@@ -42,3 +42,5 @@ def test_publishable_only_drops_queries_a_closed_model_may_not_see(settings: Set
         for n, image_id in enumerate((public, private))
     ]
     assert [q.query_image_id for q in publishable_only(settings, queries)] == [public]
+
+    assert publishable_only(settings, queries, in_gallery=[private]) == []
