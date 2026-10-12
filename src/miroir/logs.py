@@ -11,3 +11,6 @@ def setup(*, verbose: bool = False) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    if not verbose:
+        # httpx logs every request at INFO; a run makes tens of thousands.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
