@@ -25,6 +25,10 @@ api = [
     "fastapi>=0.143.0",
     "uvicorn>=0.54.0",
 ]
+openrouter = [
+    "httpx>=0.28.1",
+    "pillow>=12.3.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +39,7 @@ packages = ["src/miroir"]
 
 [dependency-groups]
 dev = [
+    "miroir[openrouter]",
     "pyarrow-stubs>=20.0.0.20260819",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
@@ -109,3 +114,6 @@ reportUnnecessaryTypeIgnoreComment = "error"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--disable-socket", "--strict-markers", "-ra"]
+
+[tool.uv.sources]
+miroir = { workspace = true }
