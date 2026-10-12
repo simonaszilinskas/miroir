@@ -1,0 +1,365 @@
+<title>@@PAGE_TITLE@@</title>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap");
+
+:root {
+  --bg: #f6f7f6;
+  --surface: #ffffff;
+  --well: #eceeec;
+  --ink: #1c2127;
+  --muted: #5d6670;
+  --rule: #d6dbdd;
+  --accent: #2c5a6e;
+  --accent-soft: #e2ecf0;
+  --right: #2d6a3c;
+  --right-soft: #e3efe5;
+  --wrong: #a23a2f;
+  --wrong-soft: #f5e4e1;
+  --focus: #2c5a6e;
+  --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --tile: 132px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #14181c;
+    --surface: #1b2026;
+    --well: #232a31;
+    --ink: #e5e8ea;
+    --muted: #9aa4ad;
+    --rule: #333b44;
+    --accent: #84b4ca;
+    --accent-soft: #1f3540;
+    --right: #7fc28e;
+    --right-soft: #1d3324;
+    --wrong: #ec8e82;
+    --wrong-soft: #3b2220;
+    --focus: #84b4ca;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14181c;
+  --surface: #1b2026;
+  --well: #232a31;
+  --ink: #e5e8ea;
+  --muted: #9aa4ad;
+  --rule: #333b44;
+  --accent: #84b4ca;
+  --accent-soft: #1f3540;
+  --right: #7fc28e;
+  --right-soft: #1d3324;
+  --wrong: #ec8e82;
+  --wrong-soft: #3b2220;
+  --focus: #84b4ca;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 var(--sans);
+}
+.page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 64px; display: grid; gap: 28px; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible + span, label:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+h1, h2 { font-family: var(--serif); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.01em; }
+h2 { font-size: 21px; line-height: 1.2; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--muted); }
+.eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+/* header */
+.intro { display: grid; gap: 10px; }
+.intro p { margin: 0; max-width: 68ch; color: var(--muted); }
+.models { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
+.models li { display: flex; gap: 6px; align-items: baseline; }
+.models b { font-weight: 600; }
+
+/* filter bar */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+  padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--rule);
+}
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button {
+  font: inherit; font-weight: 500; color: var(--ink); background: transparent; border: 0;
+  padding: 6px 12px; cursor: pointer; border-right: 1px solid var(--rule);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border-radius: 4px; padding: 2px 4px; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.check.off { color: var(--muted); cursor: not-allowed; }
+.count { margin-left: auto; color: var(--muted); }
+
+/* set section */
+.set { display: grid; gap: 14px; }
+.set-head { display: grid; gap: 4px; }
+.set-head p { margin: 0; color: var(--muted); max-width: 68ch; }
+.scores-wrap { overflow-x: auto; }
+table.scores { border-collapse: collapse; min-width: 560px; width: 100%; background: var(--surface); border: 1px solid var(--rule); }
+.scores th, .scores td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.scores th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.scores tr:last-child td { border-bottom: 0; }
+.metric { display: grid; gap: 3px; min-width: 104px; }
+.metric .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.metric .ci { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.range { position: relative; height: 4px; background: var(--well); border-radius: 2px; }
+.range i { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 2px; }
+.range b { position: absolute; top: -2px; width: 2px; height: 8px; background: var(--accent); }
+.source { font-size: 12px; color: var(--muted); }
+
+/* query card */
+.cards { display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; display: grid; }
+.card-head {
+  display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline;
+  padding: 10px 14px; border-bottom: 1px solid var(--rule);
+}
+.card-head .flags { margin-left: auto; display: flex; gap: 6px; }
+.flag { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 3px; border: 1px solid var(--rule); color: var(--muted); }
+.card-body { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
+.ref { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border-right: 1px solid var(--rule); align-content: start; }
+.rows { overflow-x: auto; padding: 6px 14px 12px; }
+.row { display: grid; grid-template-columns: 150px auto; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--rule); min-width: max-content; }
+.row:last-child { border-bottom: 0; }
+.row-name { display: grid; gap: 6px; align-content: start; }
+.row-name b { font-weight: 600; overflow-wrap: anywhere; }
+.verdict { justify-self: start; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; border: 1.5px solid; }
+.verdict.top1 { color: var(--surface); background: var(--right); border-color: var(--right); }
+.verdict.top5 { color: var(--right); background: var(--right-soft); border-color: var(--right); }
+.verdict.miss { color: var(--wrong); background: var(--wrong-soft); border-color: var(--wrong); border-style: dashed; }
+.tiles { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+/* thumbnail tile */
+.tile { width: var(--tile); display: grid; gap: 4px; align-content: start; }
+.ref .tile { width: auto; }
+.frame { position: relative; aspect-ratio: 1; width: 100%; max-width: 100%; background: var(--well); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.frame .none { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+.tile.right .frame { border: 3px solid var(--right); }
+.tile.wrong .frame { border: 1px dashed var(--wrong); }
+.badge {
+  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1;
+}
+.right .badge { background: var(--right); color: var(--surface); }
+.wrong .badge { background: var(--surface); color: var(--wrong); border: 1.5px solid var(--wrong); }
+.rank { position: absolute; top: 4px; left: 4px; font: 500 11px/1 var(--mono); background: var(--surface); color: var(--ink); padding: 3px 5px; border-radius: 3px; }
+.tile .t { font-size: 12.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tile .meta { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+.tile .meta a { font-weight: 500; }
+.sim { font-family: var(--mono); font-size: 11px; }
+.empty { padding: 28px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed var(--rule); border-radius: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend .dot { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-weight: 700; font-size: 11px; }
+.legend .dot.r { background: var(--right); color: var(--surface); }
+.legend .dot.w { background: var(--surface); color: var(--wrong); border: 1.5px solid var(--wrong); }
+
+@media (max-width: 760px) {
+  .card-body { grid-template-columns: minmax(0, 1fr); }
+  .ref { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .row { grid-template-columns: 112px auto; }
+  :root { --tile: 112px; }
+  .count { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="page">
+  <header class="intro">
+    <div class="eyebrow">MIROIR · visual search over POP records</div>
+    <h1>Miroir Match Viewer</h1>
+    <p id="about"></p>
+    <ul class="models" id="models"></ul>
+    <div class="legend" aria-label="Legend">
+      <span><span class="dot r" aria-hidden="true">✓</span>Right record (thick border)</span>
+      <span><span class="dot w" aria-hidden="true">✗</span>Wrong record (dashed border)</span>
+      <span>Similarity is cosine, 0 to 1.</span>
+    </div>
+  </header>
+
+  <nav class="bar" aria-label="Filters">
+    <div class="seg" role="group" aria-label="Test set" id="set-filter"></div>
+    <label class="check" id="disagree-label"><input type="checkbox" id="only-disagree"><span>Models disagree</span></label>
+    <label class="check"><input type="checkbox" id="only-misses"><span>Misses only</span></label>
+    <span class="count num" id="count" aria-live="polite"></span>
+  </nav>
+
+  <main id="sets"></main>
+</div>
+
+<script id="miroir-data" type="application/json">@@PAGE_DATA@@</script>
+<script>
+(function () {
+  "use strict";
+  var data = JSON.parse(document.getElementById("miroir-data").textContent);
+  var modelOf = {};
+  data.models.forEach(function (m) { modelOf[m.key] = m; });
+  var SET_NOTES = {
+    T1: "Query: one archive photo of a building. Right: another photo of the same building.",
+    T5: "Query: one view of a museum object. Right: another view of the same object.",
+    T3: "Query: one crop of an artwork from a Jeu de Paume room photo. Right: another crop of the same artwork."
+  };
+  var COLLECTIONS = { joconde: "Joconde", memoire: "Mémoire", "rose-valland": "Rose Valland" };
+  var state = { set: "all", disagree: false, misses: false };
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function pct(v) { return (100 * v).toFixed(1) + "%"; }
+  function outcome(rank) { return rank === 1 ? "top1" : rank !== null && rank <= 5 ? "top5" : "miss"; }
+
+  function verdict(rank) {
+    if (rank === null) return '<span class="verdict miss">No answer in gallery</span>';
+    if (rank === 1) return '<span class="verdict top1">✓ Right at 1</span>';
+    if (rank <= 5) return '<span class="verdict top5">✓ Right at ' + rank + "</span>";
+    return '<span class="verdict miss">✗ Right one at ' + rank.toLocaleString("en") + "</span>";
+  }
+
+  function frame(image, extra) {
+    var src = data.images[image];
+    var img = src
+      ? '<img src="' + src + '" alt="" loading="lazy" decoding="async">'
+      : '<span class="none">No image</span>';
+    return '<div class="frame">' + img + (extra || "") + "</div>";
+  }
+
+  function meta(r) {
+    return '<div class="meta"><span>' + esc(COLLECTIONS[r.collection] || r.collection) + "</span>" +
+      '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">POP ↗</a></div>';
+  }
+
+  function refTile(label, r) {
+    if (!r) return '<div class="tile"><div class="eyebrow">' + label + '</div><div class="frame"><span class="none">None in gallery</span></div></div>';
+    return '<figure class="tile" style="margin:0"><div class="eyebrow">' + label + "</div>" +
+      frame(r.image) + '<div class="t" title="' + esc(r.title) + '">' + esc(r.title) + "</div>" + meta(r) + "</figure>";
+  }
+
+  function hitTile(h, i) {
+    var cls = h.right ? "right" : "wrong";
+    var badge = '<span class="badge" role="img" aria-label="' + (h.right ? "Right" : "Wrong") + '">' + (h.right ? "✓" : "✗") + "</span>";
+    var rank = '<span class="rank">' + (i + 1) + "</span>";
+    return '<li class="tile ' + cls + '">' + frame(h.image, rank + badge) +
+      '<div class="t" title="' + esc(h.title) + '">' + esc(h.title) + "</div>" +
+      '<div class="meta"><span class="sim">' + h.similarity.toFixed(3) + "</span><span>" +
+      esc(COLLECTIONS[h.collection] || h.collection) + '</span><a href="' + esc(h.url) +
+      '" target="_blank" rel="noopener">POP ↗</a></div></li>';
+  }
+
+  function metricCell(t) {
+    var v = t[0], lo = t[1], hi = t[2];
+    return '<td><div class="metric"><span class="v">' + pct(v) + '</span>' +
+      '<span class="range" aria-hidden="true"><i style="left:' + (100 * lo) + "%;width:" + (100 * (hi - lo)) + '%"></i>' +
+      '<b style="left:calc(' + (100 * v) + '% - 1px)"></b></span>' +
+      '<span class="ci">95% CI ' + (100 * lo).toFixed(1) + "–" + (100 * hi).toFixed(1) + "</span></div></td>";
+  }
+
+  function scoreTable(set) {
+    var rows = set.scores.map(function (s) {
+      return "<tr><td><b>" + esc(modelOf[s.model].label) + "</b></td>" +
+        metricCell(s.hit_at_1) + metricCell(s.hit_at_5) + metricCell(s.hit_at_10) +
+        '<td class="num">' + s.queries.toLocaleString("en") + '</td><td class="source">' + esc(s.source) + "</td></tr>";
+    }).join("");
+    return '<div class="scores-wrap"><table class="scores"><thead><tr><th>Model</th><th>Hit@1</th><th>Hit@5</th><th>Hit@10</th><th>Queries</th><th>Source</th></tr></thead><tbody>' + rows + "</tbody></table></div>";
+  }
+
+  function card(q) {
+    var outs = q.answers.map(function (a) { return outcome(a.rank); });
+    var disagree = outs.some(function (o) { return o !== outs[0]; });
+    var miss = outs.indexOf("miss") >= 0;
+    var flags = (disagree ? '<span class="flag">Models disagree</span>' : "") + (miss ? '<span class="flag">Miss</span>' : "");
+    var rows = q.answers.map(function (a) {
+      var m = modelOf[a.model];
+      return '<div class="row"><div class="row-name"><b title="' + esc(m.model) + '">' + esc(m.label) + "</b>" + verdict(a.rank) + "</div>" +
+        '<ol class="tiles" aria-label="Top ' + a.top.length + " for " + esc(m.label) + '">' + a.top.map(hitTile).join("") + "</ol></div>";
+    }).join("");
+    return '<article class="card" data-set="' + esc(q.set_id) + '" data-disagree="' + disagree + '" data-miss="' + miss + '">' +
+      '<div class="card-head"><span class="mono">' + esc(q.query_id) + "</span>" +
+      '<span class="muted">' + esc(q.query.title) + "</span>" +
+      '<span class="flags">' + flags + "</span></div>" +
+      '<div class="card-body"><div class="ref">' + refTile("Query", q.query) + refTile("Right answer", q.answer) + "</div>" +
+      '<div class="rows">' + rows + "</div></div></article>";
+  }
+
+  function build() {
+    var n = data.models.length;
+    document.getElementById("about").textContent =
+      data.per_set + " random queries per set from the tune halves (seed " + data.seed + "), publishable images only. " +
+      "Every model searches the same gallery: " + data.gallery_images.toLocaleString("en") + " images of " + data.gallery +
+      ". Results are ranked by record; each tile shows the record's closest image.";
+    document.getElementById("models").innerHTML = data.models.map(function (m) {
+      return '<li><span class="eyebrow">Model</span><b>' + esc(m.label) + '</b><span class="mono muted">' + esc(m.run) + "</span></li>";
+    }).join("");
+
+    var sets = data.sets.map(function (s) { return s.set_id; });
+    var seg = document.getElementById("set-filter");
+    seg.innerHTML = ["all"].concat(sets).map(function (id) {
+      return '<button type="button" data-set="' + esc(id) + '" aria-pressed="' + (id === "all") + '">' + (id === "all" ? "All sets" : esc(id)) + "</button>";
+    }).join("");
+
+    document.getElementById("sets").innerHTML = data.sets.map(function (s) {
+      var cards = data.queries.filter(function (q) { return q.set_id === s.set_id; }).map(card).join("");
+      return '<section class="set" data-set="' + esc(s.set_id) + '"><div class="set-head"><div class="eyebrow">' + esc(s.set_id) + "</div>" +
+        "<h2>" + esc(s.name) + "</h2><p>" + esc(SET_NOTES[s.set_id] || "") + "</p></div>" + scoreTable(s) +
+        '<div class="cards">' + (cards || '<div class="empty">No usable queries in this set.</div>') + "</div>" +
+        '<div class="empty nomatch" hidden>No query in this set matches the filters.</div></section>';
+    }).join("");
+
+    var dis = document.getElementById("only-disagree");
+    if (n < 2) {
+      dis.disabled = true;
+      var lab = document.getElementById("disagree-label");
+      lab.classList.add("off");
+      lab.title = "Needs two or more models";
+      lab.querySelector("span").textContent = "Models disagree (needs 2+ models)";
+    }
+    seg.addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b) return;
+      state.set = b.getAttribute("data-set");
+      seg.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      apply();
+    });
+    dis.addEventListener("change", function () { state.disagree = dis.checked; apply(); });
+    var mis = document.getElementById("only-misses");
+    mis.addEventListener("change", function () { state.misses = mis.checked; apply(); });
+    apply();
+  }
+
+  function apply() {
+    var shown = 0, total = 0;
+    document.querySelectorAll("section.set").forEach(function (sec) {
+      var visibleSet = state.set === "all" || sec.getAttribute("data-set") === state.set;
+      sec.hidden = !visibleSet;
+      var inSet = 0;
+      sec.querySelectorAll("article.card").forEach(function (c) {
+        total += 1;
+        var ok = visibleSet &&
+          (!state.disagree || c.getAttribute("data-disagree") === "true") &&
+          (!state.misses || c.getAttribute("data-miss") === "true");
+        c.hidden = !ok;
+        if (ok) { shown += 1; inSet += 1; }
+      });
+      var note = sec.querySelector(".nomatch");
+      if (sec.querySelector("article.card")) note.hidden = !(visibleSet && inSet === 0);
+    });
+    document.getElementById("count").textContent = "Showing " + shown + " of " + total + " queries";
+  }
+
+  build();
+})();
+</script>
