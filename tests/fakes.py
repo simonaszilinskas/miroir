@@ -59,6 +59,8 @@ class FakeOpenRouter:
     batch_bodies: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     request_sizes: list[int] = field(default_factory=list[int])
     """Number of inputs in each /embeddings request."""
+    refuse_after: int | None = None
+    """Refuse every /embeddings request after this many, as if credit ran out."""
     fail_first: int = 0
     """Answer this many requests with 429 before serving."""
     polls: int = 0
@@ -69,6 +71,8 @@ class FakeOpenRouter:
             return httpx.Response(429, headers={"retry-after": "0"})
         path = request.url.path.removeprefix("/api/v1")
         if path == "/embeddings":
+            if self.refuse_after is not None and len(self.request_sizes) >= self.refuse_after:
+                return httpx.Response(402, json={"error": {"message": "out of credit"}})
             body = json.loads(request.content)
             self.embedding_bodies.append(body)
             self.request_sizes.append(len(body["input"]))

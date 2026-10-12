@@ -17,7 +17,7 @@ from miroir.jobs.embed import (
     probe,
     run_name,
 )
-from miroir.jobs.openrouter import OpenRouterClient
+from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PrivacyError
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.records.build import build
@@ -146,3 +146,29 @@ def test_queries_keep_only_publishable_images(built: Settings) -> None:
 
     assert run.ids == tuple(public)
     assert run.info.gallery == "T5-tune-queries"
+
+
+def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    probe(embedder(built, FakeOpenRouter()), "g")
+
+    dying = FakeOpenRouter(refuse_after=2)
+    with pytest.raises(OpenRouterError, match="out of credit"):
+        embed_gallery(
+            embedder(
+                built,
+                dying,
+            ),
+            "g",
+        )
+    first = sum(dying.request_sizes)
+    assert 0 < first < len(ids)
+
+    fake = FakeOpenRouter()
+    done = embed_gallery(embedder(built, fake), "g")
+
+    assert sum(fake.request_sizes) == len(ids) - first
+    assert sorted(done.ids) == sorted(ids)
+    assert done.info.cost_usd == pytest.approx(COST_PER_INPUT * len(ids))
+    assert not built.checkpoint_path(run_name(OPTIONS["A9"], "g")).exists()

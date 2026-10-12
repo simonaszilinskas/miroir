@@ -136,6 +136,11 @@ class Settings(BaseSettings):
         """
         return self.data_root / "spend" / "openrouter.jsonl"
 
+    def checkpoint_path(self, run: str) -> Path:
+        """Vectors a paid run has already received, kept until the run is written."""
+        _check_name(run)
+        return self.data_root / "checkpoints" / run
+
     def probe_path(self, option: str) -> Path:
         """Cost measured on 100 images for one option, read before a full run."""
         _check_name(option)

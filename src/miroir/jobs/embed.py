@@ -13,7 +13,7 @@ import random
 import time
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from itertools import batched
 from pathlib import Path
@@ -26,6 +26,7 @@ from miroir.config import SEED, Settings
 from miroir.eval.sets import load_queries, read_gallery
 from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
 from miroir.images.fetch import LONG_SIDE, Fetched, ImageFetcher
+from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.openrouter import (
     JSON,
     Embeddings,
@@ -124,11 +125,22 @@ class OpenRouterEmbedder:
     # images
 
     def embed_images(
-        self, image_ids: Sequence[str], *, kind: SpendKind, run: str, limit_usd: float
+        self,
+        image_ids: Sequence[str],
+        *,
+        kind: SpendKind,
+        run: str,
+        limit_usd: float,
+        checkpoint: Checkpoint | None = None,
     ) -> Embedded:
-        """Fetch, check and embed images. Stops with BudgetError once `limit_usd` is spent."""
+        """Fetch, check and embed images. Stops with BudgetError once `limit_usd` is spent.
+
+        With a checkpoint, images it holds are not sent again, each answer is saved to it as it
+        arrives, and the result holds the checkpoint's vectors as well as the new ones.
+        """
         self.check_publishable(image_ids)
-        images = [self._images[i] for i in image_ids]
+        held = set(checkpoint.ids) if checkpoint else set[str]()
+        images = [self._images[i] for i in image_ids if i not in held]
         skips: Counter[str] = Counter()
         ids: list[str] = []
         rows: list[NDArray[np.float16]] = []  # normalised float16: half the memory
@@ -144,13 +156,20 @@ class OpenRouterEmbedder:
                 cost_usd=result.cost_usd,
                 items=len(chunk),
             )
-            ids.extend(f.image_id for f in chunk)
-            rows.append(_unit_float16(result.vectors))
+            chunk_ids = [f.image_id for f in chunk]
+            unit = _unit_float16(result.vectors)
+            if checkpoint is not None:
+                checkpoint.append(chunk_ids, unit)
+            else:
+                rows.append(unit)
+            ids.extend(chunk_ids)
             if spent > limit_usd:
                 msg = f"{run}: spent ${spent:.4f}, over its ${limit_usd:.4f} limit; stopped"
                 raise BudgetError(msg)
             if len(ids) % 1000 < len(chunk):
                 logger.info("%s: %d/%d images, $%.4f", run, len(ids), len(images), spent)
+        if checkpoint is not None:
+            return Embedded(checkpoint.ids, checkpoint.vectors(), spent, dict(skips))
         vectors = np.concatenate(rows) if rows else np.zeros((0, 0), dtype=np.float32)
         return Embedded(tuple(ids), vectors, spent, dict(skips))
 
@@ -267,6 +286,9 @@ def _run_images(embedder: OpenRouterEmbedder, ids: list[str], gallery: str) -> V
     out = embedder.settings.vectors_path(run)
     _refuse_existing(out)
     embedder.check_publishable(ids)
+    checkpoint = Checkpoint(embedder.settings.checkpoint_path(run))
+    held = set(checkpoint.ids)
+    todo = [i for i in ids if i not in held]
     projected = check_run(
         embedder.budget,
         embedder.ledger,
@@ -275,13 +297,26 @@ def _run_images(embedder: OpenRouterEmbedder, ids: list[str], gallery: str) -> V
         option=option.option,
         model=option.model,
         resolution=LONG_SIDE,
-        count=len(ids),
+        count=len(todo),
     )
     limit = projected * OVERRUN_FACTOR
-    logger.info("%s: %d images, about $%.2f (stops past $%.2f)", run, len(ids), projected, limit)
+    logger.info(
+        "%s: %d images to send (%d saved before), about $%.2f (stops past $%.2f)",
+        run,
+        len(todo),
+        len(held),
+        projected,
+        limit,
+    )
     start = time.monotonic()
-    done = embedder.embed_images(ids, kind=SpendKind.RUN, run=run, limit_usd=limit)
-    return _write(embedder, out, done, gallery, start)
+    done = embedder.embed_images(
+        todo, kind=SpendKind.RUN, run=run, limit_usd=limit, checkpoint=checkpoint
+    )
+    # Cost of the whole run, including the sessions before a resume.
+    paid = embedder.ledger.total(SpendKind.RUN, run=run)
+    written = _write(embedder, out, replace(done, cost_usd=paid), gallery, start)
+    checkpoint.remove()
+    return written
 
 
 def _run_texts(embedder: OpenRouterEmbedder, texts: Mapping[str, str], gallery: str) -> VectorSet:

@@ -135,11 +135,19 @@ class SpendLedger:
             msg = f"{self._path} is damaged; fix it by hand before spending more: {err}"
             raise BudgetError(msg) from err
 
-    def total(self, kind: SpendKind | None = None, service: Service | None = None) -> float:
+    def total(
+        self,
+        kind: SpendKind | None = None,
+        service: Service | None = None,
+        *,
+        run: str | None = None,
+    ) -> float:
         return sum(
             line.cost_usd
             for line in self.lines()
-            if (kind is None or line.kind == kind) and (service is None or line.service == service)
+            if (kind is None or line.kind == kind)
+            and (service is None or line.service == service)
+            and (run is None or line.run == run)
         )
 
 
