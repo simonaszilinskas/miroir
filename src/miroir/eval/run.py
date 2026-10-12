@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from miroir.commons.model import is_commons_image
 from miroir.config import Half, Settings, eval_result_path
 from miroir.eval import amstertime
+from miroir.eval.rerank import MIX_INLIERS, SHORTLIST, Rerank, read_matches, rerank, search_times
 from miroir.eval.results import (
     RunResult,
     SetScore,
@@ -18,9 +20,19 @@ from miroir.eval.results import (
     set_score,
     write_result,
 )
-from miroir.eval.scoring import Difference, Gallery, SearchQuery, paired_bootstrap, score
+from miroir.eval.scoring import (
+    Difference,
+    Gallery,
+    ScoreResult,
+    SearchQuery,
+    Shortlist,
+    paired_bootstrap,
+    score,
+    shortlists,
+)
 from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.vectors import read_vectors
+from miroir.eval.vectors import VectorSet, read_vectors
+from miroir.jobs.spend import SpendKind, SpendLedger
 from miroir.records.store import read_images, read_records
 
 logger = logging.getLogger(__name__)
@@ -55,13 +67,15 @@ def score_test_set(
         if query_vector_run is None
         else read_vectors(settings.vectors_path(query_vector_run))
     )
-    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
-    ids = None if gallery is None else read_gallery(settings, gallery)
-    searched = Gallery.from_vectors(vectors, entity_of, ids)
-    loaded = load_queries(settings, set_id, half, allow_sealed=allow_sealed)
-    if publishable_queries:
-        loaded = publishable_only(settings, loaded, in_gallery=ids)
-    queries = search_queries(loaded)
+    searched, queries = _search_inputs(
+        settings,
+        vectors,
+        set_id=set_id,
+        half=half,
+        gallery=gallery,
+        allow_sealed=allow_sealed,
+        publishable_queries=publishable_queries,
+    )
     scored = set_score(
         score(asking, searched, queries),
         test_set=set_id,
@@ -80,6 +94,111 @@ def score_test_set(
         today=_today(),
     )
     return scored
+
+
+def _search_inputs(
+    settings: Settings,
+    vectors: VectorSet,
+    *,
+    set_id: str,
+    half: Half,
+    gallery: str | None,
+    allow_sealed: bool,
+    publishable_queries: bool,
+) -> tuple[Gallery, list[SearchQuery]]:
+    entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
+    ids = None if gallery is None else read_gallery(settings, gallery)
+    searched = Gallery.from_vectors(vectors, entity_of, ids)
+    loaded = load_queries(settings, set_id, half, allow_sealed=allow_sealed)
+    if publishable_queries:
+        loaded = publishable_only(settings, loaded, in_gallery=ids)
+    return searched, search_queries(loaded)
+
+
+def rerank_shortlists(
+    settings: Settings, *, vector_run: str, set_id: str, gallery: str, top: int = SHORTLIST
+) -> tuple[tuple[Shortlist, ...], ScoreResult, VectorSet]:
+    """Each tune query's top entities (step E1), on the queries a closed model may see.
+
+    Also returns the plain search score of the same queries and the vectors searched.
+    """
+    vectors = read_vectors(settings.vectors_path(vector_run))
+    searched, queries = _search_inputs(
+        settings,
+        vectors,
+        set_id=set_id,
+        half="tune",
+        gallery=gallery,
+        allow_sealed=False,
+        publishable_queries=True,
+    )
+    lists, plain = shortlists(vectors, searched, queries, top=top)
+    return lists, plain, vectors
+
+
+def matches_name(vector_run: str, set_id: str, top: int = SHORTLIST) -> str:
+    """Name of the file holding a shortlist's keypoint matches."""
+    return f"E1-{vector_run}-{set_id}-top{top}"
+
+
+def score_rerank(
+    settings: Settings,
+    *,
+    round_id: str,
+    label: str,
+    vector_run: str,
+    set_id: str,
+    gallery: str,
+    top: int = SHORTLIST,
+) -> list[SetScore]:
+    """Score a shortlist re-ranked each way (`Rerank`), one result file per way.
+
+    Writes eval/results/<round>/E-E1-<label>-<way>.json. Matches must be on file
+    (`miroir rerank modal`).
+    """
+    lists, plain, vectors = rerank_shortlists(
+        settings, vector_run=vector_run, set_id=set_id, gallery=gallery, top=top
+    )
+    name = matches_name(vector_run, set_id, top)
+    matched = read_matches(settings.matches_path(name))
+    unmatched = [s.query_id for s in lists if s.query_id not in matched]
+    if unmatched:
+        msg = f"{name}: {len(unmatched)} queries have no matches yet, e.g. {unmatched[0]}"
+        raise ValueError(msg)
+    mine = [matched[s.query_id] for s in lists]
+    median_s, p95_s = search_times(mine)
+    cost = SpendLedger(settings.spend_ledger).total(SpendKind.RUN, run=name)
+    out: list[SetScore] = []
+    for how in Rerank:
+        per_query = tuple(rerank(s, matched[s.query_id], how) for s in lists)
+        result = replace(plain, per_query=per_query)
+        scored = set_score(result, test_set=set_id, half="tune", gallery=gallery)
+        info = replace(
+            vectors.info,
+            option="E1",
+            model=f"{vectors.info.model} + ALIKED/LightGlue",
+            cost_usd=cost,
+            wall_time_s=sum(m.search_s + m.candidates_s for m in mine),
+            notes=(
+                f"top {top} entities re-ranked by {how} (homography inliers"
+                f"{f', + cosine, inliers / {MIX_INLIERS:.0f}' if how is Rerank.MIX else ''}); "
+                f"adds {median_s * 1000:.0f} ms median, {p95_s * 1000:.0f} ms p95 per search "
+                "on a Modal L4 (gallery keypoints computed ahead)"
+            ),
+        )
+        write_result(
+            eval_result_path(round_id, "E", f"E1-{label}-{how}"),
+            round_id=round_id,
+            step="E",
+            option=f"E1-{label}-{how}",
+            vector_run=vector_run,
+            query_vector_run=vector_run,
+            vectors=info,
+            scores=[scored],
+            today=_today(),
+        )
+        out.append(scored)
+    return out
 
 
 def score_amstertime(

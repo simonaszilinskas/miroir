@@ -29,6 +29,8 @@ amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R
 eval_app.add_typer(amstertime_app, name="amstertime")
 embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote models.")
 app.add_typer(embed_app, name="embed")
+rerank_app = typer.Typer(no_args_is_help=True, help="Step E1: re-rank shortlists by keypoints.")
+app.add_typer(rerank_app, name="rerank")
 r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
 app.add_typer(r0_app, name="r0")
 vlm_app = typer.Typer(
@@ -560,6 +562,56 @@ def vlm_score(
         h3, weight = vlm.score_h3(settings, prepared, image_run, image_label, round_id=round_id)
         typer.echo(f"H3 {image_label}+H1, image weight {weight:.1f}: {h3.vectors.notes}")
         _echo_scores(h3.scores)
+
+
+@rerank_app.command("modal")
+def rerank_modal(
+    *,
+    vectors: Annotated[str, typer.Option(help="Vector run whose search gives the shortlists.")],
+    test_set: Annotated[str, typer.Option("--set", help="Test set id; tune half only.")],
+    max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list.")] = (
+        "screening-20k-publishable-fetched"
+    ),
+) -> None:
+    """Match each tune query against its top 50 entities' best images, on a Modal GPU. Paid."""
+    from miroir.eval.rerank import tasks  # noqa: PLC0415
+    from miroir.eval.run import matches_name, rerank_shortlists  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+
+    settings = get_settings()
+    lists, _, _ = rerank_shortlists(settings, vector_run=vectors, set_id=test_set, gallery=gallery)
+    name = matches_name(vectors, test_set)
+    with open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        done = runner.match(name, tasks(lists), max_usd=max_usd)
+    typer.echo(f"{name}: {done} queries matched; next: uv run miroir eval rerank ...")
+
+
+@eval_app.command("rerank")
+def eval_rerank(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2...")],
+    label: Annotated[str, typer.Option(help="Shortlist label, e.g. A7-embeddinggemma-2-512.")],
+    vectors: Annotated[str, typer.Option(help="Vector run whose search gave the shortlists.")],
+    test_set: Annotated[str, typer.Option("--set", help="Test set id; tune half only.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list.")] = (
+        "screening-20k-publishable-fetched"
+    ),
+) -> None:
+    """Score shortlists re-ranked by keypoint matches; one result file per way (E1)."""
+    from miroir.eval.run import score_rerank  # noqa: PLC0415
+
+    scores = score_rerank(
+        get_settings(),
+        round_id=round_id,
+        label=label,
+        vector_run=vectors,
+        set_id=test_set,
+        gallery=gallery,
+    )
+    _echo_scores(scores)
 
 
 def _openrouter_key_usage() -> float | None:

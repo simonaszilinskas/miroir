@@ -33,6 +33,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from miroir.config import SEED, Settings
 from miroir.eval import amstertime
+from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
 from miroir.eval.sets import read_gallery
 from miroir.eval.vectors import Route, RunInfo, VectorSet, write_vectors
 from miroir.jobs.checkpoint import Checkpoint
@@ -44,6 +45,8 @@ from miroir.jobs.modal_spec import (
     FILL_CONTAINERS,
     FILL_MACHINE,
     FILL_TIMEOUT_S,
+    L4,
+    MATCH_QUERIES,
     OPTIONS,
     R0_MACHINE,
     R0_OPTIONS,
@@ -85,6 +88,7 @@ class RemoteCalls(Protocol):
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
     def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
+    def match(self, tasks: Sequence[MatchTask]) -> MatchChunk: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,6 +350,42 @@ class ModalRunner:
         )
         logger.info("image volume: %s for %s, $%.4f", paid.result, gallery, paid.cost_usd)
         return paid.result
+
+    def match(self, name: str, tasks: Sequence[MatchTask], *, max_usd: float) -> int:
+        """Keypoint matches of each query against its shortlist (step E1), on a Modal GPU.
+
+        Each answer is appended to `Settings.matches_path(name)` as it arrives, so a stopped
+        run resumes. Stops before a call once the run has cost `max_usd`. Returns queries done.
+        """
+        path = self.settings.matches_path(name)
+        held = read_matches(path)
+        todo = [t for t in tasks if t.query_id not in held]
+        self._images(sorted({i for t in todo for i in (t.image_id, *t.candidates)}))  # privacy
+        logger.info("%s: %d queries to match (%d saved before)", name, len(todo), len(held))
+        cost = 0.0
+        missing: set[str] = set()
+        for chunk in batched(todo, MATCH_QUERIES):
+            if cost >= max_usd:
+                msg = f"{name}: cost ${cost:.4f}, at its ${max_usd:.2f} limit; stopped"
+                raise BudgetError(msg)
+            paid = self._paid(
+                lambda chunk=chunk: self._calls.match(chunk),
+                machine=L4,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option="E1",
+                run=name,
+                model="aliked+lightglue",
+                items=len(chunk),
+            )
+            cost += paid.cost_usd
+            append_matches(path, paid.result.queries)
+            missing.update(paid.result.missing)
+            held.update({q.query_id: q for q in paid.result.queries})
+            logger.info("%s: %d/%d queries, $%.4f", name, len(held), len(tasks), cost)
+        if missing:
+            logger.warning("%s: %d image(s) could not be read on Modal", name, len(missing))
+        return len(held)
 
     def r0(self, name: str) -> VectorSet:
         """Round R0: download AmsterTime into a Modal volume, embed all 2,462 images there."""

@@ -10,6 +10,7 @@ import pytest
 
 from miroir.config import Settings
 from miroir.eval import amstertime
+from miroir.eval.rerank import CandidateMatch, MatchChunk, MatchTask, QueryMatches, read_matches
 from miroir.eval.sets import write_gallery
 from miroir.eval.vectors import Route, read_vectors
 from miroir.jobs.checkpoint import Checkpoint
@@ -17,6 +18,7 @@ from miroir.jobs.modal_run import ModalRunner, load_modal_probe, output_runs, ru
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     L4,
+    MATCH_QUERIES,
     OPTIONS,
     R0_OPTIONS,
     ChunkResult,
@@ -70,6 +72,22 @@ class FakeCalls:
         self.calls.append(("download", 0))
         self.clock.now += SECONDS_PER_CALL
         return 2 * amstertime.PAIRS
+
+    def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
+        self.calls.append(("match", len(tasks)))
+        self.clock.now += SECONDS_PER_CALL
+        done = tuple(
+            QueryMatches(
+                t.query_id,
+                t.image_id,
+                tuple(CandidateMatch(c, 20, 10, 12) for c in t.candidates),
+                query_s=0.01,
+                match_s=0.2,
+                candidates_s=0.5,
+            )
+            for t in tasks
+        )
+        return MatchChunk(done, load_s=5.0, missing=())
 
     def amstertime_embed(self, option: ModalOption) -> ChunkResult:
         self.calls.append((option.id, 2 * amstertime.PAIRS))
@@ -272,3 +290,26 @@ def test_a_whole_image_option_never_borrows_a_cropped_probe(built: Settings) -> 
     assert option("A2-dinov3-l-256-nocrop").resize is Resize.WHOLE
     with pytest.raises(BudgetError):
         r.embed_gallery("A2-dinov3-l-256-nocrop", "g")
+
+
+def test_matching_saves_each_answer_resumes_and_stops_at_its_limit(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    count = MATCH_QUERIES + 1
+    tasks = [MatchTask(f"q{n}", ids[0], tuple(ids[1:3])) for n in range(count)]
+    r, calls = runner(built)
+    with pytest.raises(BudgetError, match="limit"):
+        r.match("m", tasks, max_usd=SECONDS_PER_CALL * L4.usd_per_s / 2)
+    assert len(read_matches(built.matches_path("m"))) == MATCH_QUERIES  # first call kept
+    assert r.match("m", tasks, max_usd=1.0) == count
+    assert calls.calls == [("match", MATCH_QUERIES), ("match", 1)]
+    assert r.ledger.total(SpendKind.RUN, run="m") == pytest.approx(
+        2 * SECONDS_PER_CALL * L4.usd_per_s
+    )
+
+
+def test_private_images_are_never_matched_on_modal(built: Settings) -> None:
+    private = image_ids(built, publishable=False)[0]
+    r, calls = runner(built)
+    with pytest.raises(PrivacyError):
+        r.match("m", [MatchTask("q", private, ())], max_usd=1.0)
+    assert calls.calls == []

@@ -23,6 +23,7 @@ from miroir.config import (
     MODAL_WEIGHTS_MOUNT,
     Settings,
 )
+from miroir.eval.rerank import MatchChunk, MatchTask
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
@@ -49,24 +50,33 @@ HF_SECRET_NAME = "huggingface"  # noqa: S105 (the name of a Modal secret, not it
 
 app = modal.App(APP_NAME)
 
-image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .uv_pip_install(
-        "torch==2.14.1",
-        "torchvision==0.29.1",
-        "transformers==5.19.0",
-        "sentence-transformers[image]==6.1.0",
-        "open-clip-torch==3.3.0",
-        "timm==1.0.30",
-        "qwen-vl-utils==0.0.14",
-        "accelerate==1.15.0",
-        "httpx==0.28.1",
-        "pillow==12.3.0",
-        "numpy==2.5.4",
-        "pydantic==2.14.1",
-        "pydantic-settings==2.15.0",
+_libraries = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "transformers==5.19.0",
+    "sentence-transformers[image]==6.1.0",
+    "open-clip-torch==3.3.0",
+    "timm==1.0.30",
+    "qwen-vl-utils==0.0.14",
+    "accelerate==1.15.0",
+    "httpx==0.28.1",
+    "pillow==12.3.0",
+    "numpy==2.5.4",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+)
+_CACHES = {"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf", "TORCH_HOME": f"{MODAL_WEIGHTS_MOUNT}/torch"}
+image = _libraries.env(_CACHES).add_local_python_source("miroir")
+#: Keypoint matching (step E1): LightGlue from its repository, pinned, without its own
+#: dependencies (it asks for the GUI build of OpenCV; the headless one is enough here).
+match_image = (
+    _libraries.apt_install("git")
+    .uv_pip_install("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
+    .pip_install(
+        "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8",
+        extra_options="--no-deps",
     )
-    .env({"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf", "TORCH_HOME": f"{MODAL_WEIGHTS_MOUNT}/torch"})
+    .env(_CACHES)
     .add_local_python_source("miroir")
 )
 
@@ -183,6 +193,28 @@ def embed_megaloc(option: ModalOption, images: list[Image]) -> ChunkResult:
     return _embed(option, images)
 
 
+# --- step E1: keypoint matching of each query against its shortlist ------------------------
+
+
+@app.function(
+    image=match_image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def match_shortlists(tasks: list[MatchTask]) -> MatchChunk:
+    from miroir.remote.matching import match_tasks  # noqa: PLC0415 (container only)
+
+    result = match_tasks(tasks)
+    if result.load_s > 0:
+        weights.commit()  # keep the ALIKED and LightGlue weights for the next container
+    return result
+
+
 FAMILY_FUNCTIONS = {
     Family.DINO: embed_dino,
     Family.SIGLIP2: embed_siglip2,
@@ -275,6 +307,9 @@ class ModalCalls:
 
     def amstertime_embed(self, option: ModalOption) -> ChunkResult:
         return amstertime_embed.remote(option)
+
+    def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
+        return match_shortlists.remote(list(tasks))
 
 
 @contextmanager

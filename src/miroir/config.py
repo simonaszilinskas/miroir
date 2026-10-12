@@ -172,6 +172,11 @@ class Settings(BaseSettings):
         _check_name(model_slug)
         return self.data_root / "vlm" / f"{model_slug}.jsonl"
 
+    def matches_path(self, name: str) -> Path:
+        """Keypoint matches of each query against its shortlist (step E1), one query per line."""
+        _check_name(name)
+        return self.data_root / "matches" / f"{name}.jsonl"
+
     @property
     def vectors_dir(self) -> Path:
         """Vectors that remote jobs send back, one folder per model run."""

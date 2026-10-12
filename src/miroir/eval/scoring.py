@@ -266,6 +266,75 @@ def rank_entities(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Shortlist:
+    """A query's top entities by vector search, each with its best image, for re-ranking."""
+
+    query_id: str
+    image_id: str
+    entity_ids: tuple[str, ...]
+    """The top entities, best first, ties broken as in `score`."""
+    image_ids: tuple[str, ...]
+    """Each entity's best-scoring image the query may see."""
+    scores: tuple[float, ...]
+    """Each entity's cosine."""
+    right_ranks: tuple[tuple[str, int], ...]
+    """Every right entity in the gallery with its rank from 1, in and beyond the shortlist."""
+
+
+def shortlists(
+    query_vectors: VectorSet, gallery: Gallery, queries: Sequence[SearchQuery], *, top: int
+) -> tuple[tuple[Shortlist, ...], ScoreResult]:
+    """Each query's top `top` entities, and the plain search score of the same queries.
+
+    Queries with no right entity in the gallery get no shortlist, as `score` skips them.
+    """
+    scores = entity_scores(query_vectors, gallery, queries)
+    plain = rank_entities(scores, queries)
+    code_of = {name: i for i, name in enumerate(scores.entity_ids)}
+    rows_of: dict[str, list[int]] = {}
+    for row, entity in enumerate(gallery.entity_ids):
+        rows_of.setdefault(entity, []).append(row)
+    query_row = query_vectors.index()
+    lists: list[Shortlist] = []
+    for j, query in enumerate(queries):
+        values = scores.values[j]
+        coded = (code_of[e] for e in dict.fromkeys(query.entity_ids) if e in code_of)
+        right = [c for c in coded if np.isfinite(values[c])]
+        if not right:
+            continue
+        ranked = np.argsort(-values, kind="stable")  # ties: lower entity id first
+        best = [int(c) for c in ranked[:top] if np.isfinite(values[c])]
+        asked: Floats = np.asarray(query_vectors.vectors[query_row[query.image_id]], np.float32)
+        hidden = {query.image_id, *query.excluded_image_ids}
+        images: list[str] = []
+        for c in best:
+            rows = [r for r in rows_of[scores.entity_ids[c]] if gallery.image_ids[r] not in hidden]
+            sims = np.asarray(gallery.vectors[rows], dtype=np.float32) @ asked
+            images.append(gallery.image_ids[rows[int(np.argmax(sims))]])
+        lists.append(
+            Shortlist(
+                query_id=query.query_id,
+                image_id=query.image_id,
+                entity_ids=tuple(scores.entity_ids[c] for c in best),
+                image_ids=tuple(images),
+                scores=tuple(float(values[c]) for c in best),
+                right_ranks=tuple((scores.entity_ids[c], _rank(values, c)) for c in right),
+            )
+        )
+    return tuple(lists), plain
+
+
+def average_precision(ranks: Sequence[int]) -> float:
+    """AP of the right entities found at `ranks` (from 1)."""
+    ordered = sorted(ranks)
+    return sum((i + 1) / r for i, r in enumerate(ordered)) / len(ordered)
+
+
+def _rank(scores: Floats, c: int) -> int:
+    return int((scores > scores[c]).sum() + (scores[:c] == scores[c]).sum()) + 1
+
+
 def _check_queries(queries: Sequence[Asked]) -> None:
     if not queries:
         msg = "no queries to score"

@@ -31,6 +31,8 @@ CHUNK_TIMEOUT_S = 20 * 60
 DOWNLOAD_TIMEOUT_S = 30 * 60
 #: Embedding the 2,462 AmsterTime images, model download included.
 R0_TIMEOUT_S = 30 * 60
+#: Queries per keypoint-matching call (step E1), each with its shortlist of 50.
+MATCH_QUERIES = 40
 #: A warm container waits this long for the next call before it shuts down.
 SCALEDOWN_S = 120
 
