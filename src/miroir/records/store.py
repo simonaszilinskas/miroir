@@ -34,6 +34,7 @@ RECORDS_SCHEMA = pa.schema(
         pa.field("commune", pa.string()),
         pa.field("publishable", pa.bool_(), nullable=False),
         pa.field("pop_url", pa.string(), nullable=False),
+        pa.field("linked_refs", _STRINGS, nullable=False),
         pa.field("image_count", pa.int32(), nullable=False),
         pa.field("cover_image_id", pa.string(), nullable=False),
     ]
@@ -73,6 +74,7 @@ def write_records(records: Sequence[Record], records_path: Path, images_path: Pa
             "commune": r.commune,
             "publishable": r.publishable,
             "pop_url": r.pop_url,
+            "linked_refs": list(r.linked_refs),
             "image_count": len(r.images),
             "cover_image_id": r.cover.image_id,
         }
@@ -135,6 +137,7 @@ def read_records(records_path: Path, images_path: Path) -> list[Record]:
             commune=_optional(row["commune"]),
             publishable=bool(row["publishable"]),
             pop_url=str(row["pop_url"]),
+            linked_refs=_strings(row["linked_refs"]),
             images=tuple(sorted(by_ref[str(row["ref"])], key=lambda i: i.position)),
         )
         for row in rows

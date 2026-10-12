@@ -66,6 +66,8 @@ class Record:
     publishable: bool
     """False when the rights holder must approve reproduction. Gate for outside model services."""
     pop_url: str
+    linked_refs: tuple[str, ...]
+    """Refs of related records in the same base (Rose Valland `RENV`): room photo <-> artwork."""
     images: tuple[Image, ...]
 
     @property

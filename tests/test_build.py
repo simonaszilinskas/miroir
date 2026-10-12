@@ -10,7 +10,7 @@ def test_build_writes_parquet_that_reads_back(settings: Settings) -> None:
     report = build(settings)
 
     records = read_records(settings.records_parquet, settings.images_parquet)
-    assert len(records) == 17  # 20 fixture records, 3 without a usable image
+    assert len(records) == 20  # 23 fixture records, 3 without a usable image
     assert {r.collection for r in records} == set(Collection)
     assert report.counts[Collection.MEMOIRE]["skip_record:no_image"] == 2
     assert report.counts[Collection.JOCONDE]["skip_image:duplicate"] == 1

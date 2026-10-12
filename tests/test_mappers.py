@@ -136,3 +136,11 @@ def test_description_is_capped() -> None:
     record = _record(RV, "OAR00119")
     assert record.description.startswith("Chaise en acajou")
     assert len(record.description) <= DESCRIPTION_MAX_CHARS
+
+
+def test_jeu_de_paume_links_room_photo_and_artworks() -> None:
+    room = _record(RV, "JDP-0241")  # "Vue de la salle 6"
+    assert "JDP-0230" in room.linked_refs
+    assert "JDP-0228" in room.linked_refs
+    assert _record(RV, "JDP-0230").linked_refs == ("JDP-0241",)
+    assert _record(J, "M1222019757").linked_refs == ()

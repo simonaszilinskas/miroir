@@ -63,6 +63,8 @@ class FieldMap:
     entity_id: Callable[[RawRecord], str] = field(default=_ref)
     decade_of: tuple[str, ...] = ()
     """Date fields whose decade is added to `period` ("années 1940")."""
+    linked: tuple[str, ...] = ()
+    """Fields listing refs of related records in the same base."""
 
 
 def _memoire_entity_id(raw: RawRecord) -> str:
@@ -130,6 +132,8 @@ FIELD_MAPS: dict[Collection, FieldMap] = {
         commune=("COM",),
         images="VIDEO",
         publishable=lambda _raw: True,
+        # Jeu de Paume: a room photo lists the artworks it shows, and each artwork its room(s).
+        linked=("RENV",),
     ),
 }
 
@@ -167,6 +171,7 @@ def map_record(collection: Collection, raw: RawRecord) -> MapResult:
         commune=_first(raw, fmap.commune),
         publishable=fmap.publishable(raw),
         pop_url=f"{POP_NOTICE_URL}/{collection.mongo_collection}/{ref}",
+        linked_refs=_unique(_keywords(raw, fmap.linked)),
         images=images,
     )
     return MapResult(record=record, record_skip=None, image_skips=image_skips)
