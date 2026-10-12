@@ -8,6 +8,8 @@ data/
 *.gif
 # ...except small committed text fixtures
 !tests/fixtures/**/*.jsonl
+# ...and hand-made label checks
+!eval/labels/*.jsonl
 
 .env
 __pycache__/
