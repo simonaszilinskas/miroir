@@ -11,6 +11,7 @@ from miroir.remote.preprocess import (
     center_crop,
     dino_eval,
     resize_shorter_side,
+    squash,
 )
 
 
@@ -36,3 +37,7 @@ def test_dino_eval_shape_and_normalisation() -> None:
     assert pixels.dtype == np.float32
     expected = (1.0 - IMAGENET_MEAN) / IMAGENET_STD
     assert np.allclose(pixels[:, 100, 100], expected, atol=1e-5)
+
+
+def test_squash_ignores_the_aspect() -> None:
+    assert squash(PILImage.new("RGB", (900, 300)), 322).shape == (3, 322, 322)

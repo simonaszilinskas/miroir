@@ -229,6 +229,9 @@ def embed_modal(
     probe: Annotated[
         bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
     ] = False,
+    max_usd: Annotated[
+        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
+    ] = None,
 ) -> None:
     """Embed a gallery with an open model on a Modal GPU. Paid: probe first."""
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
@@ -247,7 +250,7 @@ def embed_modal(
                 f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
             )
             return
-        done = runner.embed_gallery(option, gallery)
+        done = runner.embed_gallery(option, gallery, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 

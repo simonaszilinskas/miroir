@@ -56,7 +56,7 @@ image = (
         "pydantic==2.14.1",
         "pydantic-settings==2.15.0",
     )
-    .env({"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf"})
+    .env({"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf", "TORCH_HOME": f"{MODAL_WEIGHTS_MOUNT}/torch"})
     .add_local_python_source("miroir")
 )
 
@@ -156,12 +156,28 @@ def embed_qwen3_vl(option: ModalOption, images: list[Image]) -> ChunkResult:
     return _embed(option, images)
 
 
+@app.function(
+    image=image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    secrets=[hf_secret],
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def embed_megaloc(option: ModalOption, images: list[Image]) -> ChunkResult:
+    return _embed(option, images)
+
+
 FAMILY_FUNCTIONS = {
     Family.DINO: embed_dino,
     Family.SIGLIP2: embed_siglip2,
     Family.PE_CORE: embed_pe_core,
     Family.EMBEDDINGGEMMA: embed_embeddinggemma,
     Family.QWEN3_VL: embed_qwen3_vl,
+    Family.MEGALOC: embed_megaloc,
 }
 
 

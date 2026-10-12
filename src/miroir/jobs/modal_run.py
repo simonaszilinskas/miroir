@@ -204,8 +204,13 @@ class ModalRunner:
         )
         return result, len(ids)
 
-    def embed_gallery(self, option_id: str, gallery: str) -> VectorSet:
-        """Embed every image of a gallery and write a vector run (technical spec §7.1)."""
+    def embed_gallery(
+        self, option_id: str, gallery: str, *, max_usd: float | None = None
+    ) -> VectorSet:
+        """Embed every image of a gallery and write a vector run (technical spec §7.1).
+
+        `max_usd` refuses the run when the probe projects a higher cost.
+        """
         opt = option(option_id)
         run = run_name(opt, gallery)
         out = self.settings.vectors_path(run)
@@ -224,6 +229,9 @@ class ModalRunner:
             resolution=opt.resolution,
             count=len(todo),
         )
+        if max_usd is not None and projected > max_usd:
+            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
+            raise BudgetError(msg)
         limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
         logger.info(
             "%s: %d images to send (%d saved before), about $%.2f (stops past $%.2f)",

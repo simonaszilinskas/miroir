@@ -209,3 +209,12 @@ def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
     assert calls.calls[-1] == (GEMMA, len(ids) - 2)
     assert set(done.ids) == set(ids)
     assert not built.checkpoint_path(run).exists()
+
+
+def test_max_usd_refuses_a_run_projected_above_it(built: Settings) -> None:
+    write_gallery(built, "g", image_ids(built, publishable=True))
+    r, calls = runner(built)
+    r.probe(GEMMA, "g")
+    with pytest.raises(BudgetError, match="over the"):
+        r.embed_gallery(GEMMA, "g", max_usd=0.0001)
+    assert len(calls.calls) == 1  # the probe only

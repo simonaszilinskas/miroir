@@ -38,3 +38,10 @@ def dino_eval(image: PILImage.Image, crop: int) -> NDArray[np.float32]:
     resized = resize_shorter_side(image.convert("RGB"), round(crop * 256 / 224))
     pixels = np.asarray(center_crop(resized, crop), dtype=np.float32) / 255.0
     return ((pixels - IMAGENET_MEAN) / IMAGENET_STD).transpose(2, 0, 1).copy()
+
+
+def squash(image: PILImage.Image, side: int) -> NDArray[np.float32]:
+    """Resize to `side` x `side` without keeping the aspect (MegaLoc), then ImageNet-normalise."""
+    resized = image.convert("RGB").resize((side, side), PILImage.Resampling.BILINEAR)
+    pixels = np.asarray(resized, dtype=np.float32) / 255.0
+    return ((pixels - IMAGENET_MEAN) / IMAGENET_STD).transpose(2, 0, 1).copy()

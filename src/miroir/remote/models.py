@@ -25,7 +25,7 @@ from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
 from miroir.jobs.modal_spec import ChunkResult, DType, Family, ModalOption, Pooling
 from miroir.parallel import bounded_map
 from miroir.records.model import Image
-from miroir.remote.preprocess import dino_eval
+from miroir.remote.preprocess import dino_eval, squash
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ def encoder(option: ModalOption) -> tuple[Encoder, float]:
         Family.PE_CORE: PeCoreEncoder,
         Family.EMBEDDINGGEMMA: SentenceEncoder,
         Family.QWEN3_VL: SentenceEncoder,
+        Family.MEGALOC: MegaLocEncoder,
     }
     loaded = loaders[option.family](option)
     _LOADED.clear()  # one model per container: free the GPU before the next
@@ -91,6 +92,20 @@ class DinoEncoder:
             patches = tokens[:, 1 + self.registers :].float()
             pooled = patches.clamp(min=1e-6).pow(GEM_P).mean(dim=1).pow(1.0 / GEM_P)
         return pooled.float().cpu().numpy()
+
+
+class MegaLocEncoder:
+    """MegaLoc (DINOv2-B + SALAD) through torch.hub: 322 x 322 input, 8,448-d output."""
+
+    def __init__(self, option: ModalOption) -> None:
+        self.option = option
+        model = torch.hub.load(option.model, "get_trained_model", trust_repo=True)
+        self.model = model.to(DEVICE).eval()
+
+    @torch.inference_mode()
+    def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
+        pixels = np.stack([squash(i, self.option.resolution) for i in images])
+        return self.model(torch.from_numpy(pixels).to(DEVICE)).float().cpu().numpy()
 
 
 class Siglip2Encoder:

@@ -43,6 +43,7 @@ class Family(StrEnum):
     PE_CORE = "pe-core"
     EMBEDDINGGEMMA = "embeddinggemma"
     QWEN3_VL = "qwen3-vl"
+    MEGALOC = "megaloc"
 
 
 class Pooling(StrEnum):
@@ -50,6 +51,8 @@ class Pooling(StrEnum):
     """Class token after the final LayerNorm."""
     GEM = "gem"
     """Generalised mean (p = 3) over patch tokens after the final LayerNorm."""
+    SALAD = "salad"
+    """MegaLoc's optimal-transport aggregation of DINOv2 patch tokens."""
     HEAD = "head"
     """The model's own pooling and projection (CLIP-style towers, embedding models)."""
 
@@ -134,6 +137,10 @@ _ALL = (
     _dino(
         "A2-dinov3-hplus-224-gem", "A2", "facebook/dinov3-vith16plus-pretrain-lvd1689m",
         Pooling.GEM, gated=True,
+    ),
+    ModalOption(
+        "A3-megaloc-322", "A3", Family.MEGALOC, "gmberton/MegaLoc",
+        322, Pooling.SALAD, DType.FLOAT32, 64,
     ),
     ModalOption(
         "A4-siglip2-so400m-384", "A4", Family.SIGLIP2, "google/siglip2-so400m-patch14-384",
