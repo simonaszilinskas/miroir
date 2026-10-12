@@ -14,6 +14,7 @@ from typing import cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from miroir.commons.model import CommonsPhoto, CommonsSet, Source, View
 from miroir.records.model import Collection, Image, ImageType, Record
 
 _STRINGS = pa.list_(pa.string())
@@ -52,6 +53,34 @@ IMAGES_SCHEMA = pa.schema(
         pa.field("image_type", pa.string(), nullable=False),
         pa.field("position", pa.int32(), nullable=False),
         pa.field("is_cover", pa.bool_(), nullable=False),
+    ]
+)
+
+
+COMMONS_SCHEMA = pa.schema(
+    [
+        pa.field("image_id", pa.string(), nullable=False),
+        pa.field("set_id", pa.string(), nullable=False),
+        pa.field("entity_id", pa.string(), nullable=False),
+        pa.field("wikidata_id", pa.string(), nullable=False),
+        pa.field("file_title", pa.string(), nullable=False),
+        pa.field("page_url", pa.string(), nullable=False),
+        pa.field("url", pa.string(), nullable=False),
+        pa.field("thumb_url", pa.string(), nullable=False),
+        pa.field("width", pa.int32(), nullable=False),
+        pa.field("height", pa.int32(), nullable=False),
+        pa.field("licence", pa.string(), nullable=False),
+        pa.field("licence_url", pa.string(), nullable=False),
+        pa.field("author", pa.string(), nullable=False),
+        pa.field("credit", pa.string(), nullable=False),
+        pa.field("taken", pa.string(), nullable=False),
+        pa.field("latitude", pa.float64()),
+        pa.field("longitude", pa.float64()),
+        pa.field("camera", pa.string(), nullable=False),
+        pa.field("source", pa.string(), nullable=False),
+        pa.field("category", pa.string(), nullable=False),
+        pa.field("view", pa.string(), nullable=False),
+        pa.field("phash_distance", pa.int32()),
     ]
 )
 
@@ -150,6 +179,69 @@ def read_records(records_path: Path, images_path: Path) -> list[Record]:
     ]
 
 
+def write_commons(photos: Sequence[CommonsPhoto], path: Path) -> None:
+    """Write the Commons query photos (technical spec §7: T2, T2b, T8)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "image_id": p.image_id,
+            "set_id": p.set_id.value,
+            "entity_id": p.entity_id,
+            "wikidata_id": p.wikidata_id,
+            "file_title": p.file_title,
+            "page_url": p.page_url,
+            "url": p.url,
+            "thumb_url": p.thumb_url,
+            "width": p.width,
+            "height": p.height,
+            "licence": p.licence,
+            "licence_url": p.licence_url,
+            "author": p.author,
+            "credit": p.credit,
+            "taken": p.taken,
+            "latitude": p.latitude,
+            "longitude": p.longitude,
+            "camera": p.camera,
+            "source": p.source.value,
+            "category": p.category,
+            "view": p.view.value,
+            "phash_distance": p.phash_distance,
+        }
+        for p in photos
+    ]
+    _write(pa.Table.from_pylist(rows, schema=COMMONS_SCHEMA), path)
+
+
+def read_commons(path: Path) -> list[CommonsPhoto]:
+    return [
+        CommonsPhoto(
+            image_id=str(row["image_id"]),
+            set_id=CommonsSet(row["set_id"]),
+            entity_id=str(row["entity_id"]),
+            wikidata_id=str(row["wikidata_id"]),
+            file_title=str(row["file_title"]),
+            page_url=str(row["page_url"]),
+            url=str(row["url"]),
+            thumb_url=str(row["thumb_url"]),
+            width=int(row["width"]),
+            height=int(row["height"]),
+            licence=str(row["licence"]),
+            licence_url=str(row["licence_url"]),
+            author=str(row["author"]),
+            credit=str(row["credit"]),
+            taken=str(row["taken"]),
+            latitude=_optional_float(row["latitude"]),
+            longitude=_optional_float(row["longitude"]),
+            camera=str(row["camera"]),
+            source=Source(row["source"]),
+            category=str(row["category"]),
+            view=View(row["view"]),
+            phash_distance=None if row["phash_distance"] is None else int(row["phash_distance"]),
+        )
+        for row in _read(path, COMMONS_SCHEMA).to_pylist()
+    ]
+
+
 # pyarrow-stubs leave a few parameter types unknown; keep the ignores to these two lines.
 def _write(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path)  # pyright: ignore[reportUnknownMemberType]
@@ -167,3 +259,7 @@ def _strings(value: object) -> tuple[str, ...]:
 
 def _optional(value: object) -> str | None:
     return None if value is None else str(value)
+
+
+def _optional_float(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) else None
