@@ -31,6 +31,13 @@ embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote mod
 app.add_typer(embed_app, name="embed")
 r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
 app.add_typer(r0_app, name="r0")
+vlm_app = typer.Typer(
+    no_args_is_help=True, help="Step H1: ask a vision model about query photos, search its answer."
+)
+app.add_typer(vlm_app, name="vlm")
+
+DEFAULT_GALLERY = "screening-20k-publishable-fetched"
+DEFAULT_SETS = ("T1", "T3", "T5")
 
 
 @app.callback()
@@ -419,6 +426,78 @@ def r0_run(
     run = settings.vectors_path(f"R0-{model}-amstertime").name
     typer.echo(f"{run}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
     typer.echo(f"next: uv run miroir eval amstertime score --run {run} --option {model}")
+
+
+@vlm_app.command("ask")
+def vlm_ask(
+    model: Annotated[str, typer.Option(help="qwen3-vl-30b-a3b or gemini-3.5-flash-lite.")],
+    *,
+    test_set: Annotated[
+        list[str] | None, typer.Option("--set", help="Tune half to ask about; repeat it.")
+    ] = None,
+    gallery: Annotated[str, typer.Option(help="Keep queries whose image is here.")] = (
+        DEFAULT_GALLERY
+    ),
+    probe: Annotated[
+        bool, typer.Option("--probe", help="Ask about 100 query images; print the projection.")
+    ] = False,
+    max_usd: Annotated[float, typer.Option(help="Refuse or stop a run past this.")] = 1.0,
+) -> None:
+    """Ask a vision model about each publishable query image. Paid: probe first."""
+    from miroir.jobs import describe  # noqa: PLC0415
+    from miroir.jobs.factory import open_describer  # noqa: PLC0415
+
+    settings = get_settings()
+    sets = tuple(test_set or DEFAULT_SETS)
+    ids = describe.query_image_ids(settings, sets, gallery)
+    with open_describer(settings, model) as describer:
+        if probe:
+            result = describe.probe(describer, ids, "+".join(sets) + "-tune")
+            typer.echo(
+                f"{model} probe: {result.images} images cost ${result.cost_usd:.4f}. "
+                f"Projected for {len(ids)} query images: ${result.projected_usd(len(ids)):.3f}"
+            )
+            return
+        done = describe.run(describer, ids, max_usd=max_usd)
+    typer.echo(f"{model}: {done.answered} new answers, ${done.cost_usd:.4f}, skipped {done.skips}")
+
+
+@vlm_app.command("score")
+def vlm_score(
+    model: Annotated[str, typer.Option(help="Vision model whose saved answers to search.")],
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")] = "R2",
+    test_set: Annotated[list[str] | None, typer.Option("--set", help="Repeat it.")] = None,
+    gallery: Annotated[str, typer.Option(help="Gallery list.")] = DEFAULT_GALLERY,
+    image_run: Annotated[
+        str | None, typer.Option(help="Image vector run to mix with (H3), e.g. the A7 run.")
+    ] = None,
+    image_label: Annotated[str, typer.Option(help="Short name of that run in labels.")] = "A7",
+) -> None:
+    """Score H1 (BM25 on the model's answers) and, with --image-run, H3 (mixed with images)."""
+    from miroir.eval import vlm  # noqa: PLC0415
+    from miroir.jobs.describe import OPTIONS  # noqa: PLC0415
+
+    if model not in OPTIONS:
+        raise typer.BadParameter(f"known models: {', '.join(OPTIONS)}")
+    settings = get_settings()
+    prepared = vlm.prepare(settings, OPTIONS[model], tuple(test_set or DEFAULT_SETS), gallery)
+    h1 = vlm.score_h1(prepared, round_id=round_id)
+    typer.echo(f"H1 {model}: {h1.vectors.notes}")
+    _echo_scores(h1.scores)
+    for r in vlm.report(prepared):
+        bands = ", ".join(f"{b.label}: {b.queries} q, {100 * b.hit_at_10:.0f}%" for b in r.bands)
+        typer.echo(
+            f"{r.set_id}: {r.answered}/{r.queries} answered; named {r.named} "
+            f"(right {r.name_right}); type right {r.kind_right}; commune given "
+            f"{r.commune_given}, right {r.commune_right} of {r.with_commune} with one; "
+            f"visible text {r.visible_text} (top 10 gained {r.text_helped}, lost "
+            f"{r.text_hurt}); hit@10 by confidence: {bands}"
+        )
+    if image_run is not None:
+        h3, weight = vlm.score_h3(settings, prepared, image_run, image_label, round_id=round_id)
+        typer.echo(f"H3 {image_label}+H1, image weight {weight:.1f}: {h3.vectors.notes}")
+        _echo_scores(h3.scores)
 
 
 def _openrouter_key_usage() -> float | None:

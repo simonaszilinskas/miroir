@@ -63,8 +63,25 @@ class _Wire(BaseModel):
 
 class _Usage(_Wire):
     prompt_tokens: int = 0
+    completion_tokens: int = 0
     total_tokens: int = 0
     cost: float | None = None
+
+
+class _ChatMessage(_Wire):
+    content: str | None = None
+
+
+class _ChatChoice(_Wire):
+    message: _ChatMessage
+    finish_reason: str | None = None
+
+
+class _ChatResponse(_Wire):
+    id: str = ""
+    model: str = ""
+    choices: list[_ChatChoice]
+    usage: _Usage | None = None
 
 
 class _EmbeddingItem(_Wire):
@@ -127,6 +144,16 @@ class Embeddings:
     cost_usd: float
     tokens: int
     generation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChatAnswer:
+    text: str
+    cost_usd: float
+    """0 for a single answer of a batch: the batch carries the cost."""
+    prompt_tokens: int
+    completion_tokens: int
+    finish_reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,8 +223,50 @@ class OpenRouterClient:
         response = self._parse(_EmbeddingResponse, self._call("POST", "/embeddings", body))
         return _embeddings(response, len(inputs))
 
+    # chat
+
+    def chat(self, model: str, body: Mapping[str, JSON]) -> ChatAnswer:
+        """One chat completion. `body` holds `messages` and any other request fields."""
+        payload: dict[str, JSON] = {**body, "model": model}
+        response = self._parse(_ChatResponse, self._call("POST", "/chat/completions", payload))
+        return _chat_answer(response, need_cost=True)
+
+    def chat_batch(
+        self,
+        model: str,
+        requests: Mapping[str, Mapping[str, JSON]],
+        *,
+        poll_s: float = 30.0,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> tuple[dict[str, ChatAnswer], BatchOutcome]:
+        """Chat completions `{custom_id: body}` through the Batch API (half price); waits.
+
+        Images work here, unlike batch embeddings (checked 2026-10-12).
+        """
+        return self.wait_chat_batch(
+            self.submit_batch("/v1/chat/completions", model, requests), poll_s=poll_s, sleep=sleep
+        )
+
+    def wait_chat_batch(
+        self,
+        batch_id: str,
+        *,
+        poll_s: float = 30.0,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> tuple[dict[str, ChatAnswer], BatchOutcome]:
+        """Wait for a chat batch submitted earlier; answers by `custom_id`."""
+        outcome = self.wait_batch(batch_id, poll_s=poll_s, sleep=sleep)
+        answers = {
+            cid: _chat_answer(self._parse(_ChatResponse, body), need_cost=False)
+            for cid, body in outcome.bodies.items()
+        }
+        return answers, outcome
+
     def batch_model(self, model: str) -> str | None:
-        """`model:batch` when that half-price variant exists, else None. Text inputs only."""
+        """`model:batch` when that half-price variant exists, else None.
+
+        Embedding models take text only there; chat models also take images.
+        """
         if model in UNLISTED_BATCH_MODELS:
             return model + BATCH_SUFFIX
         if self._batch_models is None:
@@ -323,6 +392,24 @@ def _embeddings(
         cost_usd=usage.cost or 0.0,
         tokens=usage.total_tokens,
         generation_id=response.id,
+    )
+
+
+def _chat_answer(response: _ChatResponse, *, need_cost: bool) -> ChatAnswer:
+    if not response.choices:
+        msg = "chat answer holds no choice"
+        raise OpenRouterError(msg)
+    usage = response.usage or _Usage()
+    if usage.cost is None and need_cost:
+        msg = "OpenRouter answered without a cost: cannot track spend"
+        raise OpenRouterError(msg)
+    choice = response.choices[0]
+    return ChatAnswer(
+        text=choice.message.content or "",
+        cost_usd=usage.cost or 0.0,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        finish_reason=choice.finish_reason or "",
     )
 
 

@@ -167,6 +167,11 @@ class Settings(BaseSettings):
         _check_name(option)
         return self.data_root / "probes" / f"{option}.json"
 
+    def vlm_answers_path(self, model_slug: str) -> Path:
+        """A vision model's answers about query photos (step H1), one JSON line per image."""
+        _check_name(model_slug)
+        return self.data_root / "vlm" / f"{model_slug}.jsonl"
+
     @property
     def vectors_dir(self) -> Path:
         """Vectors that remote jobs send back, one folder per model run."""

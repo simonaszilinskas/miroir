@@ -15,6 +15,11 @@ from miroir.http import Retry
 
 NO_WAIT = Retry(attempts=3, backoff_s=0.0, sleep=lambda _s: None)
 COST_PER_INPUT = 0.0001
+CHAT_ANSWER = (
+    '```json\n{"type": "église", "nom": "Église Saint-Martin", "commune": "Beaune", '
+    '"departement": "Côte-d\'Or", "region": "", "periode_style": "roman", "auteur": null, '
+    '"texte_visible": ["MAIRIE"], "description": "façade en pierre", "confiance": 0.8}\n```'
+)
 
 
 @cache
@@ -64,6 +69,8 @@ class FakeOpenRouter:
     fail_first: int = 0
     """Answer this many requests with 429 before serving."""
     polls: int = 0
+    chat_bodies: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
+    chat_answer: str = CHAT_ANSWER
 
     def handler(self, request: httpx.Request) -> httpx.Response:  # noqa: PLR0911 (one per route)
         if self.fail_first > 0:
@@ -77,6 +84,11 @@ class FakeOpenRouter:
             self.embedding_bodies.append(body)
             self.request_sizes.append(len(body["input"]))
             return httpx.Response(200, json=_embedding_answer(len(body["input"]), cost=True))
+        if path == "/chat/completions":
+            if self.refuse_after is not None and len(self.chat_bodies) >= self.refuse_after:
+                return httpx.Response(402, json={"error": {"message": "out of credit"}})
+            self.chat_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json=_chat_answer(self.chat_answer, cost=True))
         if path == "/key":
             return httpx.Response(200, json={"data": {"usage": self.key_usage, "limit": 50}})
         if path in ("/models", "/embeddings/models"):
@@ -91,10 +103,16 @@ class FakeOpenRouter:
                 return httpx.Response(200, json={"id": "batch-1", "status": "in_progress"})
             requests = self.batch_bodies[-1]["requests"]
             assert isinstance(requests, list)
+            chat = self.batch_bodies[-1]["endpoint"] == "/v1/chat/completions"
             results = [
                 {
                     "custom_id": r["custom_id"],
-                    "response": {"status_code": 200, "body": _embedding_answer(1, cost=False)},
+                    "response": {
+                        "status_code": 200,
+                        "body": _chat_answer(self.chat_answer, cost=False)
+                        if chat
+                        else _embedding_answer(1, cost=False),
+                    },
                 }
                 for r in requests
             ]
@@ -112,6 +130,17 @@ class FakeOpenRouter:
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handler)
+
+
+def _chat_answer(text: str, *, cost: bool) -> dict[str, object]:
+    usage: dict[str, object] = {"prompt_tokens": 600, "completion_tokens": 150}
+    if cost:
+        usage["cost"] = COST_PER_INPUT
+    return {
+        "id": "gen-chat-1",
+        "choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        "usage": usage,
+    }
 
 
 def _embedding_answer(count: int, *, cost: bool) -> dict[str, object]:
