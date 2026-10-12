@@ -56,6 +56,11 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+/** Like `node.replaceChildren`, but skips null and false (which it would print as text). */
+function fill(node, ...children) {
+  node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
+}
+
 function img(src, fallback, attrs = {}) {
   const node = el('img', { src, alt: '', loading: 'lazy', decoding: 'async', ...attrs });
   if (fallback && fallback !== src) {
@@ -460,7 +465,7 @@ function renderQuery(response) {
   const title = photo
     ? (state.box ? 'Votre photo (partie encadrée)' : 'Votre photo')
     : `« ${words} »`;
-  box.replaceChildren(
+  fill(box,
     photo ? img(state.queryUrl, null, { class: 'miroir-query__thumb', alt: 'Votre photo' }) : null,
     el('div', { class: 'miroir-query__text' },
       el('p', { class: 'miroir-query__title', text: title }),
@@ -468,6 +473,7 @@ function renderQuery(response) {
       meta),
     el('ul', { class: 'fr-btns-group fr-btns-group--inline fr-btns-group--sm fr-btns-group--icon-left fr-mb-0' },
       photo ? el('li', {}, el('button', { class: 'fr-btn fr-btn--sm fr-btn--tertiary fr-icon-crop-line fr-btn--icon-left', 'data-action': 'edit-box', text: 'Encadrer' })) : null,
+      el('li', { class: 'fr-hidden-md' }, el('button', { class: 'fr-btn fr-btn--sm fr-btn--tertiary fr-icon-filter-line fr-btn--icon-left', type: 'button', onclick: () => $('#refine').scrollIntoView({ behavior: 'smooth' }), text: 'Affiner' })),
       el('li', {}, el('a', { class: 'fr-btn fr-btn--sm fr-btn--tertiary-no-outline fr-icon-camera-line fr-btn--icon-left', href: '#/', text: 'Nouvelle recherche' }))),
   );
   $('#refine-label').firstChild.textContent = photo ? 'Préciser avec des mots ' : 'Modifier les mots ';
@@ -516,7 +522,7 @@ function renderResults(response) {
   if (response.match === true) {
     status.replaceChildren();
     const [best, ...rest] = cards;
-    results.replaceChildren(
+    fill(results,
       el('div', { class: 'miroir-section-title' },
         el('h2', { class: 'fr-h4', text: 'Meilleure correspondance' }),
         el('p', { class: 'fr-badge fr-badge--success fr-badge--sm', text: 'Correspondance sûre' })),
@@ -646,7 +652,7 @@ async function renderRecord(entityId) {
   };
   thumbs.replaceChildren(...page.images.map((image, i) => el('li', {},
     el('button', { class: 'miroir-thumb', type: 'button', 'aria-label': `Image ${i + 1}`, onclick: () => select(i) },
-      img(image.url, image.fallback_url)))));
+      img(image.thumb_url, image.fallback_url)))));
 
   const facts = el('dl', { class: 'miroir-facts' },
     page.facts.flatMap((f) => [el('dt', { text: f.label }), el('dd', { text: f.value })]));

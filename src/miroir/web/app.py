@@ -49,6 +49,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
 #: Longest wait on the search backend before the page is told to retry (Modal cuts at 150 s).
 SEARCH_WAIT_S = 100.0
+#: Side of the small images under the large one on a record page.
+THUMB_SIDE = 200
 #: Example photos are served at most this size (the page shrinks them again to search).
 EXAMPLE_SIDE = 1280
 
@@ -91,6 +93,7 @@ class SearchBody(BaseModel):
 @dataclass(frozen=True, slots=True)
 class PageImage:
     url: str
+    thumb_url: str
     fallback_url: str
     label: str | None
     credit: str | None
@@ -218,7 +221,9 @@ async def _headers(
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
     if request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store"
+        response.headers.setdefault("Cache-Control", "no-store")
+    elif request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"  # revalidate: a deploy shows at once
     return response
 
 
@@ -352,6 +357,7 @@ def entity_page(catalog: Catalog, entity_id: str) -> EntityPage | None:
         images.append(
             PageImage(
                 url=display_url(image, PAGE_SIDE),
+                thumb_url=display_url(image, THUMB_SIDE),
                 fallback_url=image.url,
                 label="Photo Wikimedia Commons"
                 if commons

@@ -15,9 +15,11 @@ main { min-height: 60vh; }
 /* --- header -------------------------------------------------------------------------- */
 
 .miroir-header .fr-header__brand { box-shadow: none; }
+.miroir-header .fr-header__brand-top { width: 100%; }
+.miroir-header .fr-header__brand-top::after, .miroir-header .fr-header__brand-top::before { display: none; }
 .miroir-service { display: flex; align-items: center; gap: 0.875rem; padding: 0.75rem 0; }
 .miroir-service a { background-image: none; }
-.miroir-mark {
+.miroir-service a.miroir-mark {
   display: inline-flex; flex: none; width: 2.75rem; height: 2.75rem; border-radius: 50%;
   background: conic-gradient(from 210deg, var(--background-action-high-blue-france), #6a6af4, var(--background-action-high-blue-france));
   box-shadow: inset 0 0 0 3px var(--background-default-grey);
@@ -132,6 +134,11 @@ main { min-height: 60vh; }
 .miroir-query__meta { margin: 0.25rem 0 0; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .miroir-query .fr-tag { margin: 0; }
 
+/* On phones the results come first; the words and filters follow them. */
+@media (max-width: 47.99em) {
+  .miroir-main { order: 1; }
+  .miroir-side { order: 2; }
+}
 .miroir-count:not(:empty) { margin-left: 0.5rem; font-size: 0.75rem; font-weight: 700; color: var(--text-inverted-blue-france); background: var(--background-action-high-blue-france); border-radius: 1rem; padding: 0 0.5rem; }
 .miroir-filters .fr-select-group, .miroir-filters .fr-fieldset { margin-bottom: 1rem; }
 
