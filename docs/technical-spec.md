@@ -47,11 +47,13 @@ Everything runs in Docker so the stack can move to the Ministry's cloud unchange
 
 Each POP export is a folder holding `<base>.jsonl` (one record per line, POP field codes), `metadata.json` (the query and count) and `field-docs.json` (field labels). The PoC starts from three exports:
 
-| Export | Records | Images | Notes |
-|---|---|---|---|
-| `memoire` | 66,000 | about 66,000 | One image per record. `VIDEO` lists size variants of the same file, not extra views |
-| `joconde` | 33,000 | 54,825 | 12,000 records have 2 or more views |
-| `rose-valand` (Mongo collection `mnr`) | 2,400 | 16,961 | Median 4 images per record, max 52 |
+| Export | Records | Kept | Images | Notes |
+|---|---|---|---|---|
+| `memoire` | 66,000 | 65,989 | 65,989 | One image per record (`IMG`). `VIDEO` lists size variants of the same file, not extra views |
+| `joconde` | 33,000 | 32,997 | 54,825 | 12,000 records have 2 or more views |
+| `rose-valand` (base `rose-valland`, Mongo collection `mnr`) | 2,400 | 2,400 | 16,961 | Median 4 images per record, max 52 |
+
+"Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table.
 
 In week 4 the project lead supplies a full export of every POP record with an image, in the same format. It will include bases with no mapper yet (Mérimée, Palissy and others). Section 3.2 limits each new mapper to the fields search needs.
 
@@ -62,38 +64,40 @@ Every mapper turns a POP record into this shape:
 | Field | Type | Source examples |
 |---|---|---|
 | `ref` | keyword | `REF` |
-| `collection` | keyword | `base` |
+| `collection` | keyword | `base`: `joconde`, `memoire` or `rose-valland` |
 | `entity_id` | keyword | Mémoire: first `LBASE` value starting with `PA` (building) or `PM` (object), else `REF`. Other bases: `REF` |
-| `title` | text | Joconde/Rose Valland `TITR`; Mémoire `EDIF`, then `LEG` |
-| `description` | text | `DESC`, `LEG`, `HIST` (first 2,000 characters) |
+| `title` | text | Joconde/Rose Valland `TITR`; Mémoire `EDIF`, then `LEG`. Empty for 11,760 Joconde records: show `denomination` instead |
+| `description` | text | Joconde/Rose Valland `DESC` then `HIST`; Mémoire `LEG`. Joined, first 2,000 characters |
 | `denomination` | keyword[] | `DENO`, `MCL` |
 | `domain` | keyword[] | `DOMN`, `DOM` |
 | `authors` | keyword[] + text | `AUTR`, `AUTP` |
-| `period` | keyword[] | `EPOQ`, `PERI`, `MILL`, decade of `DATPV` |
-| `region`, `departement`, `commune` | keyword | `REGION`/`REG`, `DPT`/`DPT_LETTRE`, `VILLE_M`/`COM` |
+| `period` | keyword[] | `EPOQ`, `PERI`, `MILL`, decade of `DATPV` ("années 1940") |
+| `region`, `departement`, `commune` | keyword | `REGION`/`REG`, `DPT`/`DPT_LETTRE`, `VILLE_M`/`COM` (first value; `departement` is the name, not the number) |
 | `publishable` | boolean | `false` when Joconde `DIFFU` is "non" or Mémoire `DIFF` asks for permission |
 | `pop_url` | keyword | `https://pop.culture.gouv.fr/notice/<mongo collection>/<REF>` |
 | `images[]` | object | see 3.3 |
 
 ### 3.3 Images
 
-- **Source.** Fetch from the POP asset bucket (`imageUrl` and the `IMG`/`VIDEO` paths under the same host). For Mémoire, keep only the largest variant. The IIIF manifest (`iiif_manifest`, IIIF v3, level-2 image service) serves as fallback and for larger sizes.
+- **Source.** Fetch from the POP asset bucket: Joconde and Mémoire `IMG`, Rose Valland `VIDEO`, all relative to the `imageUrl` host. For Mémoire, `IMG` is already the largest variant. `images.parquet` stores the percent-encoded URL. Some files are missing from the bucket (for example some names with accents return 404); the IIIF manifest (`iiif_manifest`, IIIF v3, level-2 image service) serves as fallback and for larger sizes.
+- **Image id.** First 16 hex characters of SHA-1 over `ref` and `url`, so it never depends on row order.
 - **Skip:**
-  - the shared 1×1 placeholder GIF (4 records)
+  - the shared 1×1 placeholder GIF, which `imageUrl` holds when a record lists no image (3 Joconde, 1 Mémoire)
   - `sur_demande.jpg` ("image on request", 10 Mémoire records)
-  - Mémoire records that carry a note instead of a file (939)
-- **Image type.** Taken from file-name keywords, mainly for Rose Valland:
+  - the same path listed twice in one record (1 Joconde, 8 Rose Valland)
+  - records left with no image are dropped (14). An earlier draft counted 939 Mémoire records carrying "a note instead of a file"; the July 2026 export has none. 60 Mémoire records hold a note ("NUMÉRISÉ : …") in `VIDEO`, but their `IMG` file exists
+- **Image type.** Taken from file-name keywords, case and accents ignored. The first rule that matches wins:
 
   | Type | Keywords | Count in Rose Valland |
   |---|---|---|
-  | `detail` | `detail` | 3,689 |
-  | `back` | `revers`, `dos` | 1,604 / 297 |
-  | `inscription` | `inscription`, `signature` | 1,460 / 11 |
-  | `label` | `etiquette`, `cachet`, `marque` | 1,243 / 87 / 45 |
-  | `main` | anything else | rest |
+  | `label` | `etiquette`, `cachet`, `marque` | 1,518 |
+  | `inscription` | `inscription`, `signature` | 1,457 |
+  | `back` | `revers`, `verso`, `dos` (not inside a word like "calvados"), Louvre `R-ENS` / `R-DET` | 2,038 |
+  | `detail` | `detail`, Louvre `F-DET` | 1,351 |
+  | `main` | anything else | 10,597 |
 
-  The first `main` image of a record is its cover.
-- **Storage.** Keep originals on disk or in object storage, keyed by `collection/ref/filename`. Embedders read resized copies (longest side 1,024 px).
+  The order puts what the image shows (a label, an inscription) before where it is (the back) and how it is framed (a detail): "detail-etiquette-au-revers" is a `label`. Joconde has 2 `back` images; Mémoire has none. The first `main` image of a record is its cover; a record with no `main` image uses its first image.
+- **Storage.** Keep originals on disk or in object storage, keyed by `collection/image_id` (some REFs hold spaces). Embedders read resized copies (longest side 1,024 px). `miroir.config` owns both paths.
 
 ## 4. Models
 
@@ -196,7 +200,7 @@ Build a set of queries whose answer is *not* in the index by removing their reco
 
 This section defines the test sets. [experiments.md](experiments.md) says how we use them to compare options: halves, measures, error bars and rounds.
 
-Every test set is a JSONL of `{query_image or query_text, box?, expected_entity_ids}`. `eval/run.py` scores a pipeline configuration against a set and writes `eval/results/<round>/<step>-<option>.json`, which is committed.
+Every test set is a JSONL of `{query_image or query_text, box?, expected_entity_ids}`, stored as `eval/sets/<set>/{tune,sealed}.jsonl`. `uv run miroir eval run` scores a pipeline configuration against a set and writes `eval/results/<round>/<step>-<option>.json`, which is committed. Code gets both paths from `miroir.config`, which refuses to open a sealed half outside R4.
 
 During evaluation, the query image and every other image of the same *photo record* are removed from the index, so a query cannot find itself.
 
@@ -229,15 +233,26 @@ During evaluation, the query image and every other image of the same *photo reco
 
 ```
 miroir/
+  pyproject.toml   one uv project, Python 3.12; extras `ml` (torch…) and `api` (FastAPI)
+  Makefile         `make check` (ruff, pyright strict, pytest), `make fmt`
+  CLAUDE.md, CODING_STANDARDS.md
   docs/            functional-spec.md, technical-spec.md, experiments.md, results.md
-  pipeline/        mappers/, fetch.py, embed.py, tile.py, caption.py, index.py
-  api/             FastAPI app
+  src/miroir/
+    config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR)
+    cli.py         the `miroir` command; every entry point is a subcommand
+    records/       record model, mappers per base, Parquet store  (`miroir records build`)
+    images/        fetch, resize, tile
+    embed/         embedders (needs the `ml` extra)
+    index/         OpenSearch mappings and loading
+    eval/          test set builders, scoring
+    api/           FastAPI app (needs the `api` extra)
+  tests/           unit tests; fixtures/ holds real export lines
+  eval/            sets/, results/ (committed)
   web/             SvelteKit app
-  eval/            sets/, run.py, results/
   docker-compose.yml
 ```
 
-Data and images live outside the repository. Set their location with `MIROIR_DATA_DIR`.
+`records/`, `images/` and `eval/` exist today; the others are created when their work starts. Data and images live outside the repository, in `MIROIR_DATA_DIR` (default `~/miroir-data`). The exports are read from `MIROIR_EXPORTS_DIR` and never written to.
 
 ## 11. Sizing
 
