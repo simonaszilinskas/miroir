@@ -14,7 +14,7 @@ dependencies = [
 miroir = "miroir.cli:main"
 
 [project.optional-dependencies]
-ml = [
+jobs = [
     "pillow>=12.3.0",
     "torch>=2.14.1",
     "torchvision>=0.29.1",

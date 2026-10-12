@@ -6,16 +6,18 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 
 1. One package, `src/miroir/`. No scripts outside it; no `if __name__ == "__main__"`.
 2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
-   Group by area: `miroir records build`, `miroir images fetch`, `miroir eval run`.
-3. Heavy imports (torch, transformers) go inside the command function or an `ml`-only module,
-   so `miroir --help` and the base test suite run without them.
+   Group by area: `miroir records build`, `miroir jobs embed`, `miroir eval run`.
+3. No model runs on the Mac. Model calls go to OpenRouter, or to Hugging Face Jobs when
+   OpenRouter lacks the model. Code that runs inside a job may import torch; it lives in its own
+   module, and nothing in the base install imports it.
 4. New dependencies: base only if every command needs them. Otherwise an extra
-   (`ml`, `api`) in `pyproject.toml`. Dev tools go in the `dev` group.
+   (`jobs` for remote-job code, `api`) in `pyproject.toml`. Dev tools go in the `dev` group.
 
 ## Paths and settings
 
-5. All paths and settings come from `miroir.config`. No other module reads environment
-   variables, calls `expanduser`/`Path.home`, or hard-codes a machine path.
+5. All paths, settings and secrets (`OPENROUTER_API_KEY`, `HF_TOKEN`) come from `miroir.config`.
+   No other module reads environment variables, calls `expanduser`/`Path.home`, or hard-codes a
+   machine path.
    Ruff bans `os.environ`, `os.getenv` and `os.path`; `tests/test_conventions.py` checks the rest.
 6. Need a new path? Add a property or function to `config.py`.
 

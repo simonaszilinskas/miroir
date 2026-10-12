@@ -20,6 +20,16 @@ def test_settings_read_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert Settings().records_parquet == tmp_path / "records.parquet"
 
 
+def test_secrets_use_their_usual_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("HF_TOKEN", "hf-test")
+    settings = Settings()
+    assert settings.openrouter_api_key is not None
+    assert settings.openrouter_api_key.get_secret_value() == "sk-test"
+    assert settings.hf_token is not None
+    assert "hf-test" not in repr(settings)
+
+
 def test_eval_result_path_follows_the_rule() -> None:
     path = eval_result_path("R1", "A", "dinov2-vitl14")
     assert path.parts[-4:] == ("eval", "results", "R1", "A-dinov2-vitl14.json")

@@ -11,6 +11,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from miroir.records.model import Collection
@@ -45,10 +46,19 @@ Half = Literal["tune", "sealed"]
 class Settings(BaseSettings):
     """Values read from the environment (or `.env`), prefixed `MIROIR_`."""
 
-    model_config = SettingsConfigDict(env_prefix="MIROIR_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="MIROIR_", env_file=REPO_ROOT / ".env", extra="ignore"
+    )
 
     data_dir: Path = Path("~/miroir-data")
     exports_dir: Path = Path("/Users/simonaszilinskas/Downloads/exports")
+
+    # Model work runs remotely: OpenRouter where the model is there, else Hugging Face Jobs.
+    # These two keep their usual names, without the MIROIR_ prefix.
+    openrouter_api_key: SecretStr | None = Field(
+        default=None, validation_alias="OPENROUTER_API_KEY"
+    )
+    hf_token: SecretStr | None = Field(default=None, validation_alias="HF_TOKEN")
 
     # --- inputs (read only) -------------------------------------------------
 
@@ -74,24 +84,16 @@ class Settings(BaseSettings):
     def images_parquet(self) -> Path:
         return self.data_root / "images.parquet"
 
-    @property
-    def originals_dir(self) -> Path:
-        """Downloaded images, as fetched."""
-        return self.data_root / "images" / "original"
+    # No local image store: remote jobs read images from their URLs in images.parquet.
 
     @property
-    def resized_dir(self) -> Path:
-        """Copies resized to 1,024 px on the longest side, read by embedders."""
-        return self.data_root / "images" / "1024"
+    def vectors_dir(self) -> Path:
+        """Vectors that remote jobs send back, one folder per model run."""
+        return self.data_root / "vectors"
 
-    def original_image_path(self, collection: Collection, image_id: str) -> Path:
-        """Keyed by image_id (hex), not by REF or file name: some REFs hold spaces."""
-        _check_name(image_id)
-        return self.originals_dir / collection.value / image_id
-
-    def resized_image_path(self, collection: Collection, image_id: str) -> Path:
-        _check_name(image_id)
-        return self.resized_dir / collection.value / f"{image_id}.jpg"
+    def vectors_path(self, run: str) -> Path:
+        _check_name(run)
+        return self.vectors_dir / run
 
 
 def eval_sets_dir() -> Path:

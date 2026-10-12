@@ -8,7 +8,7 @@ and [docs/experiments.md](docs/experiments.md) before changing behaviour. Code r
 
 ```sh
 uv sync                        # base + dev tools (fast; no torch)
-uv sync --extra ml             # add torch, transformers, pillow
+uv sync --extra jobs           # torch, transformers: for code that runs inside remote jobs only
 uv sync --extra api            # add fastapi, uvicorn
 make check                     # ruff format check, ruff lint, pyright strict, pytest. Must pass before commit
 make fmt                       # format and auto-fix
@@ -21,7 +21,7 @@ uv run miroir records build    # exports -> records.parquet + images.parquet (ab
 - `src/miroir/config.py`: every setting and path. Ask it for paths; never build one by hand.
 - `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
-- `src/miroir/images/`: image download and resizing.
+- `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
 - `src/miroir/eval/`: test sets, scoring. Results go to `eval/results/`.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
 
@@ -29,7 +29,9 @@ uv run miroir records build    # exports -> records.parquet + images.parquet (ab
 
 - `MIROIR_EXPORTS_DIR` (default `/Users/simonaszilinskas/Downloads/exports`): POP exports, one folder per base. Read only.
   The Rose Valland folder is spelt `rose-valand`; the collection is `rose-valland`.
-- `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `images/`.
+- `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `vectors/`.
+- Run models remotely, never on the Mac: OpenRouter if it has the model, else Hugging Face Jobs
+  (`OPENROUTER_API_KEY`, `HF_TOKEN` in `.env`). The Mac builds tables and test sets and scores returned vectors.
 - Copy `.env.example` to `.env` to change them.
 - Load records with `miroir.records.store.read_records` / `read_images`, not by opening Parquet yourself.
 

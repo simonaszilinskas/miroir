@@ -97,7 +97,7 @@ Every mapper turns a POP record into this shape:
   | `main` | anything else | 10,597 |
 
   The order puts what the image shows (a label, an inscription) before where it is (the back) and how it is framed (a detail): "detail-etiquette-au-revers" is a `label`. Joconde has 2 `back` images; Mémoire has none. The first `main` image of a record is its cover; a record with no `main` image uses its first image.
-- **Storage.** Keep originals on disk or in object storage, keyed by `collection/image_id` (some REFs hold spaces). Embedders read resized copies (longest side 1,024 px). `miroir.config` owns both paths.
+- **Storage.** No local image store. Model work runs remotely (OpenRouter where it has the model, else Hugging Face Jobs), and those jobs read images from their URLs in `images.parquet`, resized to 1,024 px on the longest side. Vectors come back to `MIROIR_DATA_DIR/vectors/`, keyed by `image_id`.
 
 ## 4. Models
 
@@ -233,7 +233,7 @@ During evaluation, the query image and every other image of the same *photo reco
 
 ```
 miroir/
-  pyproject.toml   one uv project, Python 3.12; extras `ml` (torch…) and `api` (FastAPI)
+  pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only) and `api` (FastAPI)
   Makefile         `make check` (ruff, pyright strict, pytest), `make fmt`
   CLAUDE.md, CODING_STANDARDS.md
   docs/            functional-spec.md, technical-spec.md, experiments.md, results.md
@@ -241,8 +241,8 @@ miroir/
     config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR)
     cli.py         the `miroir` command; every entry point is a subcommand
     records/       record model, mappers per base, Parquet store  (`miroir records build`)
-    images/        fetch, resize, tile
-    embed/         embedders (needs the `ml` extra)
+    images/        image helpers (URLs, tiles); no local image store
+    jobs/          remote model work: OpenRouter calls, Hugging Face Jobs (code run there may use `jobs`)
     index/         OpenSearch mappings and loading
     eval/          test set builders, scoring
     api/           FastAPI app (needs the `api` extra)

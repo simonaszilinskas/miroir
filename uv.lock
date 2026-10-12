@@ -328,7 +328,7 @@ api = [
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
-ml = [
+jobs = [
     { name = "pillow" },
     { name = "torch" },
     { name = "torchvision" },
@@ -347,16 +347,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.143.0" },
-    { name = "pillow", marker = "extra == 'ml'", specifier = ">=12.3.0" },
+    { name = "pillow", marker = "extra == 'jobs'", specifier = ">=12.3.0" },
     { name = "pyarrow", specifier = ">=26.0.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
-    { name = "torch", marker = "extra == 'ml'", specifier = ">=2.14.1" },
-    { name = "torchvision", marker = "extra == 'ml'", specifier = ">=0.29.1" },
-    { name = "transformers", marker = "extra == 'ml'", specifier = ">=5.19.0" },
+    { name = "torch", marker = "extra == 'jobs'", specifier = ">=2.14.1" },
+    { name = "torchvision", marker = "extra == 'jobs'", specifier = ">=0.29.1" },
+    { name = "transformers", marker = "extra == 'jobs'", specifier = ">=5.19.0" },
     { name = "typer", specifier = ">=0.27.3" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.54.0" },
 ]
-provides-extras = ["ml", "api"]
+provides-extras = ["jobs", "api"]
 
 [package.metadata.requires-dev]
 dev = [
