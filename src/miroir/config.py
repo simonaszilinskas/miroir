@@ -25,6 +25,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: Base URL of the POP asset bucket. Export image paths are relative to it.
 POP_ASSET_HOST = "https://popcorn-prd-perf-assets.s3.gra.io.cloud.ovh.net"
 
+#: IIIF image service (v3, level 2) serving the same files as the asset bucket.
+#: A file's service id is this host plus its bucket path with every "/" encoded.
+POP_IIIF_IMAGE_HOST = "https://iiif.prd.cloud.culture.fr/iiif/3"
+
+#: OpenRouter REST API.
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+
 #: Base URL of a record page on POP.
 POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 
@@ -57,6 +64,15 @@ class Settings(BaseSettings):
     )
     hf_token: SecretStr | None = Field(default=None, validation_alias="HF_TOKEN")
 
+    # Money cap for all OpenRouter spend together, in dollars (experiments.md §1 rule 5).
+    # A run may not push total spend past budget minus reserve. Probes have their own cap.
+    openrouter_budget_usd: float = 50.0
+    openrouter_reserve_usd: float = 5.0
+    probe_budget_usd: float = 2.0
+
+    #: Cap on the resized-image cache, in megabytes. Oldest files go first.
+    image_cache_mb: int = 1024
+
     # --- inputs (read only) -------------------------------------------------
 
     def export_dir(self, collection: Collection) -> Path:
@@ -81,7 +97,22 @@ class Settings(BaseSettings):
     def images_parquet(self) -> Path:
         return self.data_root / "images.parquet"
 
-    # No local image store: remote jobs read images from their URLs in images.parquet.
+    # No image store: images are read from their URLs. Only a small, bounded cache of
+    # resized copies is kept, for runs that send images to OpenRouter from the Mac.
+
+    @property
+    def image_cache_dir(self) -> Path:
+        return self.data_root / "cache" / "images"
+
+    @property
+    def spend_ledger(self) -> Path:
+        """One JSON line per paid OpenRouter call: what it cost and for which run."""
+        return self.data_root / "spend" / "openrouter.jsonl"
+
+    def probe_path(self, option: str) -> Path:
+        """Cost measured on 100 images for one option, read before a full run."""
+        _check_name(option)
+        return self.data_root / "probes" / f"{option}.json"
 
     @property
     def vectors_dir(self) -> Path:
