@@ -108,7 +108,7 @@ The models below are the starting point only. [experiments.md](experiments.md) c
 |---|---|---|---|
 | Same-object matching (F1, F4, F5) | DINOv2 ViT-L/14 | DINOv3 ViT-L | Self-supervised features match the *same* object across views better than text-aligned models do |
 | Words ↔ image (F2) and a second signal for F1 | SigLIP 2 so400m | SigLIP 2 base | Multilingual text encoder, so French queries work |
-| Finding objects in a photo (F4) | OWLv2 with prompts ("painting", "sculpture", "building", "vase", "furniture"…) | Grounding DINO | Open-vocabulary boxes. Score on the 15 Jeu de Paume room photos |
+| Finding objects in a photo (F4) | OWLv2 with prompts ("painting", "sculpture", "building", "vase", "furniture"…) | Grounding DINO | Open-vocabulary boxes. Score on the 14 Jeu de Paume room photos (T3) |
 | Captions | A vision model through OpenRouter | | Mémoire captions (`LEG`) have a median of 51 characters. A French visual description makes them searchable by words |
 
 Vectors are L2-normalised, so we score with inner product. Their size depends on the model chosen: 1,024 for DINOv2 ViT-L and 1,152 for SigLIP 2 so400m.
@@ -201,20 +201,43 @@ Build a set of queries whose answer is *not* in the index by removing their reco
 
 This section defines the test sets. [experiments.md](experiments.md) says how we use them to compare options: halves, measures, error bars and rounds.
 
-Every test set is a JSONL of `{query_image or query_text, box?, expected_entity_ids}`, stored as `eval/sets/<set>/{tune,sealed}.jsonl`. `uv run miroir eval run` scores a pipeline configuration against a set and writes `eval/results/<round>/<step>-<option>.json`, which is committed. Code gets both paths from `miroir.config`, which refuses to open a sealed half outside R4.
+`uv run miroir testsets build` builds T1, T3, T5 and T8 from `records.parquet` and `images.parquet` in about a second. Every draw is seeded with `config.SEED`, so the same records always give the same sets. A new export gives new sets: rebuild only between rounds, never between runs you compare. `uv run miroir eval run` scores a pipeline configuration against a set and writes `eval/results/<round>/<step>-<option>.json`, which is committed.
 
-During evaluation, the query image and every other image of the same *photo record* are removed from the index, so a query cannot find itself.
+**Query format.** Each half is a JSONL file, one query per line: `query_id`, `set_id`, `entity_id` (what the query image shows), `query_image_id`, `expected_entity_ids` (empty for T8), `exclude_image_ids` and, for T3 only, `scene_image_ids`. No set has boxes: the export holds none (see T3).
+
+**What a query may not find.** Before searching, take the query's `exclude_image_ids` out of the gallery. For T1 that is the query's whole *photo record*, so a query cannot find itself. For T3 and T5 it is the query image alone, since the record's other images are the answer. For T8 it is every image of the entity.
+
+**Halves.** Each set is split 50/50 by `entity_id` (`tune` takes the odd one). T8 queries keep the half of the T1 or T5 query they come from, so no entity sits in a tune half of one set and the sealed half of another; the build fails if one does. Tune halves are `MIROIR_DATA_DIR/testsets/<set>.tune.jsonl`. Sealed halves sit apart, in `MIROIR_DATA_DIR/testsets-sealed/<set>.sealed.jsonl`, so a glob over one folder misses them. Read either only with `miroir.eval.sets.load_queries`; the sealed half needs `allow_sealed=True`, and only R4 code may pass it. Sets live in the data dir, not in git.
+
+**Galleries.** We compare models on a 20,000-image sample first, then run the winners on every image. Each gallery is a list of `image_id`s, one per line, in `MIROIR_DATA_DIR/testsets/galleries/`:
+
+| File | Holds | Images (July 2026 exports) |
+|---|---|---|
+| `full.txt` | every image | 137,775 |
+| `screening-20k.txt` | every image a query needs (the query, every image of its answers, T3 room photos), then seeded random distractors up to 20,000 | 20,000: 15,765 needed, 4,235 distractors |
+| `screening-20k-publishable.txt` | the images of `screening-20k` whose record is `publishable`. Closed models get only these (§4, §9) | 19,212 |
+
+T1's answers fill most of the screening gallery: its 1,000 buildings hold about 12,000 photos, and a few hold hundreds. If screening scores run well above full-gallery scores, cap the answer photos kept per building.
+
+A closed model may run a query only when the query image is publishable and one answer image is in `screening-20k-publishable`. That holds for T1 1,000 of 1,000, T3 198 of 198, T5 900 of 1,000 and T8 472 of 500. When comparing a closed model with open ones, score all of them on those same queries. The share is high enough for a fair test.
+
+| Set | Halves (tune / sealed) |
+|---|---|
+| T1 | 500 / 500 |
+| T3 | 99 / 99 |
+| T5 | 500 / 500 |
+| T8 | 250 / 250 |
 
 | Set | Built from | Size | Metric | Target |
 |---|---|---|---|---|
-| T1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,262 buildings). One photo per building is the query; the others are the answer. At most 1 query per building | 1,000 queries | Right building in top 10 | ≥ 80% |
+| T1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,163 buildings; 3,262 before photos that name both a building and an object went to the object, §3.2). One photo per building is the query; the others are the answer. At most 1 query per building | 1,000 queries | Right building in top 10 | ≥ 80% |
 | T2 Phone building | Wikimedia Commons photos of buildings in T1, found through Wikidata's Mérimée ID (P380). Keep GPS from the photo metadata where present | ≥ 300 queries | Right building in top 10 | ≥ 60% |
-| T3 Room photos | 15 Jeu de Paume room photos (Rose Valland `JDP-*`) and the 231 paintings that link to them through `RENV`. Hand-drawn boxes for each painting are the reference. Detectors are scored against them | 231 queries | Right record in top 5 | ≥ 70% |
+| T3 Room photos | Rose Valland `JDP-*`: 14 Jeu de Paume room photos (plus a floor plan, which makes the 15 records with no domain) and the 231 artworks that link to them through `RENV` (`linked_refs`). The export holds no boxes, and every artwork image is a crop of a room photo: the work as it hangs, a version with the perspective corrected, sometimes a closer detail. So one crop is the query, standing in for a perfect hand-drawn box, and the artwork's other crops are the answer. The 33 artworks with a single crop are left out. Each query lists its room photo(s) in `scene_image_ids`, so detectors (step C) are scored end to end: detect on the room photo, search each box, hit if the artwork is in the top 5. Query and answers come from the same negative, so this measures matching a crop to its record, not finding the work in another photo | 198 queries (231 planned) | Right record in top 5 | ≥ 70% |
 | T4 Details | Rose Valland `detail` images, with the record's other images left in the index | up to 1,000 queries | Right record in top 10 | Report |
-| T5 Objects, other view | Joconde records with 2+ images: one view is the query | 1,000 queries | Right record in top 10 | Report |
+| T5 Objects, other view | Joconde records with 2+ images (11,964): one view is the query; the record's other views are the answer | 1,000 queries | Right record in top 10 | Report |
 | T6 Words, by hand | 50 French descriptions written by hand, judged by hand | 50 queries | Relevant record in top 10 | Report |
 | T7 Words, generated | For a hidden image, a vision model writes the short French description a member of the public might type. The answer is that image's record. The writer must come from a different model family than the option being scored | 1,000 queries | Right record in top 10 | Report |
-| T8 Not found | Queries from T1, T2 and T5 whose whole entity has been removed from the index | 500 queries | Wrong-but-confident rate at the chosen cut-off | < 5% |
+| T8 Not found | Queries from T1 and T5 (T2 later) with their whole entity taken out of the gallery: 125 from each half of each | 500 queries | Wrong-but-confident rate at the chosen cut-off | < 5% |
 | T9 Public benchmarks | AmsterTime (modern vs archive street photos) and Met (museum art) | as published | As in the published papers | Within 2 points of published scores, as a harness check |
 
 ### 7.1 Vector contract
@@ -260,7 +283,7 @@ miroir/
     eval/          test set builders, scoring
     api/           FastAPI app (needs the `api` extra)
   tests/           unit tests; fixtures/ holds real export lines
-  eval/            sets/, results/ (committed)
+  eval/            results/ (committed). Test sets live in MIROIR_DATA_DIR
   web/             SvelteKit app
   docker-compose.yml
 ```

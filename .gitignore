@@ -6,9 +6,8 @@ data/
 *.jpeg
 *.png
 *.gif
-# ...except small committed text fixtures and test sets
+# ...except small committed text fixtures
 !tests/fixtures/**/*.jsonl
-!eval/sets/**/*.jsonl
 
 .env
 __pycache__/

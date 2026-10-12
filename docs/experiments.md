@@ -132,7 +132,7 @@ As a guide to what counts as a real difference, an interval on 231 queries spans
 | Round | When | What | Output |
 |---|---|---|---|
 | R0 | Week 1 | Build the harness and test sets. Download images. Reproduce one published DINOv2 score on AmsterTime and Met (T9) to check the harness | Harness passes T9 within 2 points of the published figure |
-| R1 | Week 1–2 | All A options alone on T1, T2, T3 (hand boxes), T5. All B options on T6 and T7 | Top 3 image models, top 2 text approaches |
+| R1 | Week 1–2 | All A options alone on T1, T2, T3 (artwork crops as queries), T5. All B options on T6 and T7 | Top 3 image models, top 2 text approaches |
 | R2 | Week 2 | E and F on top of the R1 winners | Best re-ranker; best phone-gap fix |
 | R3 | Week 2–3 | C, D, G and H on the R2 winners | The full stack for the website and the full POP index |
 | R4 | Week 6 | The chosen stack and the two runners-up on the sealed halves, once | Final scores for the decision meeting |
