@@ -96,7 +96,10 @@ class FakeOpenRouter:
             return httpx.Response(200, json={"data": [{"id": i} for i in ids]})
         if path == "/batches" and request.method == "POST":
             self.batch_bodies.append(json.loads(request.content))
-            return httpx.Response(202, json={"id": "batch-1", "status": "validating"})
+            # The real answer carries "error": null.
+            return httpx.Response(
+                202, json={"id": "batch-1", "status": "validating", "error": None}
+            )
         if path == "/batches/batch-1":
             self.polls += 1
             if self.polls < 2:

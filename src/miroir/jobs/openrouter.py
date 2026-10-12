@@ -361,7 +361,11 @@ class OpenRouterClient:
 
     @staticmethod
     def _parse[M: BaseModel](model: type[M], payload: object) -> M:
-        if isinstance(payload, dict) and "error" in payload and "data" not in payload:
+        if (
+            isinstance(payload, dict)
+            and payload.get("error") is not None  # pyright: ignore[reportUnknownMemberType]
+            and "data" not in payload
+        ):
             # OpenRouter sometimes answers 200 with an error object.
             msg = f"OpenRouter error: {_ErrorBody.model_validate(payload).error}"
             raise OpenRouterError(msg)
