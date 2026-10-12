@@ -1,0 +1,11 @@
+# Data and images stay outside the repository
+data/
+*.jsonl
+*.jpg
+*.jpeg
+*.png
+.env
+__pycache__/
+.venv/
+node_modules/
+.DS_Store
