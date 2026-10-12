@@ -1,0 +1,314 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 3828491,
+    "ns": 6,
+    "title": "File:Pietro Perugino cat66.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 849352,
+      "width": 2562,
+      "height": 3327,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Pietro_Perugino_cat66.jpg/960px-Pietro_Perugino_cat66.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1247,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Pietro_Perugino_cat66.jpg/1920px-Pietro_Perugino_cat66.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Pietro_Perugino_cat66.jpg/960px-Pietro_Perugino_cat66.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1247,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Pietro_Perugino_cat66.jpg/1920px-Pietro_Perugino_cat66.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/79/Pietro_Perugino_cat66.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Pietro_Perugino_cat66.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=3828491",
+      "commonmetadata": [
+       {
+        "name": "_error",
+        "value": "0"
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Marriage of the Virgin (Perugino)|PD-old-100-expired|PD-Art (PD-old-auto-expired)|Artworks with Wikidata item|Artworks with known accession number|CC-PD-Mark|Artworks with accession number from Wikidata|PD-Art missing SDC copyright status|PD-old missing SDC copyright status|Artworks digital representation of 2D work|Works by Pietro Perugino by Garibaldi number",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "Artist": {
+        "value": "<bdi><a href=\"https://en.wikipedia.org/wiki/en:Pietro_Perugino\" class=\"extiw\" title=\"w:en:Pietro Perugino\"><span title=\"Italian Renaissance painter of the Umbrian school (1448–1523)\">Pietro Perugino</span></a></bdi>",
+        "source": "commons-desc-page"
+       },
+       "ImageDescription": {
+        "value": "<div class=\"description\">\nCat. no. 66 in Vittoria Garibaldi: <i>Perugino. Catalogo completo.</i> Octavo, Firenze 2000, <span lang=\"en\" dir=\"ltr\"><a href=\"https://en.wikipedia.org/wiki/ISBN\" class=\"extiw\" title=\"en:ISBN\"><span lang=\"en\" dir=\"ltr\">ISBN</span></a></span> <a href=\"//commons.wikimedia.org/wiki/Special:BookSources/88-8030-091-1\" title=\"Special:BookSources/88-8030-091-1\">88-8030-091-1</a></div>",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "April 1502<div style=\"display: none;\">date QS:P571,+1502-04-00T00:00:00Z/10</div>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "Vittoria Garibaldi: <i>Perugino.</i> Silvana, Milano 2004, <span lang=\"en\" dir=\"ltr\"><a href=\"https://en.wikipedia.org/wiki/ISBN\" class=\"extiw\" title=\"en:ISBN\"><span lang=\"en\" dir=\"ltr\">ISBN</span></a></span> <a href=\"//commons.wikimedia.org/wiki/Special:BookSources/88-8215-813-6\" title=\"Special:BookSources/88-8215-813-6\">88-8215-813-6</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ],
+    "extlinks": [
+     {
+      "url": "https://www.pop.culture.gouv.fr/notice/joconde/06570007477"
+     }
+    ]
+   },
+   {
+    "pageid": 116340550,
+    "ns": 6,
+    "title": "File:Église Saint-Gervais.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 2729708,
+      "width": 4672,
+      "height": 3115,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/%C3%89glise_Saint-Gervais.jpg/960px-%C3%89glise_Saint-Gervais.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 640,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/%C3%89glise_Saint-Gervais.jpg/1920px-%C3%89glise_Saint-Gervais.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/%C3%89glise_Saint-Gervais.jpg/960px-%C3%89glise_Saint-Gervais.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 640,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/%C3%89glise_Saint-Gervais.jpg/1920px-%C3%89glise_Saint-Gervais.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/5d/%C3%89glise_Saint-Gervais.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:%C3%89glise_Saint-Gervais.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=116340550",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "Canon"
+       },
+       {
+        "name": "Model",
+        "value": "Canon EOS 90D"
+       },
+       {
+        "name": "Orientation",
+        "value": 1
+       },
+       {
+        "name": "XResolution",
+        "value": "3000000/10000"
+       },
+       {
+        "name": "YResolution",
+        "value": "3000000/10000"
+       },
+       {
+        "name": "ResolutionUnit",
+        "value": 2
+       },
+       {
+        "name": "Software",
+        "value": "Adobe Photoshop Camera Raw 12.0 (Windows)"
+       },
+       {
+        "name": "DateTime",
+        "value": "2022:03:20 15:07:55"
+       },
+       {
+        "name": "ExposureTime",
+        "value": "1/100"
+       },
+       {
+        "name": "FNumber",
+        "value": "10/1"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 3
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 100
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0231"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2022:03:18 15:39:32"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2022:03:18 15:39:32"
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "6643856/1000000"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "6643856/1000000"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/1"
+       },
+       {
+        "name": "MaxApertureValue",
+        "value": "2875/1000"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 5
+       },
+       {
+        "name": "Flash",
+        "value": 0
+       },
+       {
+        "name": "FocalLength",
+        "value": "22/1"
+       },
+       {
+        "name": "SubSecTimeOriginal",
+        "value": "82"
+       },
+       {
+        "name": "SubSecTimeDigitized",
+        "value": "82"
+       },
+       {
+        "name": "ColorSpace",
+        "value": 65535
+       },
+       {
+        "name": "FocalPlaneXResolution",
+        "value": "102200864/32768"
+       },
+       {
+        "name": "FocalPlaneYResolution",
+        "value": "102200864/32768"
+       },
+       {
+        "name": "FocalPlaneResolutionUnit",
+        "value": 3
+       },
+       {
+        "name": "CustomRendered",
+        "value": 0
+       },
+       {
+        "name": "ExposureMode",
+        "value": 0
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 0
+       },
+       {
+        "name": "SceneCaptureType",
+        "value": 0
+       },
+       {
+        "name": "SerialNumber",
+        "value": "173053000265"
+       },
+       {
+        "name": "Lens",
+        "value": "TAMRON SP 17-50mm f/2.8 Di II VC B005"
+       },
+       {
+        "name": "PixelXDimension",
+        "value": "4672"
+       },
+       {
+        "name": "PixelYDimension",
+        "value": "3115"
+       },
+       {
+        "name": "DateTimeMetadata",
+        "value": "2022:03:20 16:07:55"
+       },
+       {
+        "name": "OriginalDocumentID",
+        "value": "0CC48269474345A5E4C0E5ED04ECBC0C"
+       },
+       {
+        "name": "ImageDescription",
+        "value": [
+         {
+          "name": "x-default",
+          "value": "Église Saint-Gervais, Paris 4e"
+         },
+         {
+          "name": "_type",
+          "value": "lang"
+         }
+        ]
+       },
+       {
+        "name": "iimVersion",
+        "value": 2
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Place Saint-Gervais (Paris)|Self-published work|Facade of Église Saint-Gervais-Saint-Protais",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "L'église Saint-Gervais à Paris.",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2022-03-18 15:39:32",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:ZeusUpsistos\" title=\"User:ZeusUpsistos\">Arthur Weidmann</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   }
+  ]
+ },
+ "limits": {
+  "extlinks": 500
+ }
+}

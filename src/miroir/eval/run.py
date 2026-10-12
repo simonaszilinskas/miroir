@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from miroir.commons.model import is_commons_image
 from miroir.config import Half, Settings, eval_result_path
 from miroir.eval import amstertime
 from miroir.eval.results import (
@@ -121,6 +122,8 @@ def publishable_only(
 ) -> list[Query]:
     """Queries whose image comes from a publishable record (technical spec §7, closed models).
 
+    Commons photos (T2, T2b) are openly licensed: they stay when an answer image is publishable.
+
     With `in_gallery`, also drop queries whose image is not in that list (images a service
     could not fetch are left out of the list, so every option answers the same queries).
     """
@@ -128,7 +131,14 @@ def publishable_only(
     public = {i.image_id for r in records if r.publishable for i in r.images}
     if in_gallery is not None:
         public &= set(in_gallery)
-    kept = [q for q in queries if q.query_image_id in public]
+    public_entities = {r.entity_id for r in records for i in r.images if i.image_id in public}
+    kept = [
+        q
+        for q in queries
+        if q.query_image_id in public
+        # A Commons photo is openly licensed; it needs an answer a closed model may see.
+        or (is_commons_image(q.query_image_id) and set(q.expected_entity_ids) & public_entities)
+    ]
     logger.info("kept %d of %d queries with a publishable image", len(kept), len(queries))
     return kept
 

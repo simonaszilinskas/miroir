@@ -1,0 +1,462 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 160260144,
+    "ns": 6,
+    "title": "File:27-3-23, église St Gervais, monument aux victimes du bombardement allemand (du 29 mars 1918) - btv1b53103140j.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 5639116,
+      "width": 6175,
+      "height": 8576,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg/960px-27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1333,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg/1920px-27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg/960px-27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1333,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg/1920px-27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/7d/27-3-23%2C_%C3%A9glise_St_Gervais%2C_monument_aux_victimes_du_bombardement_allemand_%28du_29_mars_1918%29_-_btv1b53103140j.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:27-3-23,_%C3%A9glise_St_Gervais,_monument_aux_victimes_du_bombardement_allemand_(du_29_mars_1918)_-_btv1b53103140j.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=160260144",
+      "commonmetadata": [],
+      "extmetadata": {
+       "Categories": {
+        "value": "Interior of Église Saint-Gervais-Saint-Protais|Artworks without Wikidata item|PD-1996|Large images|PD France|Files from Gallica|Images from Gallica (Bibliothèque nationale de France) uploaded by Gzen92Bot|Photographs by Agence Rol in the Bibliothèque nationale de France|1923 photographs by Agence Rol|1923 black and white photographs from Gallica",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "Artist": {
+        "value": "<div class=\"fn value\">\nAgence Rol. Agence photographique (commanditaire)</div>",
+        "source": "commons-desc-page"
+       },
+       "ImageDescription": {
+        "value": "Sujet : Monuments commémoratifs -- Paris (France)\n<p>Paris (France) -- Église Saint-Gervais-Saint-Protais\nRéférence bibliographique : Rol, 82224\nAppartient à l’ensemble documentaire : Pho20Rol\nImage de presse\nCouverture : 27 mars 1923\n</p>\nLangue : français",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "1923<div style=\"display: none;\">date QS:P571,+1923-00-00T00:00:00Z/9</div>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "Bibliothèque nationale de France",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 161665416,
+    "ns": 6,
+    "title": "File:St Gervais et Protais - btv1b105174277 (1 of 2).jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1958923,
+      "width": 4206,
+      "height": 5371,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/44/St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg/960px-St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1226,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/44/St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg/1920px-St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/44/St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg/960px-St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1226,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/44/St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg/1920px-St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/44/St_Gervais_et_Protais_-_btv1b105174277_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:St_Gervais_et_Protais_-_btv1b105174277_(1_of_2).jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=161665416",
+      "commonmetadata": [],
+      "extmetadata": {
+       "Categories": {
+        "value": "Interior of Église Saint-Gervais-Saint-Protais|Artworks without Wikidata item|PD US expired|PD France|Images from Gallica|CC-PD-Mark|Files from Gallica|PD-old-95-expired|Photographs by Eugène Atget|PD-old missing SDC copyright status|PD-US missing SDC copyright status|Images from Gallica (Bibliothèque nationale de France) uploaded by Gzen92Bot",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "Artist": {
+        "value": "<div class=\"fn value\">\nAtget, Eugène (1857-1927). Photographe</div>",
+        "source": "commons-desc-page"
+       },
+       "ImageDescription": {
+        "value": "Sujet : Paris (France) -- Église Saint-Gervais-Saint-Protais\n<p>Oratoires -- France -- Paris (France) (17e siècle)\nVues d'intérieur -- 1870-1913\n</p>\nLangue : français",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "between 1904 and 1906<div style=\"display: none;\">date QS:P571,+1904-00-00T00:00:00Z/8,P1319,+1904-00-00T00:00:00Z/9,P1326,+1906-00-00T00:00:00Z/9</div>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "Bibliothèque nationale de France",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 162003570,
+    "ns": 6,
+    "title": "File:Église Saint-Gervais-Saint-Protais. Tombeau du chancelier Letellier - dessin - Ferdinand Delamonce - btv1b103034181 (1 of 2).jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1090718,
+      "width": 2527,
+      "height": 2418,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg/960px-%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 919,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg/1920px-%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg/960px-%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 919,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg/1920px-%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/c2/%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_%281_of_2%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:%C3%89glise_Saint-Gervais-Saint-Protais._Tombeau_du_chancelier_Letellier_-_dessin_-_Ferdinand_Delamonce_-_btv1b103034181_(1_of_2).jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=162003570",
+      "commonmetadata": [],
+      "extmetadata": {
+       "Categories": {
+        "value": "Interior of Église Saint-Gervais-Saint-Protais|Artworks without Wikidata item|PD-old-100-expired|PD US expired|PD France|CC-PD-Mark|Files from Gallica|PD-old missing SDC copyright status|PD-US missing SDC copyright status|Images from Gallica (Bibliothèque nationale de France) uploaded by Gzen92Bot|Files from Gallica needing categories (images of 18th century)|Funerary Monument to Michel Le Tellier|Images of churches from Gallica",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "Artist": {
+        "value": "<div class=\"fn value\">\nDelamonce, Ferdinand (1678-1753). Dessinateur</div>",
+        "source": "commons-desc-page"
+       },
+       "ImageDescription": {
+        "value": "Sujet : Le Tellier, Michel (1603-1685) -- Tombes\n<p>Monuments funéraires\nStatues\nParis (France) -- Arrondissement (04e)\nParis (France) -- Église Saint-Gervais-Saint-Protais\nParis (France) -- Place Saint-Gervais\nVues d'intérieur -- 18e siècle\nRéférence bibliographique : Destailleur Paris, t. 6, 1282\n</p>\nAppartient à l’ensemble documentaire : DesDestail",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "18<sup>th</sup> century<div style=\"display: none;\">date QS:P571,+1750-00-00T00:00:00Z/7</div>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "Bibliothèque nationale de France",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 184740894,
+    "ns": 6,
+    "title": "File:Intérieur Église Saint Gervais - Paris IV (FR75) - 2026-02-21 - 31.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 7263502,
+      "width": 4284,
+      "height": 5712,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg/960px-Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1280,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg/1920px-Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg/960px-Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1280,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg/1920px-Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/ae/Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_%28FR75%29_-_2026-02-21_-_31.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Int%C3%A9rieur_%C3%89glise_Saint_Gervais_-_Paris_IV_(FR75)_-_2026-02-21_-_31.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=184740894",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "Apple"
+       },
+       {
+        "name": "Model",
+        "value": "iPhone 16 Pro"
+       },
+       {
+        "name": "XResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "YResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "ResolutionUnit",
+        "value": 2
+       },
+       {
+        "name": "Software",
+        "value": "PhotoScape"
+       },
+       {
+        "name": "DateTime",
+        "value": "2026:02:21 15:04:13"
+       },
+       {
+        "name": "YCbCrPositioning",
+        "value": 1
+       },
+       {
+        "name": "ExposureTime",
+        "value": "1/50"
+       },
+       {
+        "name": "FNumber",
+        "value": "1244236/699009"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 2
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 200
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0232"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2026:02:21 15:04:13"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2026:02:21 15:04:13"
+       },
+       {
+        "name": "ComponentsConfiguration",
+        "value": [
+         {
+          "name": 0,
+          "value": 1
+         },
+         {
+          "name": 1,
+          "value": 2
+         },
+         {
+          "name": 2,
+          "value": 3
+         },
+         {
+          "name": 3,
+          "value": 0
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "56974/10095"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "42657/25639"
+       },
+       {
+        "name": "BrightnessValue",
+        "value": "21236/11809"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/1"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 5
+       },
+       {
+        "name": "Flash",
+        "value": 16
+       },
+       {
+        "name": "FocalLength",
+        "value": "251773/37217"
+       },
+       {
+        "name": "SubSecTimeOriginal",
+        "value": "966"
+       },
+       {
+        "name": "SubSecTimeDigitized",
+        "value": "966"
+       },
+       {
+        "name": "FlashPixVersion",
+        "value": "0100"
+       },
+       {
+        "name": "ColorSpace",
+        "value": 1
+       },
+       {
+        "name": "SensingMethod",
+        "value": 2
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "ExposureMode",
+        "value": 0
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 0
+       },
+       {
+        "name": "FocalLengthIn35mmFilm",
+        "value": 24
+       },
+       {
+        "name": "SceneCaptureType",
+        "value": 0
+       },
+       {
+        "name": "GPSLatitude",
+        "value": 48.85537222222222
+       },
+       {
+        "name": "GPSLongitude",
+        "value": 2.3552083333333336
+       },
+       {
+        "name": "GPSAltitude",
+        "value": 39.74408937386334
+       },
+       {
+        "name": "GPSTimeStamp",
+        "value": [
+         {
+          "name": 0,
+          "value": "14/1"
+         },
+         {
+          "name": 1,
+          "value": "4/1"
+         },
+         {
+          "name": 2,
+          "value": "10/1"
+         }
+        ]
+       },
+       {
+        "name": "GPSSpeedRef",
+        "value": "K"
+       },
+       {
+        "name": "GPSSpeed",
+        "value": "0/1"
+       },
+       {
+        "name": "GPSImgDirectionRef",
+        "value": "T"
+       },
+       {
+        "name": "GPSImgDirection",
+        "value": "571359/1849"
+       },
+       {
+        "name": "GPSDestBearingRef",
+        "value": "T"
+       },
+       {
+        "name": "GPSDestBearing",
+        "value": "571359/1849"
+       },
+       {
+        "name": "GPSDateStamp",
+        "value": "2026:02:21"
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Interior of Église Saint-Gervais-Saint-Protais|Self-published work|Images of Paris 4e arrondissement by Chabe01|Files with coordinates missing SDC location of creation (48° N, 2° E)|Images by Chabe01 taken with iPhone 16 Pro|Images of churches by Chabe01|Paris photographs taken on 2026-02-21",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "Intérieur de l'église Saint-Gervais, Paris.",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2026-02-21 15:04:13",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Chabe01\" title=\"User:Chabe01\">Chabe01</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -12,6 +12,7 @@ from miroir import logs
 from miroir.config import get_settings
 
 if TYPE_CHECKING:
+    from miroir.eval.build_sets import BuildReport
     from miroir.eval.results import SetScore
     from miroir.eval.scoring import Interval
 
@@ -20,7 +21,9 @@ records_app = typer.Typer(no_args_is_help=True, help="POP records: parse the exp
 app.add_typer(records_app, name="records")
 eval_app = typer.Typer(no_args_is_help=True, help="Evaluation: vectors, scoring, results.")
 app.add_typer(eval_app, name="eval")
-testsets_app = typer.Typer(no_args_is_help=True, help="Test sets T1, T3, T5, T8 and galleries.")
+testsets_app = typer.Typer(
+    no_args_is_help=True, help="Test sets T1, T2, T2b, T3, T5, T8 and galleries."
+)
 app.add_typer(testsets_app, name="testsets")
 amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R0).")
 eval_app.add_typer(amstertime_app, name="amstertime")
@@ -70,22 +73,57 @@ def testsets_build() -> None:
     """Build the test sets and galleries from records.parquet (technical spec §7)."""
     from miroir.eval.build_sets import build  # noqa: PLC0415
 
-    report = build(get_settings())
+    _echo_build(build(get_settings()))
+
+
+@testsets_app.command("commons")
+def build_commons_sets(
+    sample_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--check-sample",
+            help="Also write 100 tune T2/T2b queries to this JSON file, to check by eye.",
+        ),
+    ] = None,
+) -> None:
+    """Find Commons photos for T2, T2b and T8 (cached), then rebuild every set and gallery."""
+    from miroir.commons.build import fetch_commons  # noqa: PLC0415 (imports httpx, Pillow)
+    from miroir.commons.check import write_check_sample  # noqa: PLC0415
+    from miroir.eval.build_sets import build  # noqa: PLC0415
+
+    settings = get_settings()
+    report = fetch_commons(settings)
+    for s in report.sets:
+        typer.echo(f"{s.set_id} {s.kind}: {s.photos} photos of {s.entities} entities")
+    _echo_build(build(settings))
+    if sample_out is not None:
+        count = write_check_sample(settings, sample_out)
+        typer.echo(f"{sample_out}: {count} queries to check")
+
+
+def _echo_build(report: BuildReport) -> None:
     typer.echo(
-        f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'dropped':>7} {'spec':>6}"
+        f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'dropped':>7} {'spec':>7}"
         f" {'closed-ok':>9}"
     )
     for s in report.sets:
-        flag = "" if s.tune + s.sealed + s.dropped == s.spec else "  differs from spec §7"
+        flag = "" if s.meets_spec else "  differs from spec §7"
+        spec = f"{'>=' if s.at_least else ''}{s.spec}"
         typer.echo(
             f"{s.set_id:<4} {s.tune:>6} {s.sealed:>6} {s.tune + s.sealed:>6} {s.dropped:>7}"
-            f" {s.spec:>6} {s.closed_ok:>9}{flag}"
+            f" {spec:>7} {s.closed_ok:>9}{flag}"
         )
     typer.echo(
         f"galleries: full {report.full}, screening {report.screening} "
         f"({report.needed} needed by queries, {report.screening - report.needed} distractors), "
         f"screening publishable {report.screening_publishable}"
     )
+    if report.screening_v2:
+        typer.echo(
+            f"screening-v2 {report.screening_v2} ({report.delta} new), "
+            f"screening-v2-publishable {report.screening_v2_publishable} "
+            f"({report.delta_publishable} new)"
+        )
 
 
 @eval_app.command("run")

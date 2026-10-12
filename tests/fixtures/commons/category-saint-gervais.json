@@ -1,0 +1,1341 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 12970287,
+    "ns": 14,
+    "title": "Category:Exterior of Église Saint-Gervais-Saint-Protais"
+   },
+   {
+    "pageid": 12971306,
+    "ns": 14,
+    "title": "Category:Interior of Église Saint-Gervais-Saint-Protais"
+   },
+   {
+    "pageid": 23999316,
+    "ns": 6,
+    "title": "File:Saint gervais saint pro - Paris.oga",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1161783,
+      "width": 0,
+      "height": 0,
+      "duration": 44.4865306122449,
+      "thumburl": "https://commons.wikimedia.org/w/resources/assets/file-type-icons/fileicon-ogg.png",
+      "thumbwidth": 960,
+      "thumbheight": 960,
+      "thumbattribs": [],
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/61/Saint_gervais_saint_pro_-_Paris.oga?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Saint_gervais_saint_pro_-_Paris.oga",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=23999316",
+      "commonmetadata": [
+       {
+        "name": "Software",
+        "value": [
+         {
+          "name": 0,
+          "value": "Xiph.Org libVorbis I 20120203 (Omnipresent)"
+         },
+         {
+          "name": 1,
+          "value": "ffmpeg2theora-0.29"
+         }
+        ]
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "PD-author|Église Saint-Gervais-Saint-Protais de Paris|PDsounds.org|Audio files of Paris|Sounds of church bells in France|Sound files uploaded by Fæ",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "<br>\n<dl><dd><b>Title</b> Saint-Gervais-Saint-Protais Bells</dd>\n<dd><b>Artist</b> aldor</dd>\n<dd><b>Original mp3 data</b> Length:0:44 minutes (699.23 KB) Format:MP3 Stereo 44kHz 128Kbps (CBR)</dd>\n<dd><b>User tags</b> Bells, Carllion, Cathedral, Christianity, Church, paris, Religion</dd>\n<dd><b>Type</b> Single Subject, Human</dd>\n<dd><b>PDSounds record number</b> 583</dd>\n<dd><b>Comment</b> The bells of the parisian church Saint-Gervais-Saint-Protais, Paris</dd></dl>\n&gt;&gt; <a class=\"external free\" data-mw-original-href=\"http://en.wikipedia.org/wiki/St-Gervais-et-St-Protais_Church\" href=\"https://en.wikipedia.org/wiki/St-Gervais-et-St-Protais_Church\">http://en.wikipedia.org/wiki/St-Gervais-et-St-Protais_Church</a>",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2008-05-15",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<p><a rel=\"nofollow\" class=\"external free\" href=\"http://www.pdsounds.org/audio/download/583/Saint-Gervais.mp3\">http://www.pdsounds.org/audio/download/583/Saint-Gervais.mp3</a>\n</p>\n<ul><li>PDSounds description: <a rel=\"nofollow\" class=\"external free\" href=\"http://www.pdsounds.org/sounds/saint_gervais_saint_pro\">http://www.pdsounds.org/sounds/saint_gervais_saint_pro</a></li>\n<li>Transferred by <a href=\"//commons.wikimedia.org/wiki/User:F%C3%A6\" title=\"User:Fæ\">Fæ</a></li></ul>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "aldor",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "application/ogg"
+     }
+    ]
+   },
+   {
+    "pageid": 34788481,
+    "ns": 14,
+    "title": "Category:Historical images of Église Saint-Gervais-Saint-Protais"
+   },
+   {
+    "pageid": 89106189,
+    "ns": 14,
+    "title": "Category:Cimetière Saint-Gervais"
+   },
+   {
+    "pageid": 131301756,
+    "ns": 6,
+    "title": "File:Abside et tour de l'église Saint-Gervais-Saint-Protais. 4ème arrondissement, D.1542.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 2425627,
+      "width": 2182,
+      "height": 2369,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg/960px-Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1042,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg/1920px-Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg/960px-Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1042,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg/1920px-Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/c2/Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement%2C_D.1542.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Abside_et_tour_de_l%27%C3%A9glise_Saint-Gervais-Saint-Protais._4%C3%A8me_arrondissement,_D.1542.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=131301756",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "Phase One"
+       },
+       {
+        "name": "Model",
+        "value": "IQ280"
+       },
+       {
+        "name": "Software",
+        "value": "Capture One Pro 10.0 Windows"
+       },
+       {
+        "name": "ExposureTime",
+        "value": "1/125"
+       },
+       {
+        "name": "FNumber",
+        "value": "14/1"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 1
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 100
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0230"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2019:03:22 10:36:27"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2019:03:22 10:36:27"
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "6965784/1000000"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "761471/100000"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/1000"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 3
+       },
+       {
+        "name": "LightSource",
+        "value": 0
+       },
+       {
+        "name": "FocalLength",
+        "value": "550/10"
+       },
+       {
+        "name": "FocalPlaneXResolution",
+        "value": "63015385/32768"
+       },
+       {
+        "name": "FocalPlaneYResolution",
+        "value": "63015385/32768"
+       },
+       {
+        "name": "FocalPlaneResolutionUnit",
+        "value": 3
+       },
+       {
+        "name": "FileSource",
+        "value": 3
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 0
+       },
+       {
+        "name": "ImageUniqueID",
+        "value": "1a65e44d-b383-4f7e-8188-25d10b32577e"
+       },
+       {
+        "name": "Lens",
+        "value": "1 mm f/16-2"
+       },
+       {
+        "name": "SerialNumber",
+        "value": "GP001147"
+       },
+       {
+        "name": "Artist",
+        "value": [
+         {
+          "name": 0,
+          "value": "Houbron, Frédéric, Dessinateur"
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "Copyright",
+        "value": [
+         {
+          "name": "x-default",
+          "value": "Musée Carnavalet / Ville de Paris"
+         },
+         {
+          "name": "_type",
+          "value": "lang"
+         }
+        ]
+       },
+       {
+        "name": "iimVersion",
+        "value": 4
+       },
+       {
+        "name": "OriginalTransmissionRef",
+        "value": [
+         {
+          "name": 0,
+          "value": "D.1542 | CARD01542"
+         }
+        ]
+       },
+       {
+        "name": "Headline",
+        "value": [
+         {
+          "name": 0,
+          "value": "Abside et tour de l'église Saint-Gervais-Saint-Protais. 4ème arrondissement (titre factice)"
+         }
+        ]
+       },
+       {
+        "name": "Source",
+        "value": [
+         {
+          "name": 0,
+          "value": "Paris Musées"
+         }
+        ]
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "CC-Zero|Église Saint-Gervais-Saint-Protais de Paris|Images from Paris Musées|Drawings in Musée Carnavalet|Drawings of Paris by Frédéric Houbron|Church tower of Église Saint-Gervais-Saint-Protais",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "<table class=\"wikitable unsortable\">\n\n<tbody><tr>\n<th>Auteur(s):\n</th>\n<td>Houbron, Frédéric (Banyuls-sur-Mer, en 1851 - Perpignan, 01–10–1908), dessinateur\n</td></tr>\n<tr>\n<th>Date de production:\n</th>\n<td>Vers 1895 — 1905\n</td></tr>\n<tr>\n<th>Type(s) d'objet(s):\n</th>\n<td>Dessin, Arts graphiques\n</td></tr>\n<tr>\n<th>Dénomination(s):\n</th>\n<td>Dessin\n</td></tr>\n<tr>\n<th>Dimensions - Oeuvre:\n</th>\n<td>\n<pre>   Hauteur : 18.6 cm\n   Largeur : 17 cm\n</pre>\n</td></tr>\n<tr>\n<th>Dimensions - Montage du musée:\n</th>\n<td>\n<pre>   Hauteur : 48 cm\n   Largeur : 37 cm\n</pre>\n<p>Dimensions - Passe-partout du musée:\n</p>\n<pre>   Hauteur : 50 cm\n   Largeur : 40 cm\n</pre>\n</td></tr>\n<tr>\n<th>Description:\n</th>\n<td>\n<p>Montage commun à D.1542 et D.1543\n</p>\n</td></tr>\n<tr>\n<th>Marques, inscriptions, poinçons:\n</th>\n<td>Numéro d'inventaire - Au recto du dessin en bas à gauche, numéro à l'encre rouge : \"ieD. 1542\" \\ Inscription à l'encre\n<p>Tampon - Au recto du dessin en bas à droite, tampon ovale à l'encre bleue : \"MUSEE / CARNAVALET\" (Lugt suppl. 432 c) \\ Inscription à l'encre\nInscription - Au recto du dessin en bas à gauche, numéro d'entrée à l'encre noire : \"E. 7362 (7) A. 09.\" \\ Inscription à l'encre\nInscription - Au recto du montage ancien, inscription à l'encre brune : \"Houbron XI\" (chemise XI) \\ Inscription à l'encre\n</p>\n</td></tr>\n<tr>\n<th>Description iconographique:\n</th>\n<td>\n<p>Paysage urbain. Abside et clocher (terminé en 1657)\nCommentaire historique: \n</p><p>L'église est construite de 1616 à 1657 par les architectes Salomon de Brosse et Clément Métézeau. Le corps de l'église est de style gothique flamboyant, alors que la façade, plus tardive, est d'inspiration latine\n</p>\n</td></tr>\n<tr>\n<th>Mode d'acquisition:\n</th>\n<td>Achat\n<p>Date d’acquisition: \n08–07–1909\n</p>\n</td></tr>\n<tr>\n<th>Institution:\n</th>\n<td>Musée Carnavalet, Histoire de Paris\n</td></tr>\n<tr>\n<th>Numéro d’inventaire:\n</th>\n<td>D.1542\n</td></tr>\n<tr>\n<th>IIIF Manifest:\n</th>\n<td><a rel=\"nofollow\" class=\"external free\" href=\"https://apicollections.parismusees.paris.fr/iiif/320034489/manifest\">https://apicollections.parismusees.paris.fr/iiif/320034489/manifest</a>\n</td></tr></tbody></table>",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "Vers 1895 — 1905",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.parismuseescollections.paris.fr/fr/musee-carnavalet/oeuvres/abside-et-tour-de-l-eglise-saint-gervais-saint-protais-4eme-arrondissement#infos-principales\">https://www.parismuseescollections.paris.fr/fr/musee-carnavalet/oeuvres/abside-et-tour-de-l-eglise-saint-gervais-saint-protais-4eme-arrondissement#infos-principales</a>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "Houbron, Frédéric (Banyuls-sur-Mer, en 1851 - Perpignan, 01–10–1908), dessinateur",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 136569129,
+    "ns": 6,
+    "title": "File:Chapelle, église Saint-Gervais-Saint-Protais, 4ème arrondissement, Paris. PH16327.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 3766714,
+      "width": 2104,
+      "height": 2630,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg/960px-Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1200,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg/1920px-Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg/960px-Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1200,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg/1920px-Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/5a/Chapelle%2C_%C3%A9glise_Saint-Gervais-Saint-Protais%2C_4%C3%A8me_arrondissement%2C_Paris._PH16327.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Chapelle,_%C3%A9glise_Saint-Gervais-Saint-Protais,_4%C3%A8me_arrondissement,_Paris._PH16327.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=136569129",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "Phase One"
+       },
+       {
+        "name": "Model",
+        "value": "P65+"
+       },
+       {
+        "name": "Software",
+        "value": "Capture One Pro 10.0 Windows"
+       },
+       {
+        "name": "ExposureTime",
+        "value": "1/125"
+       },
+       {
+        "name": "FNumber",
+        "value": "16/1"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 1
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 100
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0230"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2019:03:19 13:49:05"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2019:03:19 13:49:05"
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "6965784/1000000"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "8/1"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/1000"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 1
+       },
+       {
+        "name": "LightSource",
+        "value": 255
+       },
+       {
+        "name": "FocalLength",
+        "value": "550/10"
+       },
+       {
+        "name": "FocalPlaneXResolution",
+        "value": "54613333/32768"
+       },
+       {
+        "name": "FocalPlaneYResolution",
+        "value": "54613333/32768"
+       },
+       {
+        "name": "FocalPlaneResolutionUnit",
+        "value": 3
+       },
+       {
+        "name": "FileSource",
+        "value": 3
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 5
+       },
+       {
+        "name": "ImageUniqueID",
+        "value": "0377a051-ccb9-4236-91a2-b5d628b39184"
+       },
+       {
+        "name": "Lens",
+        "value": "1 mm f/2.8-22.0"
+       },
+       {
+        "name": "SerialNumber",
+        "value": "EJ021520"
+       },
+       {
+        "name": "Artist",
+        "value": [
+         {
+          "name": 0,
+          "value": "Atget, Eugène (Jean Eugène Auguste Atget, dit)"
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "Copyright",
+        "value": [
+         {
+          "name": "x-default",
+          "value": "Musée Carnavalet / Ville de Paris"
+         },
+         {
+          "name": "_type",
+          "value": "lang"
+         }
+        ]
+       },
+       {
+        "name": "iimVersion",
+        "value": 4
+       },
+       {
+        "name": "OriginalTransmissionRef",
+        "value": [
+         {
+          "name": 0,
+          "value": "PH16327 | CARPH016327"
+         }
+        ]
+       },
+       {
+        "name": "Headline",
+        "value": [
+         {
+          "name": 0,
+          "value": "Chapelle, église Saint-Gervais-Saint-Protais, 4ème arrondissement, Paris."
+         }
+        ]
+       },
+       {
+        "name": "Source",
+        "value": [
+         {
+          "name": 0,
+          "value": "Paris Musées"
+         }
+        ]
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "CC-Zero|Église Saint-Gervais-Saint-Protais de Paris|Images from Paris Musées|Photographs of Paris 4e arrondissement in Musée Carnavalet",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "<table class=\"wikitable unsortable\">\n\n<tbody><tr>\n<th>Auteur(s):\n</th>\n<td>Atget, Eugène (Jean Eugène Auguste Atget, dit) (Libourne, 12–02–1857 - Paris, 04–08–1927), photographe\n</td></tr>\n<tr>\n<th>Autre titre:\n</th>\n<td>Eglise Saint-Gervais &amp; Saint-Protais. (Titre inscrit (lettre))\n</td></tr>\n<tr>\n<th>Date de production:\n</th>\n<td>Entre 1885 et 1925\n</td></tr>\n<tr>\n<th>Type(s) d'objet(s):\n</th>\n<td>Photographie, Arts graphiques\n</td></tr>\n<tr>\n<th>Dénomination(s):\n</th>\n<td>Photographie\n</td></tr>\n<tr>\n<th>Matériaux et techniques:\n</th>\n<td>Tirage sur papier albuminé\n</td></tr>\n<tr>\n<th>Dimensions - Oeuvre:\n</th>\n<td>\n<pre>   Hauteur : 22 cm\n   Largeur : 17.4 cm\n</pre>\n</td></tr>\n<tr>\n<th>Description:\n</th>\n<td>\n<p>Tirage contrecollé sur montage au format 55 x 72 cm, avec PH16324, PH16325, PH16326 et GGRE.83.\n</p>\n</td></tr>\n<tr>\n<th>Marques, inscriptions, poinçons:\n</th>\n<td>Verso non visible\n</td></tr>\n<tr>\n<th>Description iconographique:\n</th>\n<td>\n<p>Chapelle, église Saint-Gervais-Saint-Protais, 4ème arrondissement, Paris.\n</p>\n</td></tr>\n<tr>\n<th>Mode d'acquisition:\n</th>\n<td>Mode d'acquisition inconnu\n</td></tr>\n<tr>\n<th>Institution:\n</th>\n<td>Musée Carnavalet, Histoire de Paris\n</td></tr>\n<tr>\n<th>Numéro d’inventaire:\n</th>\n<td>PH16327\n</td></tr>\n<tr>\n<th>IIIF Manifest:\n</th>\n<td><a rel=\"nofollow\" class=\"external free\" href=\"https://apicollections.parismusees.paris.fr/iiif/320166261/manifest\">https://apicollections.parismusees.paris.fr/iiif/320166261/manifest</a>\n</td></tr></tbody></table>",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "between 1885 and 1925<div style=\"display: none;\">date QS:P,+1500-00-00T00:00:00Z/6,P1319,+1885-00-00T00:00:00Z/9,P1326,+1925-00-00T00:00:00Z/9</div>",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.parismuseescollections.paris.fr/fr/musee-carnavalet/oeuvres/chapelle-eglise-saint-gervais-saint-protais-4eme-arrondissement-paris-0#infos-principales\">https://www.parismuseescollections.paris.fr/fr/musee-carnavalet/oeuvres/chapelle-eglise-saint-gervais-saint-protais-4eme-arrondissement-paris-0#infos-principales</a>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "Atget, Eugène (Jean Eugène Auguste Atget, dit) (Libourne, 12–02–1857 - Paris, 04–08–1927), photographe",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 138061195,
+    "ns": 6,
+    "title": "File:F0799 Paris 4e eglise St Gervais St Protais baie 26 vitrail St Nicolas et Ste Catherine rwk.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 2575738,
+      "width": 1887,
+      "height": 2500,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/67/F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg/960px-F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1272,
+      "responsiveUrls": {
+       "2": "https://upload.wikimedia.org/wikipedia/commons/6/67/F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/67/F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg/960px-F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1272,
+       "srcset": "https://upload.wikimedia.org/wikipedia/commons/6/67/F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/67/F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:F0799_Paris_4e_eglise_St_Gervais_St_Protais_baie_26_vitrail_St_Nicolas_et_Ste_Catherine_rwk.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=138061195",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "FUJIFILM"
+       },
+       {
+        "name": "Model",
+        "value": "X-Pro2"
+       },
+       {
+        "name": "Orientation",
+        "value": 1
+       },
+       {
+        "name": "XResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "YResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "ResolutionUnit",
+        "value": 2
+       },
+       {
+        "name": "Software",
+        "value": "GIMP 2.10.10"
+       },
+       {
+        "name": "DateTime",
+        "value": "2023:09:24 20:29:01"
+       },
+       {
+        "name": "YCbCrPositioning",
+        "value": 2
+       },
+       {
+        "name": "ExposureTime",
+        "value": "10/3200"
+       },
+       {
+        "name": "FNumber",
+        "value": "280/100"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 1
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 500
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0230"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2016:12:04 17:14:24"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2016:12:04 17:14:24"
+       },
+       {
+        "name": "ComponentsConfiguration",
+        "value": [
+         {
+          "name": 0,
+          "value": 1
+         },
+         {
+          "name": 1,
+          "value": 2
+         },
+         {
+          "name": 2,
+          "value": 3
+         },
+         {
+          "name": 3,
+          "value": 0
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "CompressedBitsPerPixel",
+        "value": "48/10"
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "833/100"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "300/100"
+       },
+       {
+        "name": "BrightnessValue",
+        "value": "561/100"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "33/100"
+       },
+       {
+        "name": "MaxApertureValue",
+        "value": "200/100"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 5
+       },
+       {
+        "name": "LightSource",
+        "value": 0
+       },
+       {
+        "name": "Flash",
+        "value": 16
+       },
+       {
+        "name": "FocalLength",
+        "value": "3500/100"
+       },
+       {
+        "name": "FlashPixVersion",
+        "value": "0100"
+       },
+       {
+        "name": "ColorSpace",
+        "value": 1
+       },
+       {
+        "name": "FocalPlaneXResolution",
+        "value": "2564/1"
+       },
+       {
+        "name": "FocalPlaneYResolution",
+        "value": "2564/1"
+       },
+       {
+        "name": "FocalPlaneResolutionUnit",
+        "value": 3
+       },
+       {
+        "name": "SensingMethod",
+        "value": 2
+       },
+       {
+        "name": "FileSource",
+        "value": 3
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "CustomRendered",
+        "value": 0
+       },
+       {
+        "name": "ExposureMode",
+        "value": 1
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 0
+       },
+       {
+        "name": "FocalLengthIn35mmFilm",
+        "value": 53
+       },
+       {
+        "name": "SceneCaptureType",
+        "value": 0
+       },
+       {
+        "name": "Sharpness",
+        "value": 0
+       },
+       {
+        "name": "SubjectDistanceRange",
+        "value": 0
+       },
+       {
+        "name": "JPEGFileComment",
+        "value": [
+         {
+          "name": 0,
+          "value": ""
+         }
+        ]
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Église Saint-Gervais-Saint-Protais de Paris|Self-published work",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "Vitrail de 1620 représentant Saint-Nicolas et Sainte Catherine - Eglise Saint-Gervais-Saint-Protais (baie 26, chapelle Sainte-Catherine), Paris 4e.",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2016-12-04 17:14:24",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Mbzt\" title=\"User:Mbzt\">Mbzt</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 145738551,
+    "ns": 14,
+    "title": "Category:Plans of Église Saint-Gervais-Saint-Protais de Paris"
+   },
+   {
+    "pageid": 172399361,
+    "ns": 6,
+    "title": "File:Paris 4e Mairie 4e 701.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 27391631,
+      "width": 7728,
+      "height": 5152,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Paris_4e_Mairie_4e_701.jpg/960px-Paris_4e_Mairie_4e_701.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 640,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Paris_4e_Mairie_4e_701.jpg/1920px-Paris_4e_Mairie_4e_701.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Paris_4e_Mairie_4e_701.jpg/960px-Paris_4e_Mairie_4e_701.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 640,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Paris_4e_Mairie_4e_701.jpg/1920px-Paris_4e_Mairie_4e_701.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/74/Paris_4e_Mairie_4e_701.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Paris_4e_Mairie_4e_701.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=172399361",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "FUJIFILM "
+       },
+       {
+        "name": "Model",
+        "value": "X-T5"
+       },
+       {
+        "name": "Orientation",
+        "value": 1
+       },
+       {
+        "name": "XResolution",
+        "value": "300/1"
+       },
+       {
+        "name": "YResolution",
+        "value": "300/1"
+       },
+       {
+        "name": "ResolutionUnit",
+        "value": 2
+       },
+       {
+        "name": "Software",
+        "value": "RAW FILE CONVERTER EX 3.0 powered by SILKYPIX"
+       },
+       {
+        "name": "DateTime",
+        "value": "2025:08:11 16:20:03"
+       },
+       {
+        "name": "YCbCrPositioning",
+        "value": 2
+       },
+       {
+        "name": "ExposureTime",
+        "value": "10/2800"
+       },
+       {
+        "name": "FNumber",
+        "value": "1100/100"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 3
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 125
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0230"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2025:03:29 13:49:25"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2025:03:29 13:49:25"
+       },
+       {
+        "name": "ComponentsConfiguration",
+        "value": [
+         {
+          "name": 0,
+          "value": 1
+         },
+         {
+          "name": 1,
+          "value": 2
+         },
+         {
+          "name": 2,
+          "value": 3
+         },
+         {
+          "name": 3,
+          "value": 0
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "CompressedBitsPerPixel",
+        "value": "32/10"
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "813/100"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "690/100"
+       },
+       {
+        "name": "BrightnessValue",
+        "value": "984/100"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/100"
+       },
+       {
+        "name": "MaxApertureValue",
+        "value": "300/100"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 3
+       },
+       {
+        "name": "LightSource",
+        "value": 0
+       },
+       {
+        "name": "Flash",
+        "value": 0
+       },
+       {
+        "name": "FocalLength",
+        "value": "1800/100"
+       },
+       {
+        "name": "FlashPixVersion",
+        "value": "0100"
+       },
+       {
+        "name": "ColorSpace",
+        "value": 1
+       },
+       {
+        "name": "FocalPlaneXResolution",
+        "value": "1879/1"
+       },
+       {
+        "name": "FocalPlaneYResolution",
+        "value": "1879/1"
+       },
+       {
+        "name": "FocalPlaneResolutionUnit",
+        "value": 3
+       },
+       {
+        "name": "SensingMethod",
+        "value": 2
+       },
+       {
+        "name": "FileSource",
+        "value": 3
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "CustomRendered",
+        "value": 1
+       },
+       {
+        "name": "ExposureMode",
+        "value": 0
+       },
+       {
+        "name": "FocalLengthIn35mmFilm",
+        "value": 27
+       },
+       {
+        "name": "SceneCaptureType",
+        "value": 0
+       },
+       {
+        "name": "SubjectDistanceRange",
+        "value": 0
+       },
+       {
+        "name": "Lens",
+        "value": "XF18-55mmF2.8-4 R LM OIS"
+       },
+       {
+        "name": "Rating",
+        "value": "0"
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Town hall of Paris 4e arrondissement|Église Saint-Gervais-Saint-Protais de Paris|Self-published work|Files by User:GFreihalter/Paris 4. Arrondissement|Files by User:GFreihalter/Paris 2025",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "Rathaus des 4. Arrondissements in Paris (Region Île-de-France/Frankreich), im Hintergrund die Kirche Saint-Gervais-Saint-Protais",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2025-03-29",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:GFreihalter\" title=\"User:GFreihalter\">GFreihalter</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 178275134,
+    "ns": 6,
+    "title": "File:Église Saint-Gervais-Saint-Protais, plaque « Loix et Actes de l’Autorité Publique.jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1416367,
+      "width": 3024,
+      "height": 4032,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/93/%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg/960px-%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1280,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/93/%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg/1920px-%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/93/%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg/960px-%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1280,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/93/%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg/1920px-%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/9/93/%C3%89glise_Saint-Gervais-Saint-Protais%2C_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:%C3%89glise_Saint-Gervais-Saint-Protais,_plaque_%C2%AB_Loix_et_Actes_de_l%E2%80%99Autorit%C3%A9_Publique.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=178275134",
+      "commonmetadata": [
+       {
+        "name": "Make",
+        "value": "Apple"
+       },
+       {
+        "name": "Model",
+        "value": "iPhone SE (2nd generation)"
+       },
+       {
+        "name": "Orientation",
+        "value": 6
+       },
+       {
+        "name": "XResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "YResolution",
+        "value": "72/1"
+       },
+       {
+        "name": "ResolutionUnit",
+        "value": 2
+       },
+       {
+        "name": "Software",
+        "value": "26.0.1"
+       },
+       {
+        "name": "DateTime",
+        "value": "2025:11:05 13:29:16"
+       },
+       {
+        "name": "YCbCrPositioning",
+        "value": 1
+       },
+       {
+        "name": "ExposureTime",
+        "value": "1/130"
+       },
+       {
+        "name": "FNumber",
+        "value": "9/5"
+       },
+       {
+        "name": "ExposureProgram",
+        "value": 2
+       },
+       {
+        "name": "ISOSpeedRatings",
+        "value": 20
+       },
+       {
+        "name": "ExifVersion",
+        "value": "0232"
+       },
+       {
+        "name": "DateTimeOriginal",
+        "value": "2025:11:05 13:29:16"
+       },
+       {
+        "name": "DateTimeDigitized",
+        "value": "2025:11:05 13:29:16"
+       },
+       {
+        "name": "ComponentsConfiguration",
+        "value": [
+         {
+          "name": 0,
+          "value": 1
+         },
+         {
+          "name": 1,
+          "value": 2
+         },
+         {
+          "name": 2,
+          "value": 3
+         },
+         {
+          "name": 3,
+          "value": 0
+         },
+         {
+          "name": "_type",
+          "value": "ol"
+         }
+        ]
+       },
+       {
+        "name": "ShutterSpeedValue",
+        "value": "20664/2941"
+       },
+       {
+        "name": "ApertureValue",
+        "value": "54823/32325"
+       },
+       {
+        "name": "BrightnessValue",
+        "value": "103871/15979"
+       },
+       {
+        "name": "ExposureBiasValue",
+        "value": "0/1"
+       },
+       {
+        "name": "MeteringMode",
+        "value": 5
+       },
+       {
+        "name": "Flash",
+        "value": 16
+       },
+       {
+        "name": "FocalLength",
+        "value": "399/100"
+       },
+       {
+        "name": "SubSecTimeOriginal",
+        "value": "159"
+       },
+       {
+        "name": "SubSecTimeDigitized",
+        "value": "159"
+       },
+       {
+        "name": "FlashPixVersion",
+        "value": "0100"
+       },
+       {
+        "name": "ColorSpace",
+        "value": 65535
+       },
+       {
+        "name": "SensingMethod",
+        "value": 2
+       },
+       {
+        "name": "SceneType",
+        "value": 1
+       },
+       {
+        "name": "ExposureMode",
+        "value": 0
+       },
+       {
+        "name": "WhiteBalance",
+        "value": 0
+       },
+       {
+        "name": "DigitalZoomRatio",
+        "value": "756/151"
+       },
+       {
+        "name": "FocalLengthIn35mmFilm",
+        "value": 140
+       },
+       {
+        "name": "SceneCaptureType",
+        "value": 0
+       },
+       {
+        "name": "GPSLatitude",
+        "value": 48.855869444444444
+       },
+       {
+        "name": "GPSLongitude",
+        "value": 2.3544722222222223
+       },
+       {
+        "name": "GPSAltitude",
+        "value": 35.84032403240324
+       },
+       {
+        "name": "GPSTimeStamp",
+        "value": [
+         {
+          "name": 0,
+          "value": "12/1"
+         },
+         {
+          "name": 1,
+          "value": "29/1"
+         },
+         {
+          "name": 2,
+          "value": "15/1"
+         }
+        ]
+       },
+       {
+        "name": "GPSSpeedRef",
+        "value": "K"
+       },
+       {
+        "name": "GPSSpeed",
+        "value": "21911/191591"
+       },
+       {
+        "name": "GPSImgDirectionRef",
+        "value": "T"
+       },
+       {
+        "name": "GPSImgDirection",
+        "value": "449539/2599"
+       },
+       {
+        "name": "GPSDestBearingRef",
+        "value": "T"
+       },
+       {
+        "name": "GPSDestBearing",
+        "value": "449539/2599"
+       },
+       {
+        "name": "GPSDateStamp",
+        "value": "2025:11:05"
+       }
+      ],
+      "extmetadata": {
+       "Categories": {
+        "value": "Rue François-Miron (Paris)|French Revolution|Église Saint-Gervais-Saint-Protais de Paris|Self-published work|Files with coordinates missing SDC location of creation (48° N, 2° E)",
+        "source": "commons-categories",
+        "hidden": ""
+       },
+       "ImageDescription": {
+        "value": "Église Saint-Gervais-Saint-Protais, plaque « Loix et Actes de l’Autorité Publique",
+        "source": "commons-desc-page"
+       },
+       "DateTimeOriginal": {
+        "value": "2025-11-05 13:29:16",
+        "source": "commons-desc-page"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"en\">Own work</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Paris14aime\" title=\"User:Paris14aime\">Paris14aime</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   }
+  ]
+ }
+}

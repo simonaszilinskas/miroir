@@ -1,0 +1,32 @@
+{
+ "head": {
+  "vars": [
+   "item",
+   "id",
+   "image",
+   "category"
+  ]
+ },
+ "results": {
+  "bindings": [
+   {
+    "item": {
+     "type": "uri",
+     "value": "http://www.wikidata.org/entity/Q3224308"
+    },
+    "id": {
+     "type": "literal",
+     "value": "06570007477"
+    },
+    "image": {
+     "type": "uri",
+     "value": "http://commons.wikimedia.org/wiki/Special:FilePath/Pietro%20Perugino%20cat66.jpg"
+    },
+    "category": {
+     "type": "literal",
+     "value": "Marriage of the Virgin (Perugino)"
+    }
+   }
+  ]
+ }
+}
