@@ -5,6 +5,7 @@ description = "Visual search over French heritage records (POP)"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "numpy>=2.3",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.15.0",
     "typer>=0.27.3",

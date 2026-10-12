@@ -318,6 +318,7 @@ name = "miroir"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "pyarrow" },
     { name = "pydantic-settings" },
     { name = "typer" },
@@ -347,6 +348,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.143.0" },
+    { name = "numpy", specifier = ">=2.3" },
     { name = "pillow", marker = "extra == 'jobs'", specifier = ">=12.3.0" },
     { name = "pyarrow", specifier = ">=26.0.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
