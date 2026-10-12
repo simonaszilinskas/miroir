@@ -23,6 +23,8 @@ testsets_app = typer.Typer(no_args_is_help=True, help="Test sets T1, T3, T5, T8 
 app.add_typer(testsets_app, name="testsets")
 amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R0).")
 eval_app.add_typer(amstertime_app, name="amstertime")
+embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote models.")
+app.add_typer(embed_app, name="embed")
 
 
 @app.callback()
@@ -175,6 +177,45 @@ def _echo_scores(scores: Sequence[SetScore]) -> None:
             for name, i in s.metrics().items()
         )
         typer.echo(f"{s.test_set}/{s.half} on {s.gallery} ({s.queries} queries): {cells}")
+
+
+@embed_app.command("openrouter")
+def embed_openrouter(
+    option: Annotated[str, typer.Option(help="Option id from experiments.md: A9, A10a.")],
+    gallery: Annotated[
+        str | None, typer.Option(help="Gallery, e.g. screening-20k-publishable.")
+    ] = None,
+    queries: Annotated[
+        str | None, typer.Option(help="Test set (tune half) whose query images to embed.")
+    ] = None,
+    *,
+    probe: Annotated[
+        bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
+    ] = False,
+) -> None:
+    """Embed a gallery or a test set's query images on OpenRouter. Paid: probe first."""
+    from miroir.jobs import embed as jobs  # noqa: PLC0415 (keeps `miroir --help` fast)
+    from miroir.jobs.factory import open_embedder  # noqa: PLC0415
+
+    if (gallery is None) == (queries is None):
+        raise typer.BadParameter("give exactly one of --gallery and --queries")
+    with open_embedder(get_settings(), option) as embedder:
+        if gallery is not None and probe:
+            result, size = jobs.probe(embedder, gallery)
+            typer.echo(
+                f"{option} probe: {result.images} images cost ${result.cost_usd:.4f} "
+                f"(${result.usd_per_image * 1000:.3f} per 1,000). "
+                f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
+            )
+            return
+        if probe:
+            raise typer.BadParameter("--probe works with --gallery only")
+        if gallery is not None:
+            done = jobs.embed_gallery(embedder, gallery)
+        else:
+            assert queries is not None
+            done = jobs.embed_queries(embedder, queries)
+        typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
 def main() -> None:
