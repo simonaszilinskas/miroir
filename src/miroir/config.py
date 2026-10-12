@@ -92,6 +92,15 @@ class Settings(BaseSettings):
         _check_name(run)
         return self.vectors_dir / run
 
+    @property
+    def benchmarks_dir(self) -> Path:
+        """Public benchmarks (set T9), one folder each. Downloaded, never committed."""
+        return self.data_root / "benchmarks"
+
+    @property
+    def amstertime_dir(self) -> Path:
+        return self.benchmarks_dir / "amstertime"
+
     # --- test sets (technical spec §7) ----------------------------------------
 
     @property

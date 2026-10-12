@@ -33,7 +33,7 @@ Floats = NDArray[np.float32]
 
 
 @dataclass(frozen=True, slots=True)
-class Query:
+class SearchQuery:
     """One test query: the image that asks, the entities that count as right, what to hide.
 
     The query image itself is always hidden from the gallery. `excluded_image_ids` adds the
@@ -141,7 +141,7 @@ class Difference:
 def score(
     query_vectors: VectorSet,
     gallery: Gallery,
-    queries: Sequence[Query],
+    queries: Sequence[SearchQuery],
     *,
     ap_max_rank: int | None = None,
 ) -> ScoreResult:
@@ -205,7 +205,7 @@ def score(
 
 
 def _score_one(
-    query: Query, scores: Floats, code_of: Mapping[str, int], ap_max_rank: int | None
+    query: SearchQuery, scores: Floats, code_of: Mapping[str, int], ap_max_rank: int | None
 ) -> QueryScore | None:
     right = [code_of[e] for e in dict.fromkeys(query.entity_ids) if e in code_of]
     right = [c for c in right if np.isfinite(scores[c])]

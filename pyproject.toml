@@ -93,6 +93,8 @@ known-first-party = ["miroir", "tests"]
 
 [tool.pyright]
 include = ["src", "tests"]
+# Imports torch, which CI does not install (it is in the `jobs` extra). Loaded via importlib.
+exclude = ["src/miroir/jobs/local_vision.py"]
 strict = ["src"]
 pythonVersion = "3.12"
 venvPath = "."

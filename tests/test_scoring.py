@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from miroir.eval.queries import read_queries
 from miroir.eval.results import (
     SUMMARY_END,
     SUMMARY_START,
@@ -18,15 +17,14 @@ from miroir.eval.results import (
 )
 from miroir.eval.scoring import (
     Gallery,
-    Query,
     QueryScore,
+    SearchQuery,
     bootstrap,
     paired_bootstrap,
     score,
 )
 from miroir.eval.vectors import Route, RunInfo, VectorSet
 
-FIXTURES = Path(__file__).parent / "fixtures" / "eval"
 INFO = RunInfo(
     option="A1",
     model="test/model",
@@ -55,56 +53,56 @@ ENTITY = {"g1": "X", "g2": "Y", "g3": "Z", "g4": "X", "q": "Q"}
 GALLERY = Gallery.from_vectors(GALLERY_RUN, ENTITY, ["g1", "g2", "g3", "g4"])
 
 
-def one(query: Query, **kwargs: int) -> QueryScore:
+def one(query: SearchQuery, **kwargs: int) -> QueryScore:
     result = score(GALLERY_RUN, GALLERY, [query], **kwargs)
     assert result.skipped_no_answer == 0
     return result.per_query[0]
 
 
 def test_entity_scores_its_best_image() -> None:
-    hit = one(Query("q1", "q", ("X",)))
+    hit = one(SearchQuery("q1", "q", ("X",)))
     assert (hit.rank, hit.ap) == (2, 0.5)
 
 
 def test_ap_over_several_right_entities() -> None:
-    hit = one(Query("q1", "q", ("X", "Y")))
+    hit = one(SearchQuery("q1", "q", ("X", "Y")))
     assert hit.rank == 2
     assert hit.ap == pytest.approx((1 / 2 + 2 / 3) / 2)
 
 
 def test_excluded_images_leave_the_gallery() -> None:
-    hit = one(Query("q1", "q", ("X",), excluded_image_ids=("g4",)))
+    hit = one(SearchQuery("q1", "q", ("X",), excluded_image_ids=("g4",)))
     assert hit.rank == 3
 
 
 def test_query_image_never_finds_itself() -> None:
     run = vector_set({"a": [1, 0], "b": [0.9, 0.1], "c": [0, 1]})
     gallery = Gallery.from_vectors(run, {"a": "A", "b": "B", "c": "C"})
-    result = score(run, gallery, [Query("a", "a", ("B",))])
+    result = score(run, gallery, [SearchQuery("a", "a", ("B",))])
     assert result.per_query[0].rank == 1
 
 
 def test_query_without_answer_in_gallery_is_skipped() -> None:
-    result = score(GALLERY_RUN, GALLERY, [Query("q1", "q", ("nowhere",))])
+    result = score(GALLERY_RUN, GALLERY, [SearchQuery("q1", "q", ("nowhere",))])
     assert result.per_query == ()
     assert result.skipped_no_answer == 1
 
 
 def test_ap_cut_at_max_rank() -> None:
-    hit = one(Query("q1", "q", ("X",)), ap_max_rank=1)
+    hit = one(SearchQuery("q1", "q", ("X",)), ap_max_rank=1)
     assert (hit.rank, hit.ap) == (2, 0.0)
 
 
 def test_ties_break_by_entity_id() -> None:
     run = vector_set({"a": [1, 0], "b": [1, 0], "q": [1, 0.01]})
     gallery = Gallery.from_vectors(run, {"a": "A", "b": "B"}, ["a", "b"])
-    ranks = [score(run, gallery, [Query("q", "q", (e,))]).per_query[0].rank for e in "AB"]
+    ranks = [score(run, gallery, [SearchQuery("q", "q", (e,))]).per_query[0].rank for e in "AB"]
     assert ranks == [1, 2]
 
 
 def test_rejects_query_without_vector() -> None:
     with pytest.raises(ValueError, match="no vector"):
-        score(GALLERY_RUN, GALLERY, [Query("q1", "missing", ("X",))])
+        score(GALLERY_RUN, GALLERY, [SearchQuery("q1", "missing", ("X",))])
 
 
 def test_gallery_needs_an_entity_per_image() -> None:
@@ -158,7 +156,9 @@ def test_paired_bootstrap_needs_the_same_queries() -> None:
 
 def _result_file(tmp_path: Path, test_set: str = "T1") -> Path:
     path = tmp_path / "results" / "R1" / "A-test.json"
-    result = score(GALLERY_RUN, GALLERY, [Query("q1", "q", ("X",)), Query("q2", "q", ("Z",))])
+    result = score(
+        GALLERY_RUN, GALLERY, [SearchQuery("q1", "q", ("X",)), SearchQuery("q2", "q", ("Z",))]
+    )
     write_result(
         path,
         round_id="R1",
@@ -205,10 +205,3 @@ def test_summary_is_rebuilt_in_place(tmp_path: Path) -> None:
     assert "old table" not in text
     assert "Notes stay." in text
     assert "| R1 | T1 | tune | fixture | A-test | test/model | 224 | cls | 2 | 50.0 [" in text
-
-
-def test_read_queries_from_a_test_set_file() -> None:
-    queries = read_queries(FIXTURES / "T0" / "tune.jsonl")
-    assert [q.query_id for q in queries] == ["q-a", "img-b"]
-    assert queries[0].excluded_image_ids == ("img-a2",)
-    assert queries[1].entity_ids == ("PA00000002", "PA00000003")
