@@ -113,8 +113,8 @@ def same_shoot(a: Record, b: Record) -> bool:
     """Two Mémoire photos from one shoot: same photographer and date, or nearby refs.
 
     Refs are numbered as the prints were filed, so near refs in one series are mostly one
-    visit (see `SHOOT_REF_WINDOW`). The ref test also covers the 3% of photos with no
-    photographer or date.
+    visit (see `SHOOT_REF_WINDOW`). The ref test also covers photos with no photographer or
+    date (0.5% of building photos).
     """
     if a.ref == b.ref:
         return True

@@ -245,7 +245,9 @@ This section defines the test sets. [experiments.md](experiments.md) says how we
 
 **Query format.** Each half is a JSONL file, one query per line: `query_id`, `set_id`, `entity_id` (what the query image shows), `query_image_id`, `expected_entity_ids` (empty for T8), `exclude_image_ids` and, for T3 only, `scene_image_ids`. No set has boxes: the export holds none (see T3).
 
-**What a query may not find.** Before searching, take the query's `exclude_image_ids` out of the gallery. For T1 that is the query's whole *photo record*, so a query cannot find itself. For T3 and T5 it is the query image alone, since the record's other images are the answer. For T8 it is every image of the entity.
+**What a query may not find.** Before searching, take the query's `exclude_image_ids` out of the gallery. For T1 that is every photo of the building from the query's *shoot* (rule below), so a query must find the building from another visit. For T3 and T5 it is the query image alone, since the record's other images are the answer. For T8 it is every image of the entity.
+
+**T1 shoot rule (October 2026).** Two Mémoire photos of one building are one shoot when they share a photographer (`AUTP`) and date (`DATPV`, a year in 92% of records), or when their refs differ only in the last number, by 50 or less. Among photos of one building, 95% of ref pairs within 50 share photographer and date (85% within 100, 68% within 200); the ref test also covers the 194 building photos (0.5%) that lack one of the two fields. A drawn building left with no photo outside the query's shoot is dropped after the halves are split, so the remaining queries keep their half and the galleries stay as drawn (dropped buildings' photos remain as distractors). The rule came after Gemini Embedding 2 (A9) scored 90.8% hit@1 on the old T1 tune half: 443 of its 453 top-1 hits were a photo from the query's own shoot, 298 the very next ref, and 357 of 499 queries had no answer outside that shoot. A perceptual hash (64-bit DCT on the 512 px images) does not separate these: the median distance between query and hit is 24 bits, so they are other frames of one visit, not copies, and the rule uses the record fields instead. T5 and T8 were checked the same way and keep their rules: T5's closest pairs are the two faces of one medal or coin, shot on the same stand, and T8's same-shoot top hits are other buildings, mostly in other towns, never one that names the query building.
 
 **Halves.** Each set is split 50/50 by `entity_id` (`tune` takes the odd one). T8 queries keep the half of the T1 or T5 query they come from, so no entity sits in a tune half of one set and the sealed half of another; the build fails if one does. Tune halves are `MIROIR_DATA_DIR/testsets/<set>.tune.jsonl`. Sealed halves sit apart, in `MIROIR_DATA_DIR/testsets-sealed/<set>.sealed.jsonl`, so a glob over one folder misses them. Read either only with `miroir.eval.sets.load_queries`; the sealed half needs `allow_sealed=True`, and only R4 code may pass it. Sets live in the data dir, not in git.
 
@@ -259,18 +261,18 @@ This section defines the test sets. [experiments.md](experiments.md) says how we
 
 T1's answers fill most of the screening gallery: its 1,000 buildings hold about 12,000 photos, and a few hold hundreds. If screening scores run well above full-gallery scores, cap the answer photos kept per building.
 
-A closed model may run a query only when the query image is publishable and one answer image is in `screening-20k-publishable`. That holds for T1 1,000 of 1,000, T3 198 of 198, T5 900 of 1,000 and T8 472 of 500. When comparing a closed model with open ones, score all of them on those same queries. The share is high enough for a fair test.
+A closed model may run a query only when the query image is publishable and one answer image is in `screening-20k-publishable`. That holds for T1 273 of 273, T3 198 of 198, T5 900 of 1,000 and T8 472 of 500. When comparing a closed model with open ones, score all of them on those same queries. The share is high enough for a fair test.
 
 | Set | Halves (tune / sealed) |
 |---|---|
-| T1 | 500 / 500 |
+| T1 | 139 / 134 (1,000 drawn, 727 dropped by the shoot rule) |
 | T3 | 99 / 99 |
 | T5 | 500 / 500 |
 | T8 | 250 / 250 |
 
 | Set | Built from | Size | Metric | Target |
 |---|---|---|---|---|
-| T1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,163 buildings; 3,262 before photos that name both a building and an object went to the object, §3.2). One photo per building is the query; the others are the answer. At most 1 query per building | 1,000 queries | Right building in top 10 | ≥ 80% |
+| T1 Archive building | Mémoire buildings (`PA`) with 2+ photos (3,163 buildings; 3,262 before photos that name both a building and an object went to the object, §3.2). One photo per building is the query; the building's photos from other shoots are the answer (shoot rule above). At most 1 query per building. Only 957 buildings have photos from 2+ shoots | 273 queries (1,000 drawn) | Right building in top 10 | ≥ 80% |
 | T2 Phone building | Wikimedia Commons photos of buildings in T1, found through Wikidata's Mérimée ID (P380). Keep GPS from the photo metadata where present | ≥ 300 queries | Right building in top 10 | ≥ 60% |
 | T3 Room photos | Rose Valland `JDP-*`: 14 Jeu de Paume room photos (plus a floor plan, which makes the 15 records with no domain) and the 231 artworks that link to them through `RENV` (`linked_refs`). The export holds no boxes, and every artwork image is a crop of a room photo: the work as it hangs, a version with the perspective corrected, sometimes a closer detail. So one crop is the query, standing in for a perfect hand-drawn box, and the artwork's other crops are the answer. The 33 artworks with a single crop are left out. Each query lists its room photo(s) in `scene_image_ids`, so detectors (step C) are scored end to end: detect on the room photo, search each box, hit if the artwork is in the top 5. Query and answers come from the same negative, so this measures matching a crop to its record, not finding the work in another photo | 198 queries (231 planned) | Right record in top 5 | ≥ 70% |
 | T4 Details | Rose Valland `detail` images, with the record's other images left in the index | up to 1,000 queries | Right record in top 10 | Report |
