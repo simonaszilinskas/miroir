@@ -16,6 +16,8 @@ uv run miroir records build    # exports -> records.parquet + images.parquet (ab
 uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
 uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
 uv run miroir eval summary     # rebuild the results table in docs/results.md
+uv run miroir embed modal --option A7-embeddinggemma-2-512 --probe   # open model on a Modal GPU
+uv run miroir r0 run           # AmsterTime on Modal; then `miroir eval amstertime score`
 ```
 
 ## Layout
@@ -23,6 +25,7 @@ uv run miroir eval summary     # rebuild the results table in docs/results.md
 - `src/miroir/config.py`: every setting and path. Ask it for paths; never build one by hand.
 - `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
+- `src/miroir/remote/`: model code that runs only inside Modal containers. The one place torch may be imported.
 - `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to `eval/results/`.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
@@ -33,7 +36,8 @@ uv run miroir eval summary     # rebuild the results table in docs/results.md
   The Rose Valland folder is spelt `rose-valand`; the collection is `rose-valland`.
 - `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `vectors/`,
   `testsets/` (tune halves, galleries) and `testsets-sealed/` (sealed halves, kept apart).
-- Run models remotely, never on the Mac: OpenRouter if it has the model, else Hugging Face Jobs
+- Run models remotely, never on the Mac: OpenRouter if it has the model, else Modal (open models,
+  `miroir embed modal`; model code only in `src/miroir/remote/`). Hugging Face Jobs are not approved
   (`OPENROUTER_API_KEY`, `HF_TOKEN` in `.env`). The Mac builds tables and test sets and scores returned vectors.
 - Copy `.env.example` to `.env` to change them.
 - Load records with `miroir.records.store.read_records` / `read_images`, not by opening Parquet yourself.

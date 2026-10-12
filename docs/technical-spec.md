@@ -98,7 +98,7 @@ Every mapper turns a POP record into this shape:
   | `main` | anything else | 10,597 |
 
   The order puts what the image shows (a label, an inscription) before where it is (the back) and how it is framed (a detail): "detail-etiquette-au-revers" is a `label`. Joconde has 2 `back` images; Mémoire has none. The first `main` image of a record is its cover; a record with no `main` image uses its first image.
-- **Storage.** No local image store. Model work runs remotely (OpenRouter where it has the model, else Hugging Face Jobs), and those jobs read images from their URLs in `images.parquet`, resized to 1,024 px on the longest side. Vectors come back to `MIROIR_DATA_DIR/vectors/`, keyed by `image_id`.
+- **Storage.** No local image store. Model work runs remotely (OpenRouter where it has the model, else Modal), and those jobs read images from their URLs in `images.parquet`, resized to 512 px on the longest side. Vectors come back to `MIROIR_DATA_DIR/vectors/`, keyed by `image_id`.
 
 ## 4. Models
 
@@ -114,6 +114,10 @@ The models below are the starting point only. [experiments.md](experiments.md) c
 Vectors are L2-normalised, so we score with inner product. Their size depends on the model chosen: 1,024 for DINOv2 ViT-L and 1,152 for SigLIP 2 so400m.
 
 **OpenRouter.** `uv run miroir embed openrouter --option A9 --gallery screening-20k-publishable [--probe]` sends images, resized to 512 px on the long side as base64 JPEG, to the standard `/embeddings` endpoint. `--queries T1` does the same for a set's tune-half query images. Images come from their bucket URL; when that answers 404, from the IIIF image service for the same file. A bounded cache keeps the resized copies in `MIROIR_DATA_DIR/cache/images`. The embedder refuses image ids from records that are not `publishable`. The Batch API halves the price but, tested on 2026-10-12, it takes images only in chat calls: an image sent to `google/gemini-embedding-2:batch` comes back "Multimodal embedding inputs are not supported", while `google/gemini-3.5-flash-lite:batch` described an image given by URL. So image embeddings pay the standard price; text embeddings (T6, T7 queries, captions) and captions go through `:batch`. `google/gemini-embedding-2:batch` works for text although OpenRouter's model lists leave it out.
+
+**Modal.** Open models run on [Modal](https://modal.com) GPUs (`src/miroir/jobs/modal_app.py`). `uv run miroir embed modal --option <id> --gallery screening-20k-publishable [--probe]` sends the gallery's image ids and URLs, 500 per call, to one Modal function per model family (DINOv2/v3, SigLIP 2, PE-Core, EmbeddingGemma 2, Qwen3-VL-Embedding). The container fetches each image itself (512 px, IIIF fallback, the same code as above), embeds it, and sends the vectors back; the Mac writes the run (§7.1). Every function runs on an L4 (24 GB): the cheapest GPU that holds every model, with bf16 and more compute per dollar than a T4. DINO models run in float32 with the DINOv2 eval transform (shorter side 256, centre crop 224) and give the CLS token or GeM (p = 3) over patch tokens; the others use their own preprocessing and pooling, in bf16 (never float16: EmbeddingGemma 2 returns NaN in it). Weights are cached in the `miroir-weights` volume; gated weights (DINOv3) read `HF_TOKEN` from the `huggingface` Modal secret. Only `publishable` images go to Modal (§9). Option ids are listed in `src/miroir/jobs/modal_spec.py`.
+
+Cost is counted on the Mac: each call's wall time times Modal's published price for its GPU, CPU and memory, written to the project ledger as `modal`. Before each call, total spend plus the call's worst case (its 20-minute timeout at full price) must fit the usable budget. A full run needs a 100-image probe of the same model and size, and stops at 1.5 times its projection plus $0.25. Model code lives only in `src/miroir/remote/`, imported inside the Modal functions; `tests/test_no_models_on_the_mac.py` imports the CLI and every other module with model imports refused.
 
 Captions are written only for records where `publishable` is true. During experiments, test queries come from the collections and Commons, so they can go to closed models. Testers' photos go to a closed model only if one wins a place in the stack and the testers agreed in writing.
 
@@ -265,7 +269,8 @@ For each query we keep the rank of the first right entity and its average precis
 | `miroir eval run --round R1 --step A --option <label> --vectors <run> --set T1 --gallery screening-20k` | Score one tune half; add `--query-vectors <run>` when the queries were embedded apart (T2) |
 | `miroir eval compare <a.json> <b.json> --set T1 --gallery screening-20k` | Paired difference a − b per measure, and which wins beyond the error bar |
 | `miroir eval summary` | Rebuild the generated table in `docs/results.md` from every result file |
-| `miroir eval amstertime download / score` | Set T9 (R0). Download and score only: the vectors come from a hosted run |
+| `miroir r0 run [--model dinov2-giant-224]` | Set T9 (R0) on Modal: AmsterTime is downloaded into a Modal volume and embedded there; only the vectors come back |
+| `miroir eval amstertime score --run <run>` | Score an AmsterTime run in its three directions (NumPy only) |
 
 Each option's result file, `eval/results/<round>/<step>-<option>.json`, holds the vector run's `meta.json` info and one entry per (set, half, gallery): sizes, skipped queries, the four measures with intervals, and every query's rank and AP. Files are checked on write and on read; a stored mean that does not match its per-query values is refused.
 
@@ -295,7 +300,8 @@ miroir/
     cli.py         the `miroir` command; every entry point is a subcommand
     records/       record model, mappers per base, Parquet store  (`miroir records build`)
     images/        image helpers (URLs, tiles); no local image store
-    jobs/          remote model work: OpenRouter calls, Hugging Face Jobs (code run there may use `jobs`)
+    jobs/          remote model work: OpenRouter calls, the Modal app and its runner, spend and privacy checks
+    remote/        model code run inside Modal containers only; the one place torch may be imported
     index/         OpenSearch mappings and loading
     eval/          test set builders, scoring
     api/           FastAPI app (needs the `api` extra)

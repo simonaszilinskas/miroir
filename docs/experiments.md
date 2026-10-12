@@ -10,7 +10,7 @@ Finding the right heritage record from a photo is a research problem before it i
 2. **Simplest wins a tie.** When two options' error bars overlap, keep the cheaper, faster, open one.
 3. **Same queries for every option.** Comparisons are paired: every option answers the same queries against the same index.
 4. **The sealed half stays sealed.** We tune on the tuning half only and open the sealed half once, in week 6.
-5. **Paid runs have a cap.** All OpenRouter spend together may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` refuses a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is the larger of our own log and what OpenRouter says the key has spent. Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
+5. **Paid runs have a cap.** All paid model work together (OpenRouter and Modal) may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` and `miroir embed modal` refuse a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is our log of Modal calls plus the larger of our log of OpenRouter calls and what OpenRouter says the key has spent. Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
 6. **Every result is committed.** Each run writes `eval/results/<round>/<step>-<option>.json`, and `docs/results.md` holds the summary table.
 
 ## 2. Options by step
@@ -19,20 +19,20 @@ Finding the right heritage record from a photo is a research problem before it i
 
 | ID | Option | Open? | Route | Why it's in the list |
 |---|---|---|---|---|
-| A1 | DINOv2 ViT-L/14 and ViT-g/14 | yes | hosted (TBD) | The current default. Everything else is measured against it |
-| A2 | DINOv3 ViT-L and ViT-H+ (the largest distilled size); the 7B teacher | yes (custom licence, gated) | L, H+: hosted (TBD). 7B: deferred | The paper's clear gains over DINOv2 on Met and AmsterTime are for the 7B only (AmsterTime mAP 56.5 vs 48.9). For distilled ViT-L it reports only Oxford-H. The 7B does not fit on a 16 GB machine |
+| A1 | DINOv2 ViT-L/14 and ViT-g/14 | yes | Modal | The current default. Everything else is measured against it |
+| A2 | DINOv3 ViT-L and ViT-H+ (the largest distilled size); the 7B teacher | yes (custom licence, gated) | Modal (L, H+; 7B for R0 only), once Meta approves access | The paper's clear gains over DINOv2 on Met and AmsterTime are for the 7B only (AmsterTime mAP 56.5 vs 48.9). For distilled ViT-L it reports only Oxford-H. The 7B does not fit on a 16 GB machine |
 | A3 | MegaLoc (DINOv2 + SALAD) | yes | hosted (TBD) | Built to recognise places from any angle |
-| A4 | SigLIP 2 so400m and giant | yes | hosted (TBD) | Text and image in one space |
-| A5 | Meta Perception Encoder, PE-Core L and G | yes | hosted (TBD) | A strong rival to SigLIP 2 |
+| A4 | SigLIP 2 so400m and giant | yes | Modal | Text and image in one space |
+| A5 | Meta Perception Encoder, PE-Core L and G | yes | Modal | A strong rival to SigLIP 2 |
 | A6 | MetaCLIP 2 | weights open, CC-BY-NC 4.0 | hosted (TBD) | Trained on many languages. Non-commercial licence: a point of comparison only, unless the Ministry's lawyers clear it |
-| A7 | EmbeddingGemma 2 (740M, 768-d) | yes | hosted (TBD) | Small, multimodal, runs on a phone |
-| A8 | Qwen3-VL-Embedding 2B and 8B | yes | hosted (TBD); 8B may be deferred | Strong on MMEB-V2 among open models |
+| A7 | EmbeddingGemma 2 (740M, 768-d) | yes | Modal | Small, multimodal, runs on a phone |
+| A8 | Qwen3-VL-Embedding 2B and 8B | yes | 2B: Modal. 8B: not yet | Strong on MMEB-V2 among open models |
 | A8b | Tencent WeMM-Embedding 2B and 9B | yes (Apache-2.0) | hosted (TBD) | Released August 2026; ahead of Qwen3-VL-Embedding-8B on MMEB-V2, as its authors report (9B 80.6, 2B 77.9, against 77.8) |
 | A9 | Gemini Embedding 2 | no | OpenRouter | Closed reference point. The OpenRouter `:batch` endpoint refuses images, so image runs pay the standard price ($0.12 per 1,000 images) |
 | A10 | Voyage multimodal 3.5; Nemotron Embed VL (`nvidia/llama-nemotron-embed-vl-1b-v2`, 1.7B despite the name) | no / yes | OpenRouter | More reference points. Nemotron is on OpenRouter only as a free variant, capped at 20 requests a minute and 1,000 a day: about 138 days for every image at one per request. It was trained on document pages, not photos |
 | A11 | RootSIFT + VLAD, and perceptual hash | yes | hosted (TBD) | Classic floor. The hash also flags exact duplicates |
 
-Routes: **OpenRouter** where it serves the model. **hosted (TBD)**: open models, to run on a hosted service still being chosen; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
+Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU (`miroir embed modal`, technical spec §4); only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
 
 For A1–A3, also compare three ways to turn an image into one vector: the class token, GeM pooling over patch tokens, and VLAD over patch tokens (as in AnyLoc).
 
