@@ -258,6 +258,22 @@ def embed_modal(
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
+@embed_app.command("modal-images")
+def embed_modal_images(
+    gallery: Annotated[str, typer.Option(help="Gallery list.")] = "screening-20k-publishable",
+) -> None:
+    """Fetch a gallery's images once into the Modal image volume, so model runs read them there."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+
+    settings = get_settings()
+    with open_modal(settings) as calls:
+        counts = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage()).fill_images(
+            gallery
+        )
+    typer.echo(f"{gallery}: {counts}")
+
+
 @r0_app.command("run")
 def r0_run(
     model: Annotated[

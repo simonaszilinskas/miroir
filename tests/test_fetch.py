@@ -120,3 +120,10 @@ def test_bounded_map_keeps_order_and_reads_input_lazily() -> None:
     assert [next(out) for _ in range(3)] == [0, 2, 4]
     assert len(read) <= 8
     assert list(out) == [n * 2 for n in range(3, 100)]
+
+
+def test_an_uncapped_cache_never_evicts(tmp_path: Path) -> None:
+    cache = ImageCache(tmp_path / "cache", None)
+    for n in range(5):
+        cache.put(f"{n:016x}", b"x" * 1000)
+    assert all(cache.get(f"{n:016x}") is not None for n in range(5))

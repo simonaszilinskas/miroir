@@ -41,7 +41,9 @@ from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
     DOWNLOAD_TIMEOUT_S,
-    L4,
+    FILL_CONTAINERS,
+    FILL_MACHINE,
+    FILL_TIMEOUT_S,
     R0_MACHINE,
     R0_OPTIONS,
     R0_TIMEOUT_S,
@@ -77,6 +79,7 @@ class RemoteCalls(Protocol):
     """The calls a run makes. `miroir.jobs.modal_app.ModalCalls` sends them to Modal."""
 
     def embed(self, option: ModalOption, images: Sequence[Image]) -> ChunkResult: ...
+    def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
     def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
 
@@ -159,7 +162,7 @@ class ModalRunner:
         opt = option(option_id)
         ids = self._gallery(gallery)
         left = check_probe(self.budget, self.ledger, self._key_usage)
-        worst = L4.usd_per_s * CHUNK_TIMEOUT_S
+        worst = opt.machine.usd_per_s * CHUNK_TIMEOUT_S
         if worst > left:
             msg = f"a probe may cost up to ${worst:.2f}; probes have ${left:.2f} left"
             raise BudgetError(msg)
@@ -167,7 +170,7 @@ class ModalRunner:
         run = f"probe-{run_name(opt, gallery)}"
         paid = self._paid(
             lambda: self._calls.embed(opt, self._images(sample)),
-            machine=L4,
+            machine=opt.machine,
             timeout_s=CHUNK_TIMEOUT_S,
             kind=SpendKind.PROBE,
             option=opt.id,
@@ -188,7 +191,7 @@ class ModalRunner:
             images=len(done.ids),
             fixed_s=max(paid.wall_s - done.embed_s, 0.0),
             per_image_s=done.embed_s / len(done.ids),
-            usd_per_s=L4.usd_per_s,
+            usd_per_s=opt.machine.usd_per_s,
             cost_usd=paid.cost_usd,
             created=_today(),
         )
@@ -247,7 +250,7 @@ class ModalRunner:
         for chunk in _chunks(todo):
             paid = self._paid(
                 lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
-                machine=L4,
+                machine=opt.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=opt.id,
@@ -268,11 +271,42 @@ class ModalRunner:
         # Cost of the whole run, including the sessions before a resume.
         total = self.ledger.total(SpendKind.RUN, run=run)
         info = self._info(
-            opt, gallery=gallery, machine=L4, cost=total, wall=self._clock() - start, skips=skips
+            opt,
+            gallery=gallery,
+            machine=opt.machine,
+            cost=total,
+            wall=self._clock() - start,
+            skips=skips,
         )
         written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
         checkpoint.remove()
         return written
+
+    def fill_images(self, gallery: str) -> dict[str, int]:
+        """Fetch a gallery's images once into the Modal image volume, several containers at once.
+
+        Model runs then read images there instead of from POP. Images already there are skipped.
+        Cost: the call's wall time for every container that may run.
+        """
+        ids = self._gallery(gallery)
+        machine = Machine(
+            FILL_MACHINE.gpu,
+            FILL_MACHINE.cpu * FILL_CONTAINERS,
+            FILL_MACHINE.memory_gib * FILL_CONTAINERS,
+        )
+        chunks = list(_chunks(ids))
+        paid = self._paid(
+            lambda: self._calls.fill_images([self._images(c) for c in chunks]),
+            machine=machine,
+            timeout_s=FILL_TIMEOUT_S * len(chunks) // FILL_CONTAINERS + FILL_TIMEOUT_S,
+            kind=SpendKind.RUN,
+            option="images",
+            run=f"images-{gallery}",
+            model="none",
+            items=len(ids),
+        )
+        logger.info("image volume: %s for %s, $%.4f", paid.result, gallery, paid.cost_usd)
+        return paid.result
 
     def r0(self, name: str) -> VectorSet:
         """Round R0: download AmsterTime into a Modal volume, embed all 2,462 images there."""

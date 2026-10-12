@@ -40,8 +40,9 @@ POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 MODAL_WEIGHTS_MOUNT = "/weights"
 #: Volume holding public benchmarks (AmsterTime), downloaded inside Modal.
 MODAL_BENCHMARKS_MOUNT = "/benchmarks"
-#: Scratch folder for resized images inside a container.
-MODAL_IMAGE_CACHE = "/root/image-cache"
+#: Volume holding every screening image, resized to 512 px, filled once (`miroir embed
+#: modal-images`) so model runs read images there instead of from POP.
+MODAL_IMAGES_MOUNT = "/images"
 
 #: Where the Modal client keeps its token after `modal token new`.
 _MODAL_TOML = Path.home() / ".modal.toml"

@@ -17,12 +17,22 @@ from pathlib import Path
 
 import modal
 
-from miroir.config import MODAL_BENCHMARKS_MOUNT, MODAL_WEIGHTS_MOUNT, Settings
+from miroir.config import (
+    MODAL_BENCHMARKS_MOUNT,
+    MODAL_IMAGES_MOUNT,
+    MODAL_WEIGHTS_MOUNT,
+    Settings,
+)
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
     DOWNLOAD_TIMEOUT_S,
+    FILL_CONCURRENCY,
+    FILL_CONTAINERS,
+    FILL_MACHINE,
+    FILL_TIMEOUT_S,
     L4,
+    L4_DINO,
     R0_MACHINE,
     R0_TIMEOUT_S,
     SCALEDOWN_S,
@@ -62,14 +72,16 @@ image = (
 
 weights = modal.Volume.from_name("miroir-weights", create_if_missing=True)
 benchmarks = modal.Volume.from_name("miroir-benchmarks", create_if_missing=True)
+images_volume = modal.Volume.from_name("miroir-images", create_if_missing=True)
 hf_secret = modal.Secret.from_name(HF_SECRET_NAME)
 
 _MIB = 1024
 
 
 # --- POP images, one function per family ----------------------------------------------------
-# Same machine for all (modal_spec.L4); max_containers=1 keeps one warm container that
-# loads its model once and takes the chunks one after another.
+# modal_spec.ModalOption.machine says what each asks for; max_containers=1 keeps one warm
+# container that loads its model once and takes the chunks one after another. Images come
+# from the `miroir-images` volume when it holds them, else from POP.
 
 
 def _embed(option: ModalOption, images: list[Image]) -> ChunkResult:
@@ -83,11 +95,11 @@ def _embed(option: ModalOption, images: list[Image]) -> ChunkResult:
 
 @app.function(
     image=image,
-    gpu=L4.gpu,
-    cpu=L4.cpu,
-    memory=L4.memory_gib * _MIB,
+    gpu=L4_DINO.gpu,
+    cpu=L4_DINO.cpu,
+    memory=L4_DINO.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -102,7 +114,7 @@ def embed_dino(option: ModalOption, images: list[Image]) -> ChunkResult:
     cpu=L4.cpu,
     memory=L4.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -117,7 +129,7 @@ def embed_siglip2(option: ModalOption, images: list[Image]) -> ChunkResult:
     cpu=L4.cpu,
     memory=L4.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -132,7 +144,7 @@ def embed_pe_core(option: ModalOption, images: list[Image]) -> ChunkResult:
     cpu=L4.cpu,
     memory=L4.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -147,7 +159,7 @@ def embed_embeddinggemma(option: ModalOption, images: list[Image]) -> ChunkResul
     cpu=L4.cpu,
     memory=L4.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -162,7 +174,7 @@ def embed_qwen3_vl(option: ModalOption, images: list[Image]) -> ChunkResult:
     cpu=L4.cpu,
     memory=L4.memory_gib * _MIB,
     timeout=CHUNK_TIMEOUT_S,
-    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
     secrets=[hf_secret],
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
@@ -179,6 +191,26 @@ FAMILY_FUNCTIONS = {
     Family.QWEN3_VL: embed_qwen3_vl,
     Family.MEGALOC: embed_megaloc,
 }
+
+
+# --- the image volume: every screening image at 512 px, fetched once ----------------------
+
+
+@app.function(
+    image=image,
+    cpu=FILL_MACHINE.cpu,
+    memory=FILL_MACHINE.memory_gib * _MIB,
+    timeout=FILL_TIMEOUT_S,
+    volumes={MODAL_IMAGES_MOUNT: images_volume},
+    max_containers=FILL_CONTAINERS,
+)
+def fill_images(images: list[Image]) -> dict[str, int]:
+    """Fetch images (512 px, IIIF fallback) into the image volume. Returns counts by outcome."""
+    from miroir.remote.models import fill_image_volume  # noqa: PLC0415
+
+    counts = fill_image_volume(images, FILL_CONCURRENCY)
+    images_volume.commit()
+    return counts
 
 
 # --- R0: AmsterTime, kept in a volume, never on the Mac -------------------------------------
@@ -230,6 +262,13 @@ class ModalCalls:
 
     def embed(self, option: ModalOption, images: Sequence[Image]) -> ChunkResult:
         return FAMILY_FUNCTIONS[option.family].remote(option, list(images))
+
+    def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
+        totals: dict[str, int] = {}
+        for counts in fill_images.map([list(c) for c in chunks]):
+            for key, n in counts.items():
+                totals[key] = totals.get(key, 0) + n
+        return totals
 
     def amstertime_download(self) -> int:
         return amstertime_download.remote()

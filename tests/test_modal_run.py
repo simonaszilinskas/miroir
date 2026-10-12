@@ -60,6 +60,11 @@ class FakeCalls:
         ids = tuple(i.image_id for i in images)
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
+    def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
+        self.calls.append(("fill", sum(len(c) for c in chunks)))
+        self.clock.now += SECONDS_PER_CALL
+        return {"ok": sum(len(c) for c in chunks)}
+
     def amstertime_download(self) -> int:
         self.calls.append(("download", 0))
         self.clock.now += SECONDS_PER_CALL
@@ -218,3 +223,17 @@ def test_max_usd_refuses_a_run_projected_above_it(built: Settings) -> None:
     with pytest.raises(BudgetError, match="over the"):
         r.embed_gallery(GEMMA, "g", max_usd=0.0001)
     assert len(calls.calls) == 1  # the probe only
+
+
+def test_fill_images_sends_the_gallery_once_and_logs_its_cost(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    r, calls = runner(built)
+    assert r.fill_images("g") == {"ok": len(ids)}
+    assert calls.calls == [("fill", len(ids))]
+    assert r.ledger.total(service=Service.MODAL) > 0
+
+
+def test_dino_options_ask_for_the_bigger_machine() -> None:
+    assert option("A2-dinov3-7b-256-cls").machine.memory_gib == 32
+    assert option(GEMMA).machine == L4

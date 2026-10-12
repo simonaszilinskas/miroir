@@ -85,8 +85,16 @@ class Machine:
 L4 = Machine(gpu="L4", cpu=4.0, memory_gib=16)
 #: R0 embedding: the DINOv3 7B weights (13.4 GB in bf16) pass through host memory.
 R0_MACHINE = Machine(gpu="L4", cpu=4.0, memory_gib=32)
+#: DINO models: the DINOv3 7B weights (13.4 GB in bf16) pass through host memory.
+L4_DINO = Machine(gpu="L4", cpu=4.0, memory_gib=32)
 #: R0 download: AmsterTime into a volume, no GPU.
 DOWNLOAD_MACHINE = Machine(gpu=None, cpu=1.0, memory_gib=2)
+#: Filling the image volume: many downloads at once, no GPU.
+FILL_MACHINE = Machine(gpu=None, cpu=2.0, memory_gib=4)
+#: Containers filling the image volume at once, and downloads in each.
+FILL_CONTAINERS = 8
+FILL_CONCURRENCY = 16
+FILL_TIMEOUT_S = 20 * 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,13 +116,23 @@ class ModalOption:
     gated: bool = False
     """Weights need an accepted licence on Hugging Face (read through the `huggingface` secret)."""
 
+    @property
+    def machine(self) -> Machine:
+        """What its family's Modal function asks for."""
+        return L4_DINO if self.family is Family.DINO else L4
+
 
 def _dino(
-    id_: str, experiment: str, model: str, pooling: Pooling, *, gated: bool = False
+    id_: str, experiment: str, model: str, pooling: Pooling, *, gated: bool = False, crop: int = 224
 ) -> ModalOption:
     return ModalOption(
-        id_, experiment, Family.DINO, model, 224, pooling, DType.FLOAT32, 64, gated=gated
+        id_, experiment, Family.DINO, model, crop, pooling, DType.FLOAT32, 64, gated=gated
     )
+
+
+_V3_L = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+_V3_HPLUS = "facebook/dinov3-vith16plus-pretrain-lvd1689m"
+_V3_7B = "facebook/dinov3-vit7b16-pretrain-lvd1689m"
 
 
 _ALL = (
@@ -122,21 +140,13 @@ _ALL = (
     _dino("A1-dinov2-l-224-gem", "A1", "facebook/dinov2-large", Pooling.GEM),
     _dino("A1-dinov2-g-224-cls", "A1", "facebook/dinov2-giant", Pooling.CLS),
     _dino("A1-dinov2-g-224-gem", "A1", "facebook/dinov2-giant", Pooling.GEM),
-    _dino(
-        "A2-dinov3-l-224-cls", "A2", "facebook/dinov3-vitl16-pretrain-lvd1689m", Pooling.CLS,
-        gated=True,
-    ),
-    _dino(
-        "A2-dinov3-l-224-gem", "A2", "facebook/dinov3-vitl16-pretrain-lvd1689m", Pooling.GEM,
-        gated=True,
-    ),
-    _dino(
-        "A2-dinov3-hplus-224-cls", "A2", "facebook/dinov3-vith16plus-pretrain-lvd1689m",
-        Pooling.CLS, gated=True,
-    ),
-    _dino(
-        "A2-dinov3-hplus-224-gem", "A2", "facebook/dinov3-vith16plus-pretrain-lvd1689m",
-        Pooling.GEM, gated=True,
+    _dino("A2-dinov3-l-256-cls", "A2", _V3_L, Pooling.CLS, gated=True, crop=256),
+    _dino("A2-dinov3-l-256-gem", "A2", _V3_L, Pooling.GEM, gated=True, crop=256),
+    _dino("A2-dinov3-hplus-256-cls", "A2", _V3_HPLUS, Pooling.CLS, gated=True, crop=256),
+    _dino("A2-dinov3-hplus-256-gem", "A2", _V3_HPLUS, Pooling.GEM, gated=True, crop=256),
+    ModalOption(
+        "A2-dinov3-7b-256-cls", "A2", Family.DINO, _V3_7B,
+        256, Pooling.CLS, DType.BFLOAT16, 32, gated=True,  # float32 needs a 48 GB GPU
     ),
     ModalOption(
         "A3-megaloc-322", "A3", Family.MEGALOC, "gmberton/MegaLoc",
@@ -178,7 +188,7 @@ R0_OPTIONS: dict[str, ModalOption] = {
         "R0-dinov3-vit7b16-224",
         "A2",
         Family.DINO,
-        "facebook/dinov3-vit7b16-pretrain-lvd1689m",
+        _V3_7B,
         224,
         Pooling.CLS,
         DType.BFLOAT16,  # 26.9 GB in float32 would need a 48 GB GPU

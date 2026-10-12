@@ -80,13 +80,17 @@ def to_jpeg(data: bytes, long_side: int = LONG_SIDE) -> bytes:
 
 
 class ImageCache:
-    """Resized JPEGs keyed by `image_id`, capped at `max_bytes`; oldest files are removed first."""
+    """Resized JPEGs keyed by `image_id`, capped at `max_bytes`; oldest files are removed first.
 
-    def __init__(self, directory: Path, max_bytes: int) -> None:
+    `max_bytes=None` means no cap: no eviction, and no scan of the folder at start (a Modal
+    volume holding every screening image, where listing 19,000 files would be slow).
+    """
+
+    def __init__(self, directory: Path, max_bytes: int | None) -> None:
         self._dir = directory
         self._max = max_bytes
         self._lock = threading.Lock()
-        self._size = sum(p.stat().st_size for p in self._files())
+        self._size = 0 if max_bytes is None else sum(p.stat().st_size for p in self._files())
 
     def get(self, image_id: str) -> bytes | None:
         path = self._path(image_id)
@@ -103,7 +107,7 @@ class ImageCache:
         tmp.replace(path)
         with self._lock:
             self._size += len(jpeg)
-            if self._size > self._max:
+            if self._max is not None and self._size > self._max:
                 self._evict()
 
     @property
@@ -112,7 +116,7 @@ class ImageCache:
 
     def _evict(self) -> None:
         """Remove oldest files until the cache is at 90% of its cap. Caller holds the lock."""
-        target = int(self._max * 0.9)
+        target = int((self._max or 0) * 0.9)
         files = sorted(self._files(), key=lambda p: p.stat().st_mtime)
         removed = 0
         for path in files:

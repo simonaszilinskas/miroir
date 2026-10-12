@@ -20,7 +20,7 @@ import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGE_CACHE
+from miroir.config import MODAL_IMAGES_MOUNT
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
 from miroir.jobs.modal_spec import ChunkResult, DType, Family, ModalOption, Pooling
 from miroir.parallel import bounded_map
@@ -31,9 +31,8 @@ logger = logging.getLogger(__name__)
 
 DEVICE = "cuda"
 GEM_P = 3.0
-#: Parallel downloads per container. Higher than on the Mac: the container does nothing else.
-FETCH_CONCURRENCY = 8
-IMAGE_CACHE_BYTES = 512 * 1024 * 1024
+#: Parallel image reads per container (volume, else POP), running ahead of the GPU.
+FETCH_CONCURRENCY = 32
 #: Parallel file reads from a Modal volume.
 VOLUME_READERS = 32
 
@@ -182,12 +181,25 @@ def embed_images(option: ModalOption, images: Sequence[Image]) -> ChunkResult:
     start = time.monotonic()
     limits = httpx.Limits(max_connections=FETCH_CONCURRENCY)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
-        cache = ImageCache(Path(MODAL_IMAGE_CACHE), IMAGE_CACHE_BYTES)
+        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=FETCH_CONCURRENCY)
         skips: dict[str, int] = {}
         decoded = _decoded(fetcher.fetch_all(images), skips)
         ids, vectors = _embed_batches(model, decoded, option.batch_size)
     return ChunkResult(ids, vectors, skips, load_s, time.monotonic() - start)
+
+
+def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, int]:
+    """Fetch images into the image volume (skipping those already there). Counts by outcome."""
+    counts: dict[str, int] = {}
+    limits = httpx.Limits(max_connections=concurrency)
+    with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
+        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+        fetcher = ImageFetcher(http, cache, concurrency=concurrency)
+        for item in fetcher.fetch_all(images):
+            key = "ok" if item.skip is None else f"fetch_{item.skip.value}"
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def embed_files(option: ModalOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
