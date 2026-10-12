@@ -23,7 +23,7 @@ from miroir.records.store import read_images
 
 logger = logging.getLogger(__name__)
 
-AMSTERTIME_SET = "amstertime"
+AMSTERTIME_SET = amstertime.GALLERY
 
 
 def score_test_set(
@@ -79,10 +79,7 @@ def score_amstertime(
 ) -> RunResult:
     """Score a vector run of AmsterTime in all three directions and write one result file."""
     vectors = read_vectors(settings.vectors_path(vector_run))
-    expected = set(amstertime.image_ids(settings.amstertime_dir / "images"))
-    if set(vectors.ids) != expected:
-        msg = f"{vector_run} does not hold exactly the {len(expected)} AmsterTime images"
-        raise ValueError(msg)
+    amstertime.check_ids(vectors.ids)
     scores = [
         set_score(
             amstertime.score_amstertime(vectors, direction),

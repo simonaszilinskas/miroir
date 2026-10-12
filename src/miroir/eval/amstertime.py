@@ -13,8 +13,9 @@ The official evaluation (github.com/seyrankhademi/AmsterTime, `amstertime/eval.p
 It takes the top k = 128 neighbours by cosine distance; AP is 1/rank of the one match, or 0
 past rank 128. `score_amstertime` reproduces that with the MIROIR scorer.
 
-Embedding runs on a hosted service and returns a vector run (technical spec §7.1) whose ids
-are `old/NNNN.jpg` and `new/NNNN.png`. Nothing here loads a model.
+Embedding runs on Modal (`miroir r0 run`), which downloads AmsterTime into a volume and
+returns a vector run (technical spec §7.1) whose ids are `old/NNNN.jpg` and `new/NNNN.png`.
+Nothing here loads a model, and scoring needs no local copy of the images.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import logging
 import shutil
 import urllib.request
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from enum import StrEnum
 from pathlib import Path
 
@@ -38,6 +39,9 @@ URL = "https://ndownloader.figshare.com/files/34793920"
 SIZE = 913_361_822
 MD5 = "b9229f138e5a3e0dfa2c21f8db8aa443"
 PAIRS = 1_231
+
+#: Gallery name in vector runs of AmsterTime.
+GALLERY = "amstertime"
 
 #: Neighbours the official code retrieves; AP past this rank counts 0.
 OFFICIAL_K = 128
@@ -93,8 +97,24 @@ def download(target: Path) -> Path:
 def image_ids(images: Path) -> list[str]:
     """Ids as `old/0000.jpg`, `new/0000.png`: relative paths, sorted."""
     return sorted(
-        f"{side}/{path.name}" for side in ("old", "new") for path in (images / side).iterdir()
+        f"{side}/{path.name}" for side in ("old", "new") for path in _files(images / side)
     )
+
+
+def check_ids(ids: Iterable[str]) -> None:
+    """Raise unless `ids` are exactly one `old/NNNN.jpg` and one `new/NNNN.png` per place.
+
+    Needs no local copy of the images: they live in a Modal volume.
+    """
+    ids = list(ids)
+    old = {place_of(i) for i in ids if i.startswith("old/") and i.endswith(".jpg")}
+    new = {place_of(i) for i in ids if i.startswith("new/") and i.endswith(".png")}
+    if len(ids) != 2 * PAIRS or len(old) != PAIRS or old != new:
+        msg = (
+            f"expected {PAIRS} places with one old/NNNN.jpg and one new/NNNN.png each; got "
+            f"{len(ids)} ids, {len(old)} old and {len(new)} new places"
+        )
+        raise ValueError(msg)
 
 
 def place_of(image_id: str) -> str:
@@ -131,9 +151,14 @@ def score_amstertime(vectors: VectorSet, direction: Direction) -> ScoreResult:
 def _complete(images: Path) -> bool:
     if not (images / "old").is_dir() or not (images / "new").is_dir():
         return False
-    old = {place_of(f"old/{p.name}") for p in (images / "old").iterdir()}
-    new = {place_of(f"new/{p.name}") for p in (images / "new").iterdir()}
+    old = {place_of(f"old/{p.name}") for p in _files(images / "old")}
+    new = {place_of(f"new/{p.name}") for p in _files(images / "new")}
     return len(old) == PAIRS and old == new
+
+
+def _files(folder: Path) -> Iterator[Path]:
+    """Image files, without the `.DS_Store` files the archive ships."""
+    return (p for p in folder.iterdir() if p.is_file() and not p.name.startswith("."))
 
 
 def _find_dir(root: Path, name: str) -> Path:
