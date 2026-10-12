@@ -29,7 +29,7 @@ Light and dark themes: "Affichage" in the header or footer.
 
 Images on the cards come straight from the POP bucket (Rose Valland scans through the IIIF service, scaled, since some files weigh 20 MB). Query photos go to our Modal container only, never to an outside model; they are not stored. The logs keep a hash of each photo, the words, the filters and the records returned (technical spec §9).
 
-Weights, cut-offs and buckets are data (`routing.json`), not code: a third bucket (archive building, colour building, object) needs only a new entry with `greyscale: true` or `false`; the server already measures each photo's colourfulness. Extra gallery photos of an entity from Commons (image ids `commons-…` in the vector runs) are picked up by `build-index` and shown with their author and licence.
+Weights, cut-offs and buckets are data (`routing.json`), not code: a third bucket (archive building, colour building, object) needs only a new entry with `greyscale: true` or `false`; the server already measures each photo's chroma spread (`images.colour`, the statistic G5 routes on). Extra gallery photos of an entity from Commons (image ids `commons-…` in the vector runs) are picked up by `build-index` and shown with their author and licence.
 
 ## Scores of the deployed stack
 

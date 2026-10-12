@@ -20,6 +20,7 @@ from PIL import Image as PILImage
 from PIL import ImageOps
 
 from miroir.eval.bm25 import Bm25
+from miroir.images.colour import chroma_spread
 from miroir.images.fetch import JPEG_QUALITY, LONG_SIDE
 from miroir.web import ranking
 from miroir.web.catalog import (
@@ -40,7 +41,6 @@ from miroir.web.routing import (
     Guess,
     PhotoType,
     Routing,
-    colourfulness,
     read_guess,
     read_routing,
 )
@@ -133,7 +133,8 @@ class SearchResponse:
     confidence: float | None
     guessed_type: str | None
     bucket: str | None
-    colourfulness: float | None
+    chroma: float | None
+    """The photo's chroma spread (`images.colour`): near 0 for black and white."""
     cards: tuple[Card, ...]
     timings_ms: dict[str, float] = field(default_factory=dict[str, float])
 
@@ -203,7 +204,7 @@ class Engine:
             confidence=confidence,
             guessed_type=None if photo is None else photo.photo_type.value,
             bucket=None if photo is None else photo.bucket,
-            colourfulness=None if photo is None else photo.colourfulness,
+            chroma=None if photo is None else photo.chroma,
             cards=cards,
             timings_ms=timings,
         )
@@ -222,8 +223,8 @@ class Engine:
         a3 = np.where(mask, self.gallery.a3(a3_query), -np.inf).astype(np.float32)
         timings["vectors_photo"] = _ms(tick)
         photo_type, _ = self.guess.photo_type(a7_query)
-        colour = colourfulness(jpeg)
-        bucket = self.routing.choose(photo_type, colour)
+        chroma = chroma_spread(jpeg)
+        bucket = self.routing.choose(photo_type, chroma)
         w = bucket.a7_weight
         e7 = ranking.entity_max(a7, self.catalog)
         e3 = ranking.entity_max(a3, self.catalog)
@@ -237,7 +238,7 @@ class Engine:
             cutoff=bucket.cutoff,
             bucket=bucket.name,
             photo_type=photo_type,
-            colourfulness=colour,
+            chroma=chroma,
         )
 
     def _words(self, text: str, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Words:
@@ -305,7 +306,7 @@ class _Photo:
     cutoff: float
     bucket: str
     photo_type: PhotoType
-    colourfulness: float
+    chroma: float
 
     def confidence(self, entity: int) -> float:
         """The routed mix of the entity's raw cosines, as T8 measured it (`notfound`)."""

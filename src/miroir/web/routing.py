@@ -6,8 +6,9 @@ goes to the first bucket whose conditions it meets:
 
 - `photo_type`: "building" or "object", from the G4 guess (a logistic regression on the
   photo's EmbeddingGemma 2 vector, `guess.npz`);
-- `greyscale`: true or false, from the photo's colourfulness (`colourfulness`, below
-  `greyscale_max` counts as greyscale or sepia). Lets an archive-photo bucket be switched on.
+- `greyscale`: true or false, from the photo's chroma spread (`miroir.images.colour`, the
+  statistic step G5 routes on: below `grey_below` a photo is black and white or one tint).
+  Lets an archive-photo bucket be switched on.
 
 Each bucket gives EmbeddingGemma 2's weight (MegaLoc gets the rest) and the cut-off on the
 top result's confidence below which the page says "Pas de correspondance sûre".
@@ -15,21 +16,19 @@ top result's confidence below which the page says "Pas de correspondance sûre".
 
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image as PILImage
 from pydantic import ConfigDict, TypeAdapter
+
+from miroir.images.colour import GREY_BELOW
 
 ROUTING_FILE = "routing.json"
 GUESS_FILE = "guess.npz"
 SWITCH_AT = 0.5
-#: Side of the copy colourfulness is measured on.
-COLOUR_SIDE = 128
 
 Floats = NDArray[np.float32]
 
@@ -58,12 +57,12 @@ class Bucket:
             msg = f"bucket {self.name}: a7_weight {self.a7_weight} is not in [0, 1]"
             raise ValueError(msg)
 
-    def accepts(self, photo_type: PhotoType, colourfulness: float | None, grey_max: float) -> bool:
+    def accepts(self, photo_type: PhotoType, chroma: float | None, grey_below: float) -> bool:
         if self.photo_type is not None and self.photo_type is not photo_type:
             return False
-        if self.greyscale is None or colourfulness is None:
+        if self.greyscale is None or chroma is None:
             return True
-        return (colourfulness <= grey_max) is self.greyscale
+        return (chroma < grey_below) is self.greyscale
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,8 +84,8 @@ class Routing:
     __pydantic_config__ = ConfigDict(extra="forbid")
 
     buckets: tuple[Bucket, ...]
-    greyscale_max: float = 12.0
-    """Colourfulness at or below which a photo counts as greyscale or sepia."""
+    grey_below: float = GREY_BELOW
+    """Chroma spread under which a photo counts as black and white (`images.colour`)."""
     text: TextWeights = TextWeights()
     source: str = ""
     """How the file was made: index, sets, dates."""
@@ -96,12 +95,12 @@ class Routing:
             msg = "routing needs at least one bucket"
             raise ValueError(msg)
 
-    def choose(self, photo_type: PhotoType, colourfulness: float | None) -> Bucket:
-        """The first bucket the photo fits. With no colourfulness, greyscale is not asked."""
+    def choose(self, photo_type: PhotoType, chroma: float | None) -> Bucket:
+        """The first bucket the photo fits. With no chroma spread, greyscale is not asked."""
         for bucket in self.buckets:
-            if bucket.accepts(photo_type, colourfulness, self.greyscale_max):
+            if bucket.accepts(photo_type, chroma, self.grey_below):
                 return bucket
-        msg = f"no routing bucket takes a {photo_type} photo (colourfulness {colourfulness})"
+        msg = f"no routing bucket takes a {photo_type} photo (chroma spread {chroma})"
         raise ValueError(msg)
 
 
@@ -149,20 +148,3 @@ def read_guess(path: Path) -> Guess:
             coef=np.asarray(data["coef"], dtype=np.float64),
             bias=float(data["bias"][0]),
         )
-
-
-def colourfulness(jpeg: bytes) -> float:
-    """Hasler and Süsstrunk's colourfulness (2003) on a small copy: 0 for greyscale.
-
-    Sepia prints score low too (one hue, little spread); colour photos score above 30.
-    """
-    with PILImage.open(io.BytesIO(jpeg)) as opened:
-        small = opened.convert("RGB")
-        small.thumbnail((COLOUR_SIDE, COLOUR_SIDE))
-        pixels = np.asarray(small, dtype=np.float64)
-    r, g, b = pixels[..., 0], pixels[..., 1], pixels[..., 2]
-    rg = r - g
-    yb = 0.5 * (r + g) - b
-    spread = np.hypot(rg.std(), yb.std())
-    centre = np.hypot(rg.mean(), yb.mean())
-    return float(spread + 0.3 * centre)

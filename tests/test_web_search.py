@@ -9,7 +9,7 @@ from miroir.web import facets, ranking
 from miroir.web.bundle import cutoff_for
 from miroir.web.catalog import Filters
 from miroir.web.engine import SearchRequest, prepare_photo
-from miroir.web.routing import Bucket, PhotoType, Routing, colourfulness
+from miroir.web.routing import Bucket, PhotoType, Routing
 from tests import web_helpers as h
 
 # --- grouping (functional spec §6) ---------------------------------------------------------
@@ -147,12 +147,12 @@ def test_routing_picks_the_first_bucket_that_fits() -> None:
             Bucket("colour-building", 0.3, 0.8, PhotoType.BUILDING),
             Bucket("object", 0.2, 0.7, PhotoType.OBJECT),
         ),
-        greyscale_max=10.0,
+        grey_below=2.0,
     )
-    assert routing.choose(PhotoType.BUILDING, 2.0).name == "archive"
+    assert routing.choose(PhotoType.BUILDING, 0.5).name == "archive"
     assert routing.choose(PhotoType.BUILDING, 40.0).name == "colour-building"
     assert routing.choose(PhotoType.BUILDING, None).name == "archive"
-    assert routing.choose(PhotoType.OBJECT, 2.0).name == "object"
+    assert routing.choose(PhotoType.OBJECT, 0.5).name == "object"
 
 
 def test_a_building_guess_routes_to_embeddinggemma_alone() -> None:
@@ -163,21 +163,11 @@ def test_a_building_guess_routes_to_embeddinggemma_alone() -> None:
     assert response.cards[0].entity_id == "PA1"
 
 
-def test_colourfulness_tells_grey_from_colour() -> None:
-    import io  # noqa: PLC0415
-
-    from PIL import Image as PILImage  # noqa: PLC0415
-
-    def jpeg(colour: tuple[int, int, int]) -> bytes:
-        out = io.BytesIO()
-        picture = PILImage.new("RGB", (32, 32), colour)
-        picture.paste((20, 200, 40), (0, 0, 16, 32))
-        picture.save(out, format="JPEG")
-        return out.getvalue()
-
-    grey = prepare_photo(h.photo(120))
-    assert colourfulness(grey) < 2
-    assert colourfulness(jpeg((220, 30, 30))) > 30
+def test_a_grey_photo_reports_no_chroma() -> None:
+    engine, _ = h.engine(building=True)
+    response = engine.search(SearchRequest(image=h.photo(120)))
+    assert response.chroma is not None
+    assert response.chroma < 1
 
 
 # --- "not found" (T8 cut-off) --------------------------------------------------------------
