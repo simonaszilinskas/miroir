@@ -305,6 +305,7 @@ For each query we keep the rank of the first right entity and its average precis
 | `miroir eval run --round R1 --step A --option <label> --vectors <run> --set T1 --gallery screening-20k` | Score one tune half; add `--query-vectors <run>` when the queries were embedded apart (T2) |
 | `miroir eval compare <a.json> <b.json> --set T1 --gallery screening-20k` | Paired difference a − b per measure, and which wins beyond the error bar |
 | `miroir eval summary` | Rebuild the generated table in `docs/results.md` from every result file |
+| `miroir eval viewer --out <file.html>` | One self-contained page: for 20 seeded tune queries per set (T1, T5, T3; publishable images only), the query, a right answer and each model's top 5 records as thumbnails, marked right or wrong, with filters for misses and disagreements. Every model searches the publishable screening gallery |
 | `miroir r0 run [--model dinov2-giant-224]` | Set T9 (R0) on Modal: AmsterTime is downloaded into a Modal volume and embedded there; only the vectors come back |
 | `miroir eval amstertime score --run <run>` | Score an AmsterTime run in its three directions (NumPy only) |
 
