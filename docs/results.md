@@ -102,7 +102,7 @@ What we learned:
 - EmbeddingGemma 2 (open, 740M) ties Gemini Embedding 2 on T1 and T3 (paired bootstrap, every interval crosses 0) and trails it on T5 by 3 points hit@10 [−5.6, −0.5].
 - MegaLoc wins T5 outright: hit@10 62.5 against A9's 51.2, +11.3 [+7.4, +14.9] paired. It also ties the best on T3.
 - GeM pooling never beats CLS on T1, and helps a little on T5 hit@10.
-- All 14 runs cost $8.30 together. Project spend after R1: $14.74 (OpenRouter $5.55, Modal $9.18).
+- The 14 runs cost $7.82 together; probes, the image volume and R0 make up the rest of the Modal spend. Project spend after R1: $14.74 (OpenRouter $5.55, Modal $9.18).
 - T8 is not scored: the harness refuses queries with no right answer until the not-found measure exists. T6 and T7 do not exist yet, so EmbeddingGemma 2's text side waits.
 
 ## Summary of all runs
