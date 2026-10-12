@@ -23,6 +23,7 @@ from PIL import Image as PILImage
 from miroir.config import MODAL_IMAGE_CACHE
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
 from miroir.jobs.modal_spec import ChunkResult, DType, Family, ModalOption, Pooling
+from miroir.parallel import bounded_map
 from miroir.records.model import Image
 from miroir.remote.preprocess import dino_eval
 
@@ -33,6 +34,8 @@ GEM_P = 3.0
 #: Parallel downloads per container. Higher than on the Mac: the container does nothing else.
 FETCH_CONCURRENCY = 8
 IMAGE_CACHE_BYTES = 512 * 1024 * 1024
+#: Parallel file reads from a Modal volume.
+VOLUME_READERS = 32
 
 
 class Encoder(Protocol):
@@ -176,7 +179,10 @@ def embed_files(option: ModalOption, files: Sequence[tuple[str, Path]]) -> Chunk
     """Embed images read from disk (a benchmark on a Modal volume), keyed by the given ids."""
     model, load_s = encoder(option)
     start = time.monotonic()
-    opened = ((image_id, _open(path.read_bytes())) for image_id, path in files)
+    # Volume files load lazily and one read waits on the network: read many at once.
+    opened = bounded_map(
+        lambda item: (item[0], _open(item[1].read_bytes())), files, workers=VOLUME_READERS
+    )
     ids, vectors = _embed_batches(model, opened, option.batch_size)
     return ChunkResult(ids, vectors, {}, load_s, time.monotonic() - start)
 
