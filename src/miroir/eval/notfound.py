@@ -87,22 +87,26 @@ class NotFoundScore:
 
 
 def confidences(
-    ranking: EntityScores, raw: Sequence[EntityScores], weights: Sequence[float]
+    ranking: EntityScores,
+    raw: Sequence[EntityScores],
+    weights: Sequence[float] | NDArray[np.floating],
 ) -> tuple[Confidence, ...]:
     """Each query's confidence: the weighted raw scores of the entity ranked first.
 
     For one model, pass its scores as `ranking` and `raw` with weight 1: the top cosine.
     After fusion, the fused scores pick the top entity but say little about confidence (G1
     gives the top entity about 1 whatever happens), so the models' own cosines score it.
+    `weights` is one weight per model, or one row per query when weights vary by query (G4).
     """
     top = np.argmax(ranking.values, axis=1)
     rows = np.arange(len(ranking.query_ids))
+    per_query = np.broadcast_to(np.asarray(weights, dtype=np.float64), (len(rows), len(raw)))
     total = np.zeros(len(rows), dtype=np.float64)
-    for part, weight in zip(raw, weights, strict=True):
+    for m, part in enumerate(raw):
         if part.query_ids != ranking.query_ids or part.entity_ids != ranking.entity_ids:
             msg = "raw scores and ranking cover different queries or entities"
             raise ValueError(msg)
-        total += weight * part.values[rows, top].astype(np.float64)
+        total += per_query[:, m] * part.values[rows, top].astype(np.float64)
     return tuple(Confidence(q, float(s)) for q, s in zip(ranking.query_ids, total, strict=True))
 
 

@@ -260,6 +260,55 @@ def eval_stack(
         )
 
 
+@eval_app.command("route")
+def eval_route(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")],
+    option: Annotated[str, typer.Option(help="Result file label, e.g. G4-router-A7+A3.")],
+    vectors: Annotated[list[str], typer.Option(help="Vector run of one model; repeat (2+).")],
+    gallery: Annotated[str, typer.Option(help="Gallery list, e.g. screening-20k.")],
+    test_set: Annotated[list[str], typer.Option("--set", help="Test set to rank; repeat it.")],
+    guess_vectors: Annotated[
+        list[str] | None,
+        typer.Option(help="Vector run(s) the building-or-object guess reads. Default: first."),
+    ] = None,
+    switch: Annotated[
+        bool, typer.Option("--switch", help="Hard switch at p > 0.5 instead of a blend.")
+    ] = False,
+    publishable_queries: Annotated[
+        bool,
+        typer.Option("--publishable-queries", help="Only queries a closed model may see."),
+    ] = False,
+    not_found: Annotated[
+        bool, typer.Option("--not-found", help="Also score T8, the not-found measure.")
+    ] = False,
+) -> None:
+    """G4: fusion weights set per photo by a building-or-object guess; tune halves only."""
+    from miroir.eval.router import score_router  # noqa: PLC0415
+
+    report = score_router(
+        get_settings(),
+        runs=vectors,
+        guess_runs=guess_vectors or vectors[:1],
+        hard=switch,
+        round_id=round_id,
+        step="G",
+        option=option,
+        set_ids=test_set,
+        gallery=gallery,
+        publishable_queries=publishable_queries,
+        not_found=not_found,
+    )
+    typer.echo(report.result.vectors.notes)
+    _echo_scores(report.result.scores)
+    for s in report.result.not_found:
+        typer.echo(
+            f"{s.test_set}/{s.half}: wrong but confident at {100 * s.match_rate:.0f}% matched "
+            f"{_pct(s.wrong_confident)}; matched at {100 * s.wrong_target:.0f}% wrong "
+            f"{_pct(s.match_rate_at_target)}"
+        )
+
+
 @eval_app.command("summary")
 def eval_summary() -> None:
     """Rebuild the summary table in docs/results.md from every file in eval/results/."""

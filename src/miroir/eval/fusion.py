@@ -8,6 +8,8 @@ buildings and objects before they are combined:
 - G2, reciprocal-rank fusion: each entity gets the weighted sum of 1 / (RRF_K + rank) over
   models. Only ranks count, so a model's score scale does not matter.
 
+- G4, routed weighted sum: G1 with weights set per query (`fuse_per_query`, `router`).
+
 An entity hidden from a query (score -inf) stays hidden after fusion.
 """
 
@@ -32,14 +34,39 @@ class Method(StrEnum):
 def fuse(parts: Sequence[EntityScores], weights: Sequence[float], method: Method) -> EntityScores:
     """One set of entity scores from several models' scores on the same queries and gallery."""
     first = _check(parts, weights)
+    if any(w <= 0 for w in weights):
+        msg = f"weights must be positive: {weights}"
+        raise ValueError(msg)
+    rows = np.broadcast_to(
+        np.asarray(weights, dtype=np.float32), (len(first.query_ids), len(parts))
+    )
+    return _combine(parts, rows, method)
+
+
+def fuse_per_query(parts: Sequence[EntityScores], weights: Floats) -> EntityScores:
+    """G1 with each query's own weights: `weights[i, m]` is model m's weight for query i.
+
+    A weight may be 0, leaving that model out for that query (G4 routes this way).
+    """
+    first = _check(parts, [1.0] * len(parts))
+    shape = (len(first.query_ids), len(parts))
+    if weights.shape != shape or (weights < 0).any():
+        msg = f"per-query weights need shape {shape} and no negative value, got {weights.shape}"
+        raise ValueError(msg)
+    return _combine(parts, weights, Method.WEIGHTED_SUM)
+
+
+def _combine(parts: Sequence[EntityScores], weights: Floats, method: Method) -> EntityScores:
+    first = parts[0]
     hidden = np.zeros(first.values.shape, dtype=bool)
     total: Floats = np.zeros(first.values.shape, dtype=np.float32)
-    for part, weight in zip(parts, weights, strict=True):
+    for m, part in enumerate(parts):
         hidden |= ~np.isfinite(part.values)
+        column = weights[:, m : m + 1].astype(np.float32)
         if method is Method.WEIGHTED_SUM:
-            total += np.float32(weight) * min_max(part.values)
+            total += column * min_max(part.values)
         else:
-            total += np.float32(weight) / (RRF_K + ranks(part.values))
+            total += column / (RRF_K + ranks(part.values))
     total[hidden] = -np.inf
     return EntityScores(
         query_ids=first.query_ids,
@@ -79,9 +106,6 @@ def split_weight(first: float, count: int) -> tuple[float, ...]:
 def _check(parts: Sequence[EntityScores], weights: Sequence[float]) -> EntityScores:
     if len(parts) < 2 or len(parts) != len(weights):
         msg = f"fusion needs 2+ models with one weight each: {len(parts)} and {len(weights)}"
-        raise ValueError(msg)
-    if any(w <= 0 for w in weights):
-        msg = f"weights must be positive: {weights}"
         raise ValueError(msg)
     first = parts[0]
     for part in parts[1:]:

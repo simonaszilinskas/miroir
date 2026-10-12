@@ -103,6 +103,7 @@ Scored on: T2. T1 must not drop by more than its error bar.
 | G1 | Weighted sum of min-max-normalised scores (OpenSearch hybrid pipeline) |
 | G2 | Reciprocal-rank fusion |
 | G3 | Logistic regression over image score, text score and E1 match count. It outputs a probability used as the "not found" score |
+| G4 | G1 with weights chosen per photo by a building-or-object guess |
 
 Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident rate at a fixed match rate).
 

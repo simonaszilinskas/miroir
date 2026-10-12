@@ -71,7 +71,7 @@ class Stack:
 
 
 @dataclass(frozen=True, slots=True)
-class _Model:
+class Model:
     run: str
     vectors: VectorSet
     gallery: Gallery
@@ -100,7 +100,7 @@ def score_stack(
     """Score the stack on each set's tune half (and T8 if asked); write one result file."""
     gallery_ids = read_gallery(settings, gallery)
     entity_of = {i.image_id: i.entity_id for i in read_images(settings.images_parquet)}
-    models = tuple(_load(settings, run, entity_of, gallery_ids) for run in stack.runs)
+    models = tuple(load_model(settings, run, entity_of, gallery_ids) for run in stack.runs)
 
     def queries_of(set_id: str) -> list[Query]:
         loaded = load_queries(settings, set_id, "tune")
@@ -130,7 +130,7 @@ def score_stack(
         for set_id in IN_INDEX_SETS:
             if set_id not in scored:
                 scored[set_id] = scored_set(set_id)
-        missing = _score_models(models, _not_found_queries(queries_of(NOT_FOUND_SET)), stack)
+        missing = _score_models(models, not_found_queries(queries_of(NOT_FOUND_SET)), stack)
         found = (
             not_found_score(
                 [c for s in IN_INDEX_SETS for c in _confidences(scored[s].parts, weights, stack)],
@@ -156,13 +156,13 @@ def score_stack(
     )
 
 
-def _load(settings: Settings, run: str, entity_of: dict[str, str], ids: list[str]) -> _Model:
+def load_model(settings: Settings, run: str, entity_of: dict[str, str], ids: list[str]) -> Model:
     vectors = read_vectors(settings.vectors_path(run))
-    return _Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids))
+    return Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids))
 
 
 def _score_models(
-    models: Sequence[_Model], queries: Sequence[Asked], stack: Stack
+    models: Sequence[Model], queries: Sequence[Asked], stack: Stack
 ) -> tuple[EntityScores, ...]:
     parts: list[EntityScores] = []
     for model in models:
@@ -192,7 +192,7 @@ def _weights(stack: Stack, scored: dict[str, _Scored]) -> tuple[tuple[float, ...
         results = [
             rank_entities(_fused(s.parts, weights, stack), s.queries) for s in scored.values()
         ]
-        tried[first] = _mean_over_sets(results)
+        tried[first] = mean_over_sets(results)
         logger.info("weight %.1f: mean hit@10 %.3f, mean mAP %.3f", first, *tried[first])
     # Best mean hit@10, then mAP; a tie goes to the weight nearest equal shares.
     nearest_even = sorted(WEIGHT_GRID, key=lambda f: abs(f - 1 / count))
@@ -205,7 +205,7 @@ def _weights(stack: Stack, scored: dict[str, _Scored]) -> tuple[tuple[float, ...
     return split_weight(best, count), note
 
 
-def _mean_over_sets(results: Sequence[ScoreResult]) -> tuple[float, float]:
+def mean_over_sets(results: Sequence[ScoreResult]) -> tuple[float, float]:
     values = [per_query_values(r.per_query) for r in results]
     return (
         float(np.mean([v["hit@10"].mean() for v in values])),
@@ -219,7 +219,7 @@ def _confidences(
     return confidences(_fused(parts, weights, stack), parts, weights)
 
 
-def _not_found_queries(queries: Sequence[Query]) -> list[NotFoundQuery]:
+def not_found_queries(queries: Sequence[Query]) -> list[NotFoundQuery]:
     with_answer = sum(1 for q in queries if q.expected_entity_ids)
     if with_answer:
         msg = f"{with_answer} {NOT_FOUND_SET} queries have a right answer"
@@ -228,7 +228,7 @@ def _not_found_queries(queries: Sequence[Query]) -> list[NotFoundQuery]:
 
 
 def _info(
-    models: Sequence[_Model], stack: Stack, weights: Sequence[float], chosen_note: str
+    models: Sequence[Model], stack: Stack, weights: Sequence[float], chosen_note: str
 ) -> RunInfo:
     infos = [m.vectors.info for m in models]
     notes: list[str] = []
@@ -243,6 +243,11 @@ def _info(
         first = infos[0]
         joined = "; ".join(n for n in (first.notes, *notes) if n)
         return replace(first, notes=joined)
+    return combined_info(infos, "; ".join(notes))
+
+
+def combined_info(infos: Sequence[RunInfo], notes: str) -> RunInfo:
+    """One `RunInfo` for several models used together: costs and times add up."""
     routes = {i.route for i in infos}
     return RunInfo(
         option="+".join(i.option for i in infos),
@@ -254,7 +259,7 @@ def _info(
         cost_usd=sum(i.cost_usd for i in infos),
         wall_time_s=sum(i.wall_time_s for i in infos),
         route=routes.pop() if len(routes) == 1 else Route.HOSTED,
-        notes="; ".join(notes),
+        notes=notes,
     )
 
 

@@ -17,6 +17,7 @@ uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries
 uv run miroir testsets commons # Commons photos -> T2, T2b, T8c, screening-v2 (cached; 20 s)
 uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
 uv run miroir eval stack ...    # fuse models (G1, G2), expand queries (E5), score T8
+uv run miroir eval route ...    # G4: fusion weights set per photo by a building-or-object guess
 uv run miroir eval summary     # rebuild the results table in docs/results.md
 uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir embed modal --option A7-embeddinggemma-2-512 --probe   # open model on a Modal GPU
