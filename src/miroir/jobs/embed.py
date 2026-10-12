@@ -34,6 +34,7 @@ from miroir.jobs.openrouter import (
     image_input,
     jpeg_data_url,
 )
+from miroir.jobs.privacy import PublishableImages
 from miroir.jobs.spend import (
     PROBE_IMAGES,
     Budget,
@@ -48,7 +49,6 @@ from miroir.jobs.spend import (
 )
 from miroir.parallel import bounded_map
 from miroir.records.model import Image
-from miroir.records.store import read_records
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,6 @@ OPTIONS: dict[str, EmbedOption] = {
     "A9": EmbedOption("A9", "google/gemini-embedding-2", "gemini-embedding-2", 6),
     "A10a": EmbedOption("A10a", "voyageai/voyage-multimodal-3.5", "voyage-multimodal-3.5", 16),
 }
-
-
-class PrivacyError(PermissionError):
-    """Asked to send an image from a record that is not publishable to an outside service."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,30 +109,17 @@ class OpenRouterEmbedder:
         self._batch_poll_s = batch_poll_s
         self.ledger = SpendLedger(settings.spend_ledger)
         self.budget = Budget.from_settings(settings)
-        self._images, self._publishable = _load_images(settings)
+        self._store = PublishableImages.load(settings)
+        self._images = self._store.images
 
     # privacy
 
     def check_publishable(self, image_ids: Sequence[str]) -> None:
-        unknown = [i for i in image_ids if i not in self._images]
-        if unknown:
-            msg = f"{len(unknown)} image id(s) not in images.parquet, e.g. {unknown[0]}"
-            raise KeyError(msg)
-        private = [i for i in image_ids if i not in self._publishable]
-        if private:
-            msg = (
-                f"{len(private)} image(s) come from records that are not publishable "
-                f"(e.g. {private[0]}); they may not go to {self.option.model}"
-            )
-            raise PrivacyError(msg)
+        self._store.check(image_ids, self.option.model)
 
     def publishable_only(self, image_ids: Sequence[str]) -> list[str]:
         """Drop ids from records that are not publishable (logged), keeping order."""
-        self.check_publishable([i for i in image_ids if i not in self._images])
-        kept = [i for i in image_ids if i in self._publishable]
-        if len(kept) < len(image_ids):
-            logger.info("left out %d non-publishable image(s)", len(image_ids) - len(kept))
-        return kept
+        return self._store.only_publishable(image_ids)
 
     # images
 
@@ -358,10 +341,3 @@ def _keep(fetched: Fetched, skips: Counter[str]) -> bool:
         return True
     skips[f"fetch_{fetched.skip.value}"] += 1
     return False
-
-
-def _load_images(settings: Settings) -> tuple[dict[str, Image], frozenset[str]]:
-    records = read_records(settings.records_parquet, settings.images_parquet)
-    images = {i.image_id: i for r in records for i in r.images}
-    publishable = frozenset(i.image_id for r in records if r.publishable for i in r.images)
-    return images, publishable

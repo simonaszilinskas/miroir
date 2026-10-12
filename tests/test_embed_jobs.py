@@ -11,7 +11,6 @@ from miroir.images.fetch import ImageCache, ImageFetcher
 from miroir.jobs.embed import (
     OPTIONS,
     OpenRouterEmbedder,
-    PrivacyError,
     embed_gallery,
     embed_queries,
     embed_texts,
@@ -19,6 +18,7 @@ from miroir.jobs.embed import (
     run_name,
 )
 from miroir.jobs.openrouter import OpenRouterClient
+from miroir.jobs.privacy import PrivacyError
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.records.build import build
 from miroir.records.store import read_records
