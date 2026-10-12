@@ -138,6 +138,15 @@ What we learned:
 - One loss beyond the bar: DINOv3 L CLS on T3, hit@1 −11.1 [−19.2, −3.0]. We have no explanation yet; bf16 is the other change in these runs.
 - The four runs cost $1.67, and their probes $0.09.
 
+### Commons photos: T2, T2b, T8c (2026-10-12)
+
+Expected (written 2026-10-12, before any score). Queries are recent colour photos from Commons (technical spec §7); the gallery is `screening-v2-publishable`, so every model sees the same images and T2b keeps only works with a publishable image.
+
+- T2 (a visitor's photo of a building, answers mostly black-and-white Mémoire photos): A7 and A9 lead, as on T1, with hit@10 near 40%, below the 60% target. MegaLoc (A3) is trained on street-level colour photos, so it should do better here than on T1's archive queries, but still trail A7. Exterior photos score at least 10 points above interior and detail ones: most Mémoire photos show the outside.
+- T2b (Roman sculpture, lamps and coins of one museum, shot on stands): A3 leads, as on T5, near 50% hit@10; A7 and A9 near 40%. Coins shot on the other face are misses for every model.
+- G1-A7+A3 sits between its two models on each set and edges the best single model on the mean of the two, but not beyond the error bar on either set (as on T1, T3, T5).
+- T8c: a quarter or more of not-found photos still get a confident wrong answer at the cut-off that answers half of T2 and T2b, as on T8.
+
 ## R2: fusion (step G), re-ranking (E1), query expansion (E5), "not found" (T8)
 
 G belongs to R3 in experiments.md §5. We pulled it forward because it costs nothing: it only combines vectors we already have, with NumPy, on the Mac.
