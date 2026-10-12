@@ -105,7 +105,40 @@ What we learned:
 - The 14 runs cost $7.82 together; probes, the image volume and R0 make up the rest of the Modal spend. Project spend after R1: $14.74 (OpenRouter $5.55, Modal $9.18).
 - T8 is not scored: the harness refuses queries with no right answer until the not-found measure exists. T6 and T7 do not exist yet, so EmbeddingGemma 2's text side waits.
 
-## R2: fusion (step G), query expansion (E5), "not found" (T8)
+### DINO on the whole photo (2026-10-12)
+
+Which R1 models crop, from our code and each model's published preprocessing config:
+
+| Option | What the model sees |
+|---|---|
+| A1 DINOv2, A2 DINOv3 | **A centre square.** Shorter side to crop × 256/224, then a crop × crop square: a 4:3 photo keeps 58% of its area, a 2:1 photo 38% |
+| A3 MegaLoc | The whole image, stretched to 322 × 322 |
+| A4 SigLIP 2 | The whole image, stretched to 384 × 384 (processor: resize to 384 × 384, no crop) |
+| A5 PE-Core | The whole image, stretched (open_clip config: `resize_mode` "squash") |
+| A7 EmbeddingGemma 2 | The whole image, aspect kept (Gemma 4 image processor, up to 280 image tokens) |
+| A8 Qwen3-VL-Embedding | The whole image, aspect kept, within 512² pixels |
+
+Only DINO crops, so only DINO was rerun. New runs see the whole image: shorter side 256 (DINOv3, patch 16) or 224 (DINOv2, patch 14), longer side rounded to the patch grid and capped at twice the shorter. CLS and GeM come from one pass. These runs are in bf16; R1's L, H+ and g ran in float32 (the 7B was bf16 in both). Same gallery and queries as above. Each cell: hit@1 / hit@10 without the crop, then R1's hit@10 with it.
+
+| Option | Cost | T1 | T3 | T5 |
+|---|---|---|---|---|
+| A2 DINOv3 L/16, CLS | $0.16 (both) | 20.3 / 29.7 (29.0) | 26.3 / 59.6 (62.6) | 29.1 / 40.9 (42.7) |
+| A2 DINOv3 L/16, GeM | | 11.6 / 21.7 (21.7) | 28.3 / 64.6 (61.6) | 31.4 / **51.2** (46.3) |
+| A2 DINOv3 H+/16, CLS | $0.35 (both) | 21.0 / 34.1 (33.3) | 30.3 / 60.6 (55.6) | 29.1 / 41.5 (41.1) |
+| A2 DINOv3 H+/16, GeM | | 13.0 / 26.1 (26.8) | 30.3 / 60.6 (59.6) | 27.3 / 45.4 (44.0) |
+| A2 DINOv3 7B/16, CLS | $0.88 (both) | 23.2 / 36.2 (33.3) | 31.3 / 65.7 (59.6) | 30.7 / 42.4 (42.9) |
+| A2 DINOv3 7B/16, GeM | | 13.8 / 26.8 (none) | 35.4 / 70.7 (none) | 29.8 / 51.2 (none) |
+| A1 DINOv2 g/14, CLS | $0.29 (both) | 15.2 / 29.7 (24.6) | 27.3 / 53.5 (52.5) | 28.2 / 39.5 (39.7) |
+| A1 DINOv2 g/14, GeM | | 10.9 / 18.1 (19.6) | 27.3 / 56.6 (57.6) | 34.1 / **58.2** (51.0) |
+
+What we learned:
+
+- The crop is not why DINO comes last. On T1 and T3 no run moves beyond the error bar at hit@10 (paired bootstrap against the cropped run), and the best uncropped DINO run on T1 (7B CLS, 23.2 hit@1) stays far behind EmbeddingGemma 2 (36.2).
+- GeM on T5 gains from the whole object: DINOv2 g +7.2 hit@10 [+4.1, +10.6], DINOv3 L +5.0 [+2.3, +7.9]. DINOv2 g GeM now sits between MegaLoc (62.5) and Gemini (51.2) on T5, but still trails on T1 and T3.
+- One loss beyond the bar: DINOv3 L CLS on T3, hit@1 −11.1 [−19.2, −3.0]. We have no explanation yet; bf16 is the other change in these runs.
+- The four runs cost $1.67, and their probes $0.09.
+
+## R2: fusion (step G), re-ranking (E1), query expansion (E5), "not found" (T8)
 
 G belongs to R3 in experiments.md §5. We pulled it forward because it costs nothing: it only combines vectors we already have, with NumPy, on the Mac.
 
@@ -259,6 +292,36 @@ What we learned:
 - The guess does not help "not found". Keep a separate confidence score (A7's or G1's cosines) for that, and leave the cut-off to G3.
 - Before R4: the guess learned from gallery images of entities that may be in sealed queries (we cannot see which). Retrain it in R4 with every sealed-query entity left out too.
 
+### E1: re-ranking the top 50 by keypoint matches (2026-10-12)
+
+We wrote no guess before these runs; the reasons below came after the scores.
+
+Set-up: for each tune query (the same queries as R1), the top 50 entities by cosine, each with its best image. ALIKED keypoints (2,048 at most, on the 512 px images; BSD licence, where SuperPoint's weights forbid commercial use), LightGlue matching, then OpenCV MAGSAC fits one homography (4 px). Two ways to re-rank, the second fixed before scoring:
+
+- **inliers**: matches that agree on the homography, most first;
+- **mix**: cosine + inliers / 100.
+
+Matching ran on a Modal L4, one pair after another. It adds 1.2 s per search at the median (0.7 to 1.4 s by set, 95th percentile at most 1.6 s), with the gallery's keypoints computed ahead. Cost: $0.71 for the A7 shortlists, $0.52 for A3.
+
+Each cell: hit@1 / hit@10. Last two columns: paired difference, mix minus the shortlist's model alone, with 95% intervals.
+
+| Shortlist | Set | Alone | Inliers | Mix | Mix − alone, hit@1 | Mix − alone, hit@10 |
+|---|---|---|---|---|---|---|
+| A7 EmbeddingGemma 2 | T1 | 36.2 / 50.0 | 23.2 / 44.9 | 25.4 / 46.4 | −10.9 [−17.4, −4.3] | −3.6 [−10.1, +2.9] |
+| A7 EmbeddingGemma 2 | T3 | 56.6 / 84.8 | 71.7 / 91.9 | **72.7 / 92.9** | +16.2 [+8.1, +24.2] | +8.1 [+2.0, +14.1] |
+| A7 EmbeddingGemma 2 | T5 | 33.4 / 48.1 | 31.8 / 45.4 | 37.9 / 50.3 | +4.5 [+0.7, +8.4] | +2.3 [−0.7, +5.4] |
+| A3 MegaLoc | T1 | 20.3 / 29.7 | 20.3 / 29.0 | 21.0 / 29.7 | +0.7 [−4.3, +5.8] | +0.0 [−4.3, +4.3] |
+| A3 MegaLoc | T3 | 55.6 / 85.9 | 67.7 / 90.9 | 66.7 / 92.9 | +11.1 [+3.0, +19.2] | +7.1 [+3.0, +12.1] |
+| A3 MegaLoc | T5 | 39.5 / 62.5 | 35.2 / 54.0 | **44.7 / 63.2** | +5.2 [+2.0, +8.6] | +0.7 [−2.0, +3.8] |
+
+What we learned:
+
+- T3 gains most: crops of one negative share every detail, so the right record gets 195 inliers at the median against 6 for wrong ones. A7 then mix reaches 72.7 hit@1, 16 points above any model alone.
+- T1 loses with A7. Wrong buildings still get 27 inliers at the median (right ones 51): archive prints share borders, mounts and repeated stonework. With 49 wrong candidates, one often beats the right one. On A3's shortlist the gains and losses cancel.
+- On T5, inliers alone hurt; the mix lifts hit@1 by about 5 points on both shortlists, and A3 + mix is the best T5 result so far (44.7 / 63.2).
+- The mix scores at or above inliers alone everywhere but A3 on T3 at hit@1 (one point lower). Its weight was not tuned.
+- 1.2 s per search is slow for a website; matching the 50 pairs in one batch would cut it.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -277,15 +340,23 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 138 | 29.7 [22.5, 37.7] | 35.5 [28.3, 43.5] | 40.6 [33.3, 49.3] | 33.6 [26.8, 41.4] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A4-siglip2-so400m-384 | google/siglip2-so400m-patch14-384 | 384 | head | 138 | 23.2 [16.7, 30.4] | 34.1 [26.8, 42.0] | 37.0 [29.0, 44.9] | 28.4 [22.3, 35.0] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 138 | 24.6 [18.1, 31.9] | 29.7 [23.2, 37.0] | 31.9 [24.6, 39.1] | 27.7 [21.1, 34.9] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 138 | 23.2 [15.9, 29.7] | 31.2 [23.2, 39.1] | 36.2 [29.0, 44.2] | 27.6 [21.1, 34.5] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 138 | 24.6 [18.1, 31.9] | 30.4 [23.2, 37.7] | 33.3 [25.4, 40.6] | 27.6 [20.8, 34.6] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 138 | 23.2 [16.7, 29.7] | 32.6 [25.4, 40.6] | 35.5 [28.3, 43.5] | 27.1 [20.8, 33.9] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 138 | 22.5 [15.9, 29.7] | 31.2 [23.2, 38.4] | 33.3 [26.1, 40.6] | 26.5 [20.0, 33.5] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 138 | 21.0 [14.5, 28.3] | 29.7 [22.5, 37.0] | 34.1 [26.8, 41.3] | 25.2 [18.8, 31.8] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 138 | 20.3 [13.8, 27.5] | 27.5 [20.3, 34.8] | 29.0 [21.7, 36.2] | 24.2 [17.5, 31.3] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 138 | 20.3 [14.5, 26.8] | 26.8 [19.6, 34.8] | 29.7 [22.5, 37.0] | 24.0 [18.1, 30.8] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322 | gmberton/MegaLoc | 322 | salad | 138 | 20.3 [14.5, 26.8] | 26.1 [18.8, 33.3] | 29.7 [22.5, 37.0] | 23.3 [17.3, 30.0] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-cls | facebook/dinov2-giant | 224 | cls | 138 | 15.2 [9.4, 21.0] | 24.6 [18.1, 31.9] | 29.7 [22.5, 37.0] | 20.0 [14.6, 25.8] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 138 | 15.2 [9.4, 21.7] | 23.9 [17.4, 31.2] | 26.8 [19.6, 34.1] | 19.8 [14.2, 25.8] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-cls | facebook/dinov2-large | 224 | cls | 138 | 14.5 [8.7, 20.3] | 21.0 [14.5, 28.3] | 25.4 [18.1, 32.6] | 18.0 [12.5, 23.7] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 138 | 13.0 [8.0, 18.8] | 22.5 [15.9, 29.7] | 24.6 [17.4, 31.9] | 17.8 [12.5, 23.4] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 138 | 13.0 [8.0, 18.8] | 21.0 [15.2, 27.5] | 26.1 [18.8, 32.6] | 17.1 [12.4, 22.5] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-gem | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | gem | 138 | 13.8 [8.7, 19.6] | 18.1 [12.3, 24.6] | 26.8 [19.6, 34.1] | 16.8 [11.8, 22.5] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 138 | 12.3 [7.2, 18.1] | 18.1 [12.3, 24.6] | 21.7 [15.2, 28.3] | 15.1 [10.2, 21.0] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 138 | 11.6 [6.5, 16.7] | 16.7 [10.9, 23.2] | 21.7 [15.2, 29.0] | 14.4 [9.8, 19.7] |
+| R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-gem | facebook/dinov2-giant | 224 | gem | 138 | 10.9 [5.8, 15.9] | 14.5 [9.4, 20.3] | 18.1 [12.3, 25.4] | 13.4 [8.6, 18.4] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-gem | facebook/dinov2-large | 224 | gem | 138 | 7.2 [3.6, 12.3] | 15.2 [9.4, 21.0] | 19.6 [13.8, 26.1] | 11.5 [7.4, 16.1] |
 | R1 | T1 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-gem | facebook/dinov2-giant | 224 | gem | 138 | 7.2 [3.6, 11.6] | 13.8 [8.0, 19.6] | 19.6 [13.8, 26.1] | 11.4 [7.4, 16.2] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322 | gmberton/MegaLoc | 322 | salad | 99 | 55.6 [46.5, 65.7] | 83.8 [76.7, 90.9] | 85.9 [78.8, 91.9] | 67.5 [59.8, 75.6] |
@@ -294,31 +365,47 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A4-siglip2-so400m-384 | google/siglip2-so400m-patch14-384 | 384 | head | 99 | 49.5 [39.4, 59.6] | 73.7 [64.6, 81.8] | 80.8 [72.7, 87.9] | 60.2 [52.2, 68.2] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 99 | 45.5 [35.4, 54.6] | 68.7 [59.6, 76.8] | 79.8 [70.7, 87.9] | 55.7 [47.6, 63.9] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 99 | 39.4 [30.3, 49.5] | 65.7 [56.6, 74.7] | 75.8 [67.7, 83.8] | 50.5 [42.9, 59.0] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-gem | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | gem | 99 | 35.4 [26.3, 45.5] | 63.6 [53.5, 72.7] | 70.7 [61.6, 79.8] | 48.5 [40.2, 57.3] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 99 | 37.4 [27.3, 47.5] | 55.6 [46.5, 65.7] | 62.6 [53.5, 71.7] | 46.5 [38.2, 55.2] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 99 | 34.3 [24.2, 43.4] | 56.6 [47.5, 66.7] | 61.6 [52.5, 70.7] | 44.5 [36.1, 52.9] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 99 | 31.3 [22.2, 40.4] | 53.5 [43.4, 63.6] | 65.7 [56.6, 74.7] | 43.1 [35.1, 51.2] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 99 | 32.3 [23.2, 41.4] | 50.5 [40.4, 59.6] | 59.6 [49.5, 68.7] | 42.1 [33.5, 50.5] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 99 | 30.3 [21.2, 39.4] | 51.5 [42.4, 61.6] | 60.6 [51.5, 69.7] | 41.3 [33.5, 49.4] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 99 | 30.3 [21.2, 39.4] | 51.5 [41.4, 60.6] | 55.6 [45.5, 64.6] | 40.7 [32.5, 49.1] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 99 | 30.3 [21.2, 38.4] | 50.5 [40.4, 59.6] | 60.6 [51.5, 69.7] | 40.6 [32.5, 48.4] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-gem | facebook/dinov2-giant | 224 | gem | 99 | 30.3 [21.2, 39.4] | 50.5 [41.4, 60.6] | 57.6 [48.5, 67.7] | 40.5 [32.7, 48.7] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 99 | 30.3 [21.2, 39.4] | 48.5 [39.4, 57.6] | 59.6 [50.5, 68.7] | 40.5 [32.1, 48.4] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-cls | facebook/dinov2-large | 224 | cls | 99 | 33.3 [24.2, 42.4] | 46.5 [36.4, 55.6] | 50.5 [40.4, 59.6] | 40.3 [31.4, 49.0] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 99 | 28.3 [19.2, 37.4] | 53.5 [44.4, 63.6] | 64.6 [55.6, 73.7] | 40.3 [32.7, 49.0] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 99 | 28.3 [20.2, 37.4] | 54.5 [45.5, 64.6] | 64.6 [55.6, 74.7] | 40.2 [32.7, 48.5] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 99 | 31.3 [23.2, 41.4] | 49.5 [40.4, 58.6] | 52.5 [43.4, 61.6] | 39.9 [31.8, 48.7] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 99 | 26.3 [17.2, 35.4] | 54.5 [44.4, 63.6] | 59.6 [49.5, 69.7] | 39.6 [31.8, 47.5] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-gem | facebook/dinov2-giant | 224 | gem | 99 | 27.3 [19.2, 36.4] | 51.5 [41.4, 61.6] | 56.6 [46.5, 65.7] | 38.5 [30.6, 47.1] |
 | R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-gem | facebook/dinov2-large | 224 | gem | 99 | 29.3 [20.2, 38.4] | 46.5 [37.4, 55.6] | 54.5 [45.5, 64.6] | 37.4 [29.4, 46.0] |
+| R1 | T3 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-cls | facebook/dinov2-giant | 224 | cls | 99 | 27.3 [19.2, 36.4] | 48.5 [39.4, 58.6] | 53.5 [44.4, 62.6] | 37.1 [29.4, 45.2] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A3-megaloc-322 | gmberton/MegaLoc | 322 | salad | 443 | 39.5 [35.0, 44.0] | 53.7 [49.0, 58.2] | 62.5 [58.5, 67.0] | 46.7 [42.5, 50.8] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-gem | facebook/dinov2-giant | 224 | gem | 443 | 34.1 [29.8, 38.4] | 49.0 [44.0, 54.0] | 58.2 [54.0, 63.0] | 42.0 [38.0, 46.0] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A9 | google/gemini-embedding-2 | 512 | api | 443 | 34.8 [30.5, 39.1] | 47.0 [42.2, 51.2] | 51.2 [46.3, 55.5] | 41.0 [36.9, 45.1] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-gem | facebook/dinov2-giant | 224 | gem | 443 | 32.3 [28.0, 36.6] | 45.4 [40.6, 50.1] | 51.0 [46.0, 55.8] | 39.1 [34.8, 43.2] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A7-embeddinggemma-2-512 | google/embeddinggemma-2 | 512 | head | 443 | 33.4 [29.1, 37.7] | 43.3 [38.6, 48.1] | 48.1 [43.3, 52.6] | 38.7 [34.7, 42.8] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 443 | 31.4 [26.9, 35.7] | 42.9 [37.9, 47.6] | 51.2 [46.5, 56.0] | 37.8 [33.6, 41.8] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A5-pe-core-l-336 | timm/PE-Core-L-14-336 | 336 | head | 443 | 30.7 [26.4, 34.8] | 44.2 [39.1, 49.0] | 49.7 [44.9, 54.2] | 37.5 [33.2, 41.3] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-gem | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | gem | 443 | 29.8 [25.5, 34.3] | 44.5 [40.0, 49.2] | 51.2 [46.5, 55.8] | 37.0 [33.1, 41.0] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A10a | voyageai/voyage-multimodal-3.5 | 512 | api | 443 | 32.1 [27.5, 36.6] | 40.6 [35.9, 45.1] | 43.6 [38.8, 48.1] | 36.5 [32.3, 40.7] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A4-siglip2-so400m-384 | google/siglip2-so400m-patch14-384 | 384 | head | 443 | 29.3 [25.3, 33.6] | 41.5 [36.8, 45.8] | 47.6 [42.9, 52.1] | 35.5 [31.5, 39.6] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 443 | 30.9 [26.2, 35.2] | 39.5 [34.5, 44.2] | 42.9 [37.9, 47.4] | 34.9 [30.5, 39.2] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-7b-256-nocrop-cls | facebook/dinov3-vit7b16-pretrain-lvd1689m | 256 | cls | 443 | 30.7 [26.4, 35.0] | 39.1 [34.3, 43.8] | 42.4 [37.7, 47.0] | 34.9 [30.6, 39.2] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 443 | 31.2 [26.9, 35.4] | 38.8 [33.9, 43.6] | 41.1 [36.1, 45.6] | 34.8 [30.5, 39.1] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-gem | facebook/dinov2-large | 224 | gem | 443 | 28.9 [24.8, 33.2] | 40.4 [35.7, 44.9] | 43.8 [39.1, 48.5] | 34.6 [30.7, 38.8] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-gem | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | gem | 443 | 27.8 [23.9, 31.8] | 41.5 [36.8, 46.3] | 46.3 [41.5, 51.0] | 34.1 [30.2, 38.1] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 443 | 29.8 [25.5, 34.1] | 38.6 [33.9, 43.1] | 42.7 [38.1, 47.0] | 33.7 [29.6, 37.9] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 443 | 27.3 [23.0, 31.8] | 40.2 [35.2, 44.7] | 45.4 [40.4, 49.9] | 33.7 [29.6, 37.8] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-gem | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | gem | 443 | 27.8 [23.9, 32.1] | 39.5 [34.8, 44.0] | 44.0 [39.3, 49.0] | 33.6 [29.7, 37.8] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-hplus-256-nocrop-cls | facebook/dinov3-vith16plus-pretrain-lvd1689m | 256 | cls | 443 | 29.1 [24.8, 33.6] | 38.6 [33.6, 43.3] | 41.5 [37.0, 46.5] | 33.5 [29.2, 37.8] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A2-dinov3-l-256-nocrop-cls | facebook/dinov3-vitl16-pretrain-lvd1689m | 256 | cls | 443 | 29.1 [24.8, 33.4] | 37.9 [33.4, 42.4] | 40.9 [36.1, 45.6] | 33.5 [29.4, 37.5] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-l-224-cls | facebook/dinov2-large | 224 | cls | 443 | 29.6 [25.3, 33.6] | 36.3 [31.6, 40.9] | 39.5 [34.8, 44.2] | 33.1 [28.8, 37.0] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 443 | 26.4 [22.3, 30.5] | 37.7 [33.0, 42.2] | 42.0 [37.2, 46.5] | 32.4 [28.4, 36.5] |
+| R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-cls | facebook/dinov2-giant | 224 | cls | 443 | 28.2 [23.9, 32.5] | 35.4 [31.2, 40.2] | 39.5 [34.8, 44.2] | 32.3 [28.2, 36.6] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 443 | 27.8 [23.5, 31.8] | 36.1 [31.8, 40.6] | 39.7 [34.8, 44.7] | 31.9 [27.8, 35.9] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 138 | 86.2 [80.4, 92.0] | 96.4 [93.5, 99.3] | 97.1 [94.2, 99.3] | 90.9 [87.0, 94.8] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 138 | 75.4 [68.1, 82.6] | 89.1 [84.1, 94.2] | 89.1 [84.1, 94.2] | 81.0 [75.3, 86.5] |
@@ -339,8 +426,16 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 138 | 29.7 [22.5, 37.7] | 37.0 [29.7, 44.9] | 41.3 [33.3, 49.3] | 33.8 [27.2, 41.4] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 138 | 29.0 [22.5, 36.2] | 36.2 [29.0, 44.2] | 42.0 [34.8, 50.0] | 33.5 [26.8, 40.8] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 28.3 [21.0, 35.5] | 34.8 [27.5, 42.8] | 44.2 [36.9, 52.2] | 33.3 [26.6, 40.1] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 138 | 25.4 [18.8, 32.6] | 37.7 [30.4, 45.7] | 46.4 [38.4, 53.6] | 32.1 [25.6, 39.0] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 138 | 23.2 [16.7, 30.4] | 34.1 [26.8, 42.0] | 44.9 [37.0, 52.9] | 29.6 [23.6, 36.2] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 138 | 21.0 [14.5, 27.5] | 26.8 [20.3, 34.8] | 29.7 [22.5, 37.7] | 24.3 [18.1, 30.7] |
+| R2 | T1 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-inliers | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 138 | 20.3 [13.8, 26.8] | 26.1 [19.6, 33.3] | 29.0 [22.5, 37.0] | 23.7 [17.4, 30.1] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 138 | 20.3 [14.5, 26.8] | 23.9 [17.4, 31.2] | 27.5 [20.3, 34.8] | 22.7 [16.7, 29.3] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 138 | 15.2 [9.4, 21.0] | 23.9 [17.4, 31.2] | 25.4 [18.1, 32.6] | 19.5 [14.0, 25.4] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 72.7 [63.6, 81.8] | 92.9 [87.9, 98.0] | 92.9 [87.9, 98.0] | 82.0 [75.6, 87.9] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 71.7 [62.6, 80.8] | 91.9 [85.9, 97.0] | 91.9 [85.9, 97.0] | 80.9 [74.1, 86.8] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 99 | 66.7 [57.6, 75.8] | 92.9 [87.9, 97.0] | 92.9 [87.9, 97.0] | 78.7 [72.0, 84.8] |
+| R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-inliers | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 99 | 67.7 [58.6, 77.8] | 90.9 [84.8, 96.0] | 90.9 [84.8, 96.0] | 78.0 [70.8, 84.6] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 60.6 [51.5, 70.7] | 83.8 [76.8, 90.9] | 89.9 [83.8, 96.0] | 71.5 [64.2, 79.3] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 99 | 59.6 [50.5, 69.7] | 81.8 [73.7, 89.9] | 88.9 [82.8, 94.9] | 70.0 [62.8, 78.1] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [46.5, 65.7] | 85.9 [78.8, 92.9] | 88.9 [81.8, 94.9] | 69.0 [62.0, 76.4] |
@@ -362,14 +457,17 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E5-A3 | gmberton/MegaLoc | 322 | salad | 99 | 30.3 [21.2, 40.4] | 78.8 [70.7, 86.9] | 79.8 [71.7, 87.9] | 51.3 [44.7, 59.0] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 99 | 4.0 [1.0, 8.1] | 15.2 [9.1, 22.2] | 22.2 [14.1, 31.3] | 10.0 [6.2, 14.5] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 99 | 1.0 [0.0, 3.0] | 5.1 [1.0, 9.1] | 9.1 [4.0, 14.1] | 4.6 [2.2, 7.5] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 443 | 44.7 [40.2, 49.2] | 56.7 [51.9, 61.2] | 63.2 [58.9, 67.5] | 51.1 [46.9, 55.4] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.4 [35.7, 44.7] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.3 [43.0, 51.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.4, 44.5] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.1 [42.8, 51.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.7, 44.7] | 54.4 [49.9, 58.9] | 60.5 [56.0, 64.8] | 47.1 [42.9, 50.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.5 [35.0, 44.0] | 53.7 [49.0, 58.2] | 62.1 [57.8, 66.6] | 46.9 [42.8, 51.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A3-alpha3 | gmberton/MegaLoc | 322 | salad | 443 | 38.4 [34.1, 42.7] | 51.7 [47.2, 56.2] | 56.9 [52.1, 61.4] | 45.1 [41.0, 49.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 37.9 [33.2, 42.4] | 49.9 [45.4, 54.4] | 54.9 [50.3, 59.1] | 43.8 [39.5, 47.8] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 443 | 37.9 [33.4, 42.4] | 47.9 [42.9, 52.4] | 50.3 [45.6, 54.6] | 42.8 [38.4, 47.0] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A9+A3 | google/gemini-embedding-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.5 [30.2, 38.8] | 50.3 [45.4, 54.9] | 55.8 [51.0, 60.3] | 42.3 [38.3, 46.3] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.7 [30.9, 40.0] | 47.6 [42.9, 52.2] | 52.8 [48.3, 57.3] | 41.9 [37.7, 46.0] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-inliers | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 443 | 35.2 [30.7, 39.7] | 47.2 [42.4, 51.7] | 54.0 [49.2, 58.5] | 41.5 [37.3, 45.6] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 34.8 [30.5, 39.1] | 47.6 [43.1, 52.1] | 51.9 [47.6, 56.7] | 41.1 [36.9, 45.1] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A3+A5 | google/embeddinggemma-2 + gmberton/MegaLoc + timm/PE-Core-L-14-336 | 512 | fusion | 443 | 35.0 [30.5, 39.3] | 46.3 [41.5, 51.0] | 52.6 [48.1, 57.1] | 41.0 [36.9, 45.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 47.9 [43.1, 52.6] | 53.7 [49.2, 58.5] | 40.7 [36.7, 44.6] |
@@ -378,6 +476,7 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-G1-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.4 [29.1, 37.5] | 45.8 [40.9, 50.1] | 51.0 [46.3, 55.3] | 39.1 [34.8, 42.9] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G1-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 45.1 [40.4, 49.7] | 49.0 [44.2, 53.5] | 39.1 [34.9, 43.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G2-A7+A4 | google/embeddinggemma-2 + google/siglip2-so400m-patch14-384 | 512 | fusion | 443 | 32.5 [28.0, 36.8] | 43.8 [39.3, 48.5] | 48.1 [43.6, 52.6] | 38.1 [33.8, 42.3] |
+| R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 443 | 31.8 [27.5, 36.6] | 41.8 [37.0, 46.3] | 45.4 [40.6, 49.7] | 36.8 [32.5, 41.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7-alpha3 | google/embeddinggemma-2 | 512 | head | 443 | 26.6 [22.6, 30.7] | 41.8 [37.0, 46.3] | 43.8 [39.1, 48.3] | 33.7 [29.9, 37.6] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-qwen3-vl-30b-a3b | google/embeddinggemma-2 + qwen/qwen3-vl-30b-a3b-instruct | 512 | fusion | 443 | 25.7 [21.9, 29.6] | 40.2 [35.7, 44.7] | 47.0 [42.2, 51.5] | 33.5 [29.6, 37.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E5-A7 | google/embeddinggemma-2 | 512 | head | 443 | 22.6 [18.7, 26.4] | 41.5 [36.8, 46.0] | 43.3 [38.6, 47.9] | 31.2 [27.4, 34.9] |
