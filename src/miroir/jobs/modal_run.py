@@ -44,6 +44,7 @@ from miroir.jobs.modal_spec import (
     FILL_CONTAINERS,
     FILL_MACHINE,
     FILL_TIMEOUT_S,
+    OPTIONS,
     R0_MACHINE,
     R0_OPTIONS,
     R0_TIMEOUT_S,
@@ -226,7 +227,7 @@ class ModalRunner:
             self.budget,
             self.ledger,
             self._key_usage,
-            load_modal_probe(self.settings.probe_path(opt.id)),
+            self.probe_for(opt),
             option=opt.id,
             model=opt.model,
             resolution=opt.resolution,
@@ -281,6 +282,22 @@ class ModalRunner:
         written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
         checkpoint.remove()
         return written
+
+    def probe_for(self, opt: ModalOption) -> ModalProbe | None:
+        """The option's probe, else one of an option with the same model and size.
+
+        Pooling (CLS or GeM) does not change the cost, so one probe serves both.
+        """
+        own = load_modal_probe(self.settings.probe_path(opt.id))
+        if own is not None:
+            return own
+        for other in OPTIONS.values():
+            if other.model == opt.model and other.resolution == opt.resolution:
+                found = load_modal_probe(self.settings.probe_path(other.id))
+                if found is not None:
+                    logger.info("%s: using the probe of %s (same model and size)", opt.id, other.id)
+                    return found
+        return None
 
     def fill_images(self, gallery: str) -> dict[str, int]:
         """Fetch a gallery's images once into the Modal image volume, several containers at once.

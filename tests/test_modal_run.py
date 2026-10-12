@@ -237,3 +237,11 @@ def test_fill_images_sends_the_gallery_once_and_logs_its_cost(built: Settings) -
 def test_dino_options_ask_for_the_bigger_machine() -> None:
     assert option("A2-dinov3-7b-256-cls").machine.memory_gib == 32
     assert option(GEMMA).machine == L4
+
+
+def test_cls_and_gem_share_a_probe(built: Settings) -> None:
+    write_gallery(built, "g", image_ids(built, publishable=True))
+    r, calls = runner(built)
+    r.probe("A1-dinov2-l-224-cls", "g")
+    r.embed_gallery("A1-dinov2-l-224-gem", "g")
+    assert [c[0] for c in calls.calls] == ["A1-dinov2-l-224-cls", "A1-dinov2-l-224-gem"]
