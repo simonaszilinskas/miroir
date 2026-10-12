@@ -10,7 +10,7 @@ Finding the right heritage record from a photo is a research problem before it i
 2. **Simplest wins a tie.** When two options' error bars overlap, keep the cheaper, faster, open one.
 3. **Same queries for every option.** Comparisons are paired: every option answers the same queries against the same index.
 4. **The sealed half stays sealed.** We tune on the tuning half only and open the sealed half once, in week 6.
-5. **Paid runs have a cap.** Before running a paid model on the full index, measure its cost on 100 images. If the full run would cost more than €200, ask the project lead first.
+5. **Paid runs have a cap.** All OpenRouter spend together may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` refuses a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is the larger of our own log and what OpenRouter says the key has spent. Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
 6. **Every result is committed.** Each run writes `eval/results/<round>/<step>-<option>.json`, and `docs/results.md` holds the summary table.
 
 ## 2. Options by step

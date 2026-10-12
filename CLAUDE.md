@@ -48,7 +48,7 @@ uv run miroir eval summary     # rebuild the results table in docs/results.md
 5. Every experiment result goes to `eval/results/<round>/<step>-<option>.json`
    (`config.eval_result_path`), and is committed.
 6. No network in unit tests (pytest runs with `--disable-socket`).
-7. Paid model runs: measure cost on 100 images first; ask before any run over €200.
+7. Paid model runs: probe 100 images first. All OpenRouter spend together stays under $50 (with $5 kept back); `miroir embed openrouter` enforces it. Ask before raising the cap.
 8. Only `publishable` records' images may go to outside model services.
 
 ## Before you commit
