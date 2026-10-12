@@ -11,7 +11,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from miroir.records.model import Collection
@@ -53,6 +53,18 @@ MODAL_BENCHMARKS_MOUNT = "/benchmarks"
 #: modal-images`) so model runs read images there instead of from POP.
 MODAL_IMAGES_MOUNT = "/images"
 
+#: Volume path, in the search app's containers, of the web index bundles (`miroir web upload`).
+MODAL_WEB_INDEX_MOUNT = "/web-index"
+
+#: The index the prototype serves (`miroir web`): a bundle name from `miroir.web.bundle.INDEXES`.
+#: Switching index is this one line, then `miroir web build-index`, `upload` and `deploy`.
+WEB_INDEX = "screening-v2"
+
+#: The `.env` file settings are read from. `miroir web secret` adds the app password to it.
+ENV_FILE = REPO_ROOT / ".env"
+#: The line of `.env` that holds the website's shared password.
+ENV_PASSWORD_KEY = "MIROIR_APP_PASSWORD"  # noqa: S105 (a variable name, not a value)
+
 #: Where the Modal client keeps its token after `modal token new`.
 _MODAL_TOML = Path.home() / ".modal.toml"
 
@@ -71,9 +83,7 @@ Half = Literal["tune", "sealed"]
 class Settings(BaseSettings):
     """Values read from the environment (or `.env`), prefixed `MIROIR_`."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="MIROIR_", env_file=REPO_ROOT / ".env", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_prefix="MIROIR_", env_file=ENV_FILE, extra="ignore")
 
     data_dir: Path = Path("~/miroir-data")
     exports_dir: Path = Path("/Users/simonaszilinskas/Downloads/exports")
@@ -97,6 +107,16 @@ class Settings(BaseSettings):
     openrouter_budget_usd: float = 50.0
     openrouter_reserve_usd: float = 5.0
     probe_budget_usd: float = 2.0
+
+    # The prototype website (`miroir web`): one shared password, and the key that signs session
+    # cookies. On the Mac they come from `.env` (MIROIR_...); in Modal from the `miroir-app`
+    # secret (APP_PASSWORD, SESSION_SECRET).
+    app_password: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MIROIR_APP_PASSWORD", "APP_PASSWORD")
+    )
+    session_secret: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MIROIR_SESSION_SECRET", "SESSION_SECRET")
+    )
 
     #: Cap on the resized-image cache, in megabytes. Oldest files go first.
     image_cache_mb: int = 1024
@@ -200,6 +220,13 @@ class Settings(BaseSettings):
     def vectors_path(self, run: str) -> Path:
         _check_name(run)
         return self.vectors_dir / run
+
+    # --- the prototype website ------------------------------------------------
+
+    def web_index_dir(self, name: str) -> Path:
+        """One web index bundle, built on the Mac before it is uploaded to Modal."""
+        _check_name(name)
+        return self.data_root / "web" / name
 
     # --- test sets (technical spec §7) ----------------------------------------
 
