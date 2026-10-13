@@ -168,6 +168,15 @@
               <li><button class="fr-btn fr-btn--tertiary fr-btn--icon-left fr-icon-close-line" id="clear-box" hidden>Effacer le cadre</button></li>
               <li><label class="fr-btn fr-btn--tertiary-no-outline fr-btn--icon-left fr-icon-image-line" for="upload-input">Changer de photo</label></li>
             </ul>
+            <p class="fr-text--sm fr-icon-map-pin-2-line miroir-position" id="photo-position" hidden>
+              <strong>Position de la photo utilisée</strong> : Miroir met en avant ce qui se trouve près de l’endroit où elle a été prise.
+              <button class="fr-link fr-link--sm" type="button" id="photo-position-off">Ne pas l’utiliser</button>
+            </p>
+            <div class="fr-toggle fr-mt-2w" id="position-toggle">
+              <input type="checkbox" class="fr-toggle__input" id="use-position" aria-describedby="use-position-hint">
+              <label class="fr-toggle__label" for="use-position">Utiliser ma position</label>
+              <p class="fr-hint-text" id="use-position-hint">Devant un monument : Miroir met en avant ce qui se trouve près de vous. Votre téléphone vous demandera l’autorisation. La position sert à cette recherche, elle n’est pas gardée.</p>
+            </div>
           </div>
         </div>
       </div>

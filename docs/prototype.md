@@ -12,8 +12,9 @@ What a person can do:
 
 1. **Home.** Take a photo (the phone's camera opens), upload an image, or describe what they see in words. Six example photos run a search in one tap: two monuments and two museum objects photographed by Wikimedia Commons users, a drawing, and a 1940s photo of a Jeu de Paume room where they draw a box around one tapestry.
 2. **Photo.** Search the whole photo, or draw a box with a finger or the mouse to search one part (a painting on a wall, a detail). The box is cut out in the browser.
-3. **Results.** One card per building or object, best first: the image that matches best (marked "Correspond : revers", "détail"… when it is not the record's main image), title, place, collection, a link to POP. Mémoire photos of one building form one card ("12 photos"). Filters (collection, region, département, domain, period) narrow the search before ranking. Words refine a photo search ("à Toulouse"). The page shows, quietly, whether it took the photo for a building or an object. When the best result is not close enough, it says **"Pas de correspondance sûre dans les collections"** and lists what the photo "ressemble à".
-4. **Record.** Every photo of the building or object, key facts, the description, and links to the full POP records.
+3. **Position (step H2).** A photo that carries GPS in its EXIF uses it on its own: the photo screen says "Position de la photo utilisée" with a "Ne pas l'utiliser" link. Otherwise a toggle, "Utiliser ma position", asks the browser (and so the visitor) for the position on the tap, not before. Buildings and objects near that position rank higher (a soft prior: bonus `exp(−d / 1 km)` on the fused score); far ones stay, so nothing breaks away from anything known. The results show "Près de vous" or "Près du lieu de la photo". The position goes with that one search; it is not logged or stored. On T2 phone photos of buildings, the right building moves from 32% to 97% in the top 10 (results.md, H2). Phones often strip GPS from a photo a web page reads, so the toggle is the main way in.
+4. **Results.** One card per building or object, best first: the image that matches best (marked "Correspond : revers", "détail"… when it is not the record's main image), title, place, collection, a link to POP. Mémoire photos of one building form one card ("12 photos"). Filters (collection, region, département, domain, period) narrow the search before ranking. Words refine a photo search ("à Toulouse"). The page shows, quietly, whether it took the photo for a building or an object. When the best result is not close enough, it says **"Pas de correspondance sûre dans les collections"** and lists what the photo "ressemble à".
+5. **Record.** Every photo of the building or object, key facts, the description, and links to the full POP records.
 
 Light and dark themes: "Affichage" in the header or footer.
 
@@ -58,6 +59,8 @@ Timings: a warm search takes about 200 ms on the GPU and about 0.9 s from a brow
 
 ## Run and deploy
 
+**Position (H2), not yet deployed (2026-10-13).** The code is on main; the next deploy picks it up once the bundle holds `places.npz` (one position per entity). `miroir web build-index` writes it when `~/miroir-data/places.parquet` exists (`miroir geo places`, about 30 s, already run). To add it to a built bundle without rebuilding: `miroir web places --index full --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
+
 ```sh
 uv sync --extra api
 uv run miroir web build-index   # NumPy on the Mac, about 3 minutes for the full index: writes ~/miroir-data/web/<index>/
@@ -75,6 +78,8 @@ To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `WEB_IND
 An L4 with 4 CPUs and 16 GB costs about $1.12 an hour while awake. Each wake-up costs about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Nothing runs when nobody uses the site. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
 
 ## Known limits
+
+- **Position.** Rose Valland works have no place (looted and moved), and Mémoire objects sit at their commune's centre, so with the position on they rank below precise neighbours. The visitor can turn the position off.
 
 - **Index.** The 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing.
 - **Phone photos of buildings.** T2: the right building is in the top 10 for a fifth of photos, and none reaches the "sure" bar. A3 does better than A7 on these photos (31.0 against 21.9 hit@10), but the router sends buildings to A7, which wins on archive photos; a third bucket for colour photos of buildings is being tuned.

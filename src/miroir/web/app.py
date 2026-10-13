@@ -41,6 +41,7 @@ from miroir.web.catalog import (
 )
 from miroir.web.engine import MAX_TEXT, SearchRequest, SearchResponse
 from miroir.web.examples import EXAMPLES
+from miroir.web.nearby import Position
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,18 @@ class FiltersBody(BaseModel):
         )
 
 
+class PositionBody(BaseModel):
+    """Where the person stands, sent only when they turned on "Utiliser ma position"."""
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class SearchBody(BaseModel):
     image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
     text: str = Field(default="", max_length=MAX_TEXT)
     filters: FiltersBody = Field(default_factory=FiltersBody)
+    position: PositionBody | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +320,12 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
     image = _decode_photo(body.image)
     if image is None and not body.text.strip():
         raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
-    request = SearchRequest(image=image, text=body.text, filters=body.filters.filters())
+    position = (
+        None if body.position is None else Position(body.position.latitude, body.position.longitude)
+    )
+    request = SearchRequest(
+        image=image, text=body.text, filters=body.filters.filters(), position=position
+    )
     start = time.monotonic()
     # Modal answers a request still open after 150 s with a redirect that loses the body, so a
     # search waiting on a starting GPU container gives up first with 503 and the page retries.

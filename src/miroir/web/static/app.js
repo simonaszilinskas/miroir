@@ -2,6 +2,8 @@
 // Plain modules, no build step. The DSFR script handles the header menu, modals, accordions
 // and the theme switch; this file handles the views and talks to /api.
 
+import { exifPosition } from './exif.js';
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -25,6 +27,7 @@ const state = {
   facets: null,
   lastWarm: 0,
   searching: false,
+  photoPosition: null, // where the current photo was taken (its EXIF GPS), or null
 };
 
 function emptyFilters() {
@@ -194,7 +197,7 @@ for (const input of [$('#camera-input'), $('#upload-input')]) {
     input.value = '';
     if (!file) return;
     try {
-      await usePhoto(file);
+      await usePhoto(file, await exifPosition(file));
       go('#/photo');
     } catch {
       alertHome('Cette image n’a pas pu être ouverte. Essayez une photo JPEG ou PNG.');
@@ -258,7 +261,9 @@ async function useExample(example) {
 
 // --- photo: load, draw a box, crop -----------------------------------------------------------
 
-async function usePhoto(blob) {
+async function usePhoto(blob, position = null) {
+  state.photoPosition = position;
+  showPhotoPosition();
   const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   const scale = Math.min(1, KEEP_SIDE / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
@@ -419,10 +424,14 @@ async function runSearch({ image = null, text = '' }) {
   renderQuery(null);
   renderWaiting();
   try {
+    // Asked anew for each photo search while the toggle is on; never kept after it.
+    const position = image ? await searchPosition() : null;
     let response = null;
     for (let attempt = 0; ; attempt += 1) {
       try {
-        response = await api('search', { method: 'POST', body: { image, text, filters: state.filters } });
+        const body = { image, text, filters: state.filters };
+        if (position) body.position = position;
+        response = await api('search', { method: 'POST', body });
         break;
       } catch (err) {
         // 503: the GPU container is still starting; the server asks to try again.
@@ -445,6 +454,61 @@ async function runSearch({ image = null, text = '' }) {
   }
 }
 
+// --- position (H2): only when the person turns it on, only for the request ------------------
+
+/** Where the browser says the person stands, or null when refused or unavailable. */
+function currentPosition() {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (found) => resolve({ latitude: found.coords.latitude, longitude: found.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  });
+}
+
+/** The position a photo search uses: the photo's own, else the person's if they turned it on. */
+async function searchPosition() {
+  if (state.photoPosition) {
+    state.positionSource = 'photo';
+    return state.photoPosition;
+  }
+  state.positionSource = 'device';
+  return $('#use-position').checked ? currentPosition() : null;
+}
+
+/** The note "Position de la photo utilisée" replaces the toggle while the photo has one. */
+function showPhotoPosition() {
+  const has = Boolean(state.photoPosition);
+  $('#photo-position').hidden = !has;
+  $('#position-toggle').hidden = has;
+}
+
+$('#photo-position-off').addEventListener('click', () => {
+  state.photoPosition = null;
+  showPhotoPosition();
+});
+
+$('#use-position').addEventListener('change', async (event) => {
+  const toggle = event.target;
+  const hint = $('#use-position-hint');
+  if (!toggle.checked) {
+    hint.textContent = POSITION_HINT;
+    return;
+  }
+  hint.textContent = 'Recherche de votre position…';
+  // The browser asks permission here, on the tap, not before.
+  const found = await currentPosition();
+  if (!found) {
+    toggle.checked = false;
+    hint.textContent = 'Position indisponible. Autorisez-la dans le navigateur, ou cherchez sans.';
+    return;
+  }
+  hint.textContent = POSITION_HINT;
+});
+const POSITION_HINT = $('#use-position-hint').textContent;
+
 function rerun() {
   if (state.lastQuery) runSearch(state.lastQuery);
 }
@@ -460,6 +524,18 @@ function renderQuery(response) {
       class: `fr-tag fr-tag--sm ${response.guessed_type === 'building' ? 'fr-icon-building-line' : 'fr-icon-palette-line'} fr-tag--icon-left`,
       title: 'Ce que Miroir pense voir : il pèse ses deux modèles en conséquence',
       text: kind,
+    }));
+  }
+  if (response?.nearby != null) {
+    const km = String(response.near_km).replace('.', ',');
+    meta.append(el('span', {
+      class: 'fr-tag fr-tag--sm fr-icon-map-pin-2-line fr-tag--icon-left',
+      title: response.nearby
+        ? `Les monuments et œuvres les plus proches passent devant (${response.nearby} à moins de ${km} km)`
+        : `Rien de connu à moins de ${km} km : résultats de toute la base`,
+      text: response.nearby
+        ? (state.positionSource === 'photo' ? 'Près du lieu de la photo' : 'Près de vous')
+        : `Rien de connu à moins de ${km} km`,
     }));
   }
   const title = photo

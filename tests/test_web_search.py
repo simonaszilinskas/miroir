@@ -7,10 +7,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from miroir.config import Settings
+from miroir.geo.model import Place, PlaceSource
+from miroir.records.store import write_places as write_places_parquet
 from miroir.web import facets, ranking
-from miroir.web.bundle import cutoff_for
-from miroir.web.catalog import Filters
-from miroir.web.engine import SearchRequest, prepare_photo
+from miroir.web.bundle import add_places, cutoff_for
+from miroir.web.catalog import CATALOG_FILE, CatalogData, Filters, write_catalog
+from miroir.web.engine import Engine, SearchRequest, prepare_photo
+from miroir.web.nearby import NEAR_KM, PLACES_FILE, Position, read_places, write_places
 from miroir.web.routing import Bucket, PhotoType, Routing
 from tests import web_helpers as h
 
@@ -235,3 +239,72 @@ def test_a_guess_saved_by_index_guess_reads_too(tmp_path: Path) -> None:
     guess = read_guess(path)
     assert guess.bias == pytest.approx(-2.0)
     assert guess.photo_type(np.asarray([3.0, 0.0, 0.0], dtype=np.float32))[0] is PhotoType.BUILDING
+
+
+# --- position (H2) ---------------------------------------------------------------------------
+
+
+def _placed_engine(tmp_path: Path) -> Engine:
+    engine, _ = h.engine(building=False)
+    path = tmp_path / PLACES_FILE
+    write_places(path, engine.catalog.entity_ids, {"PA1": (43.6, 1.44), "OBJ1": (49.44, 1.09)})
+    places = read_places(path, engine.catalog.entity_ids)
+    assert places is not None
+    return Engine(
+        catalog=engine.catalog,
+        routing=engine.routing,
+        guess=engine.guess,
+        encoders=engine.encoders,
+        gallery=engine.gallery,
+        places=places,
+    )
+
+
+def test_a_position_lifts_what_is_near(tmp_path: Path) -> None:
+    engine = _placed_engine(tmp_path)
+    toulouse = Position(43.601, 1.441)  # about 100 m from PA1
+    plain = engine.search(SearchRequest(image=h.photo(130)))
+    assert plain.cards[0].entity_id == "OBJ1"  # the photo looks like OBJ1, in Rouen
+    near = engine.search(SearchRequest(image=h.photo(130), position=toulouse))
+    assert near.cards[0].entity_id == "PA1"
+    assert len(near.cards) == 3  # nothing is removed; OBJ2 (no place) gets no bonus
+    assert near.nearby == 1
+    assert near.near_km == NEAR_KM
+
+
+def test_with_nothing_near_the_ranking_is_unchanged(tmp_path: Path) -> None:
+    engine = _placed_engine(tmp_path)
+    plain = engine.search(SearchRequest(image=h.photo(130)))
+    far = engine.search(SearchRequest(image=h.photo(130), position=Position(-33.9, 151.2)))
+    assert far.nearby == 0
+    assert [c.entity_id for c in far.cards] == [c.entity_id for c in plain.cards]
+
+
+def test_without_a_position_nothing_changes(tmp_path: Path) -> None:
+    engine = _placed_engine(tmp_path)
+    response = engine.search(SearchRequest(image=h.photo(130)))
+    assert response.nearby is None
+    assert response.cards[0].entity_id == "OBJ1"
+
+
+def test_a_bundle_without_places_ignores_positions(tmp_path: Path) -> None:
+    assert read_places(tmp_path / PLACES_FILE, ("PA1",)) is None
+    engine, _ = h.engine(building=False)
+    response = engine.search(SearchRequest(image=h.photo(130), position=Position(43.6, 1.44)))
+    assert response.nearby is None
+    assert len(response.cards) == 3
+
+
+def test_places_go_into_a_built_bundle(tmp_path: Path, settings: Settings) -> None:
+    folder = tmp_path / "bundle"
+    folder.mkdir()
+    catalog = h.catalog()
+    write_catalog(folder / CATALOG_FILE, CatalogData(catalog.images, catalog.records))
+    write_places_parquet(
+        [Place("PA1", 43.6, 1.44, PlaceSource.MERIMEE), Place("XX", 0.1, 0.1, PlaceSource.COMMUNE)],
+        settings.places_parquet,
+    )
+    assert add_places(settings, folder) == 1
+    places = read_places(folder / PLACES_FILE, catalog.entity_ids)
+    assert places is not None
+    assert places.near(Position(43.6, 1.44)).tolist() == [False, False, True]  # OBJ1, OBJ2, PA1

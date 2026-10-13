@@ -174,3 +174,14 @@ def test_generated_passwords_are_long_and_differ() -> None:
     first, second = auth.new_password(), auth.new_password()
     assert first != second
     assert len(first.replace("-", "")) == 12
+
+
+def test_a_position_reaches_the_search_and_is_checked(client: TestClient) -> None:
+    login(client)
+    image = base64.b64encode(h.photo(130)).decode()
+    body = {"image": image, "position": {"latitude": 43.6, "longitude": 1.44}}
+    answer = client.post("/api/search", json=body)
+    assert answer.status_code == 200
+    assert answer.json()["nearby"] is None  # the test engine holds no places
+    body["position"] = {"latitude": 123.0, "longitude": 1.44}
+    assert client.post("/api/search", json=body).status_code == 422

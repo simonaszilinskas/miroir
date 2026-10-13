@@ -37,6 +37,22 @@ def upload_index(settings: Settings, name: str = WEB_INDEX) -> int:
     return size
 
 
+def upload_file(settings: Settings, name: str, file_name: str) -> int:
+    """Copy one file of a built bundle to the index volume (e.g. `places.npz` alone)."""
+    import modal  # noqa: PLC0415
+
+    from miroir.web.modal_app import INDEX_VOLUME  # noqa: PLC0415
+
+    path = settings.web_index_dir(name) / file_name
+    volume = modal.Volume.from_name(INDEX_VOLUME, create_if_missing=True)
+    with volume.batch_upload(force=True) as batch:
+        batch.put_file(path, f"/{name}/{file_name}")  # pyright: ignore[reportUnknownMemberType]
+    logger.info(
+        "uploaded %s (%.1f MB) to %s:/%s", file_name, path.stat().st_size / 1e6, INDEX_VOLUME, name
+    )
+    return path.stat().st_size
+
+
 def set_secret(*, rotate: bool = False, env_file: Path = ENV_FILE) -> bool:
     """Make sure `.env` and the Modal secret hold the same password. True when it changed.
 

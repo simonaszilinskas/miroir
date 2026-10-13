@@ -36,7 +36,7 @@ from miroir.eval import router
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.records.model import Record
-from miroir.records.store import read_commons, read_records
+from miroir.records.store import read_commons, read_places, read_records
 from miroir.web import ranking
 from miroir.web.catalog import (
     CATALOG_FILE,
@@ -45,9 +45,11 @@ from miroir.web.catalog import (
     CatalogImage,
     CatalogRecord,
     Source,
+    read_catalog,
     write_catalog,
 )
 from miroir.web.engine import A3_FILE, A3_PROJECTION_FILE, A7_FILE, Projection, read_projection
+from miroir.web.nearby import PLACES_FILE, write_places
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
@@ -156,6 +158,9 @@ def build_index(settings: Settings, name: str) -> Path:
         catalog.entity_count,
     )
 
+    if settings.places_parquet.exists():  # step H2: `miroir geo places`
+        add_places(settings, out, catalog)
+
     entity_of = {i.image_id: i.entity_id for i in data.images}
     if spec.saved_guess is not None:
         guess = read_guess(settings.index_dir / spec.saved_guess)
@@ -186,6 +191,15 @@ def build_index(settings: Settings, name: str) -> Path:
     }
     (out / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2) + "\n")
     return out
+
+
+def add_places(settings: Settings, folder: Path, catalog: Catalog | None = None) -> int:
+    """Write `places.npz` into a bundle, for its catalog's entities. Returns how many are placed."""
+    catalog = catalog or read_catalog(folder / CATALOG_FILE)
+    placed = {p.entity_id: (p.latitude, p.longitude) for p in read_places(settings.places_parquet)}
+    count = write_places(folder / PLACES_FILE, catalog.entity_ids, placed)
+    logger.info("places: %d of %d entities placed", count, catalog.entity_count)
+    return count
 
 
 def catalog_data(

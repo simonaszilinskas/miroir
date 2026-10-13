@@ -1052,6 +1052,26 @@ def web_upload(index: WebIndex = WEB_INDEX) -> None:
     typer.echo(f"uploaded {size / 1e6:.0f} MB")
 
 
+@web_app.command("places")
+def web_places(
+    index: WebIndex = WEB_INDEX,
+    *,
+    upload: Annotated[bool, typer.Option(help="Also copy places.npz alone to the volume.")] = False,
+) -> None:
+    """Add entity positions (`miroir geo places`) to a built bundle, without rebuilding it."""
+    from miroir.web.bundle import add_places  # noqa: PLC0415
+    from miroir.web.nearby import PLACES_FILE  # noqa: PLC0415
+
+    settings = get_settings()
+    count = add_places(settings, settings.web_index_dir(index))
+    typer.echo(f"{index}: {count:,} entities placed")
+    if upload:
+        from miroir.web.ops import upload_file  # noqa: PLC0415
+
+        upload_file(settings, index, PLACES_FILE)
+        typer.echo(f"{PLACES_FILE} uploaded; `miroir web deploy` makes the site read it")
+
+
 @web_app.command("secret")
 def web_secret(
     *,

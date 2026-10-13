@@ -35,6 +35,7 @@ from miroir.web.catalog import (
     display_url,
     read_catalog,
 )
+from miroir.web.nearby import NEAR_KM, PLACES_FILE, EntityPlaces, Position, read_places
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
@@ -100,6 +101,8 @@ class SearchRequest:
     text: str = ""
     filters: Filters = field(default_factory=Filters)
     limit: int = RESULTS
+    position: Position | None = None
+    """Where the person stands, when they chose to share it (step H2). Used, never kept."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +140,9 @@ class SearchResponse:
     """The photo's chroma spread (`images.colour`): near 0 for black and white."""
     cards: tuple[Card, ...]
     timings_ms: dict[str, float] = field(default_factory=dict[str, float])
+    nearby: int | None = None
+    """With a position: entities known within `near_km` of it (the near ones rank higher)."""
+    near_km: float | None = None
 
 
 class Engine:
@@ -149,8 +155,10 @@ class Engine:
         encoders: Encoders,
         gallery: GalleryVectors,
         projection: Projection | None = None,
+        places: EntityPlaces | None = None,
     ) -> None:
         self.catalog = catalog
+        self.places = places
         self.routing = routing
         self.guess = guess
         self.encoders = encoders
@@ -186,6 +194,10 @@ class Engine:
         assert per_image is not None
         tick = time.monotonic()
         fused = ranking.fuse(signals)
+        nearby = None
+        if request.position is not None and self.places is not None:
+            fused = fused + self.places.prior(request.position)  # -inf (filtered out) stays
+            nearby = int(self.places.near(request.position).sum())
         top = ranking.top_entities(fused, max(1, min(request.limit, 100)))
         cards = tuple(
             card
@@ -207,6 +219,8 @@ class Engine:
             chroma=None if photo is None else photo.chroma,
             cards=cards,
             timings_ms=timings,
+            nearby=nearby,
+            near_km=None if nearby is None else NEAR_KM,
         )
 
     # --- the two kinds of query ------------------------------------------------------------
@@ -391,6 +405,7 @@ def load_engine(directory: Path, encoders: Encoders, gallery: GalleryVectors) ->
         encoders=encoders,
         gallery=gallery,
         projection=read_projection(directory),
+        places=read_places(directory / PLACES_FILE, catalog.entity_ids),
     )
 
 
