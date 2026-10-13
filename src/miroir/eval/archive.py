@@ -53,6 +53,8 @@ Floats = NDArray[np.float32]
 A7 = "A7-embeddinggemma-2-512"
 A3 = "A3-megaloc-322"
 PHOTO_VECTORS = "photo-vectors.npz"
+#: Cosines of those photos with every image of the index, float16, computed once.
+COSINES = "photo-cosines.npz"
 #: Entities ranked per query; a right entity further down counts as a miss.
 TOP = 100
 ROUND = "R3"
@@ -243,23 +245,36 @@ class _Captions:
 
 
 class _NumpyGallery:
-    """Cosines over the bundle's stored vectors, cached per query vector."""
+    """Cosines over the bundle's stored vectors. The photo queries' cosines are computed in
+    one pass over the gallery (`preload`) and kept on disk; words are computed when asked."""
 
     def __init__(self, a7: NDArray[np.float16], a3: NDArray[np.float16]) -> None:
         self._a7 = a7
         self._a3 = a3
         self._cache: dict[tuple[str, bytes], Floats] = {}
 
+    @staticmethod
+    def _key(name: str, query: Floats) -> tuple[str, bytes]:
+        return name, np.asarray(query, dtype=np.float16).tobytes()
+
+    def preload(self, path: Path, a7: Floats, a3: Floats) -> None:
+        """Cosines of every photo query (unit rows) with every image, from `path` when it
+        holds them, else computed and saved there."""
+        if path.exists():
+            with np.load(path) as data:
+                c7, c3 = data["a7"], data["a3"]
+        else:
+            c7 = _batch_cosines(self._a7, a7)
+            c3 = _batch_cosines(self._a3, a3)
+            np.savez(path, a7=c7, a3=c3)
+        for j in range(len(a7)):
+            self._cache[self._key("a7", a7[j])] = np.asarray(c7[j], dtype=np.float32)
+            self._cache[self._key("a3", a3[j])] = np.asarray(c3[j], dtype=np.float32)
+
     def _cosines(self, name: str, matrix: NDArray[np.float16], query: Floats) -> Floats:
-        q = np.asarray(query, dtype=np.float16)
-        key = (name, q.tobytes())
+        key = self._key(name, query)
         if key not in self._cache:
-            out = np.empty(matrix.shape[0], dtype=np.float32)
-            step = 16_384
-            for start in range(0, matrix.shape[0], step):
-                block = np.asarray(matrix[start : start + step], dtype=np.float32)
-                out[start : start + len(block)] = block @ q.astype(np.float32)
-            self._cache[key] = out
+            self._cache[key] = _batch_cosines(matrix, query[None, :])[0].astype(np.float32)
         return self._cache[key]
 
     def a7(self, query: Floats) -> Floats:
@@ -267,6 +282,16 @@ class _NumpyGallery:
 
     def a3(self, query: Floats) -> Floats:
         return self._cosines("a3", self._a3, query)
+
+
+def _batch_cosines(matrix: NDArray[np.float16], queries: Floats) -> NDArray[np.float16]:
+    out = np.empty((len(queries), matrix.shape[0]), dtype=np.float16)
+    step = 16_384
+    q = np.asarray(queries, dtype=np.float32).T
+    for start in range(0, matrix.shape[0], step):
+        block = np.asarray(matrix[start : start + step], dtype=np.float32)
+        out[:, start : start + len(block)] = (block @ q).T
+    return out
 
 
 #: The ways of using a mounted print that `score` compares (results.md, T1 archive).
@@ -321,12 +346,18 @@ def score(
             }
     places = _entity_places(settings, bundle)
     raw_to_id = {_key(p.raw): p.query.query_image_id for p in photos}
+    gallery = _NumpyGallery(bundle.vectors.a7, bundle.vectors.a3)
+    unit7 = np.stack([v[0] / np.linalg.norm(v[0]) for v in vectors.values()])
+    unit3 = np.stack([v[1] / np.linalg.norm(v[1]) for v in vectors.values()])
+    gallery.preload(
+        settings.archive_dir / COSINES, unit7.astype(np.float32), unit3.astype(np.float32)
+    )
     engine = Engine(
         catalog=bundle.catalog,
         routing=bundle.routing,
         guess=bundle.guess,
         encoders=_Replay(vectors, texts),
-        gallery=_NumpyGallery(bundle.vectors.a7, bundle.vectors.a3),
+        gallery=gallery,
         places=places,
         captions=_Captions(captions, raw_to_id),
     )

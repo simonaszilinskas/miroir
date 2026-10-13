@@ -26,7 +26,7 @@ CAPTION_MODELS: dict[str, str] = {
     "qwen3-vl-2b": "Qwen/Qwen3-VL-2B-Instruct",
     "qwen3-vl-4b": "Qwen/Qwen3-VL-4B-Instruct",
 }
-SITE_CAPTION_MODEL = "qwen3-vl-2b"
+SITE_CAPTION_MODEL = "qwen3-vl-4b"
 #: The photo goes to the model at most this long on its long side, in pixels (T1 was measured
 #: on POP's prints, about 670 px wide; a larger photo costs time and was not measured).
 CAPTION_SIDE = 768

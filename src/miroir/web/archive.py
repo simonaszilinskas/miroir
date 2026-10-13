@@ -2,12 +2,13 @@
 
 A photo of a Mémoire print glued on a card with a typed caption (results.md, T1 archive):
 
-1. `miroir.images.mount.find_picture` finds the print on the card (no model, a few ms); the
-   photo search then embeds the print alone.
+1. `miroir.images.mount.find_picture` finds the print on the card (no model, a few ms).
 2. Only then does the GPU container's small open vision model read the caption
    (`miroir.remote.caption`); a photo without a mount costs nothing more.
-3. The commune the caption names (`miroir.caption.Gazetteer`) acts as the photo's position:
-   step H2's soft prior around it. The caption's words refine the search as typed words do.
+3. The caption's words join the photo search, as typed words do but at the photo's weight.
+
+`ArchiveRule` can also search the print alone and use the caption's commune
+(`miroir.caption.Gazetteer`) as step H2's position; both lost on T1, so the site does neither.
 
 The visitor sees what was read and can correct or remove it; the page then sends the caption
 back (`SearchRequest.caption`) and the model is not asked again.
@@ -44,6 +45,10 @@ class ArchiveRule:
     """Weight of the caption's words beside the photo; 0 leaves them out."""
 
 
+#: On T1 tune (results.md, T1 archive): the caption's words at the photo's weight take the
+#: right building into the top 10 for 87% of prints, against 46% for the photo alone. Searching
+#: the print without its card loses (21%: the index's own prints sit on cards too), and so does
+#: the caption's commune as a position (it pulls in its neighbours).
 SITE_ARCHIVE = ArchiveRule(crop=False, words=1.0)
 
 

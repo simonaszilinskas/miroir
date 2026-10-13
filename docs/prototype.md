@@ -14,7 +14,8 @@ What a person can do:
 2. **Photo.** A second after the photo appears, a blue numbered outline marks each work Miroir finds in it (F4), with a line such as "14 œuvres repérées. Touchez un cadre bleu pour la chercher." Tapping an outline searches that work alone. The page shows 20 outlines first, the biggest and most central ones (people frame what they care about); on a wall of pictures, "Afficher les N autres objets repérés" shows the rest (up to 40). A photo of a single object shows none: "Rechercher toute la photo" does the job. A work without an outline: draw a box with a finger or the mouse (a painting, a detail). Boxes and outlines are cut out in the browser.
 3. **Position (step H2).** A photo that carries GPS in its EXIF uses it on its own: the photo screen says "Position de la photo utilisée" with a "Ne pas l'utiliser" link. Otherwise a toggle, "Utiliser ma position", asks the browser (and so the visitor) for the position on the tap, not before. Buildings and objects near that position rank higher (a soft prior: bonus `exp(−d / 1 km)` on the fused score); far ones stay, so nothing breaks away from anything known. The results show "Près de vous" or "Près du lieu de la photo". The position goes with that one search; it is not logged or stored. On T2 phone photos of buildings, the right building moves from 32% to 97% in the top 10 (results.md, H2). Phones often strip GPS from a photo a web page reads, so the toggle is the main way in.
 4. **Results.** One card per building or object, best first: the image that matches best (marked "Correspond : revers", "détail"… when it is not the record's main image), title, place, collection, a link to POP. Mémoire photos of one building form one card ("12 photos"). Filters (collection, region, département, domain, period) narrow the search before ranking. Words refine a photo search ("à Toulouse"). The page shows, quietly, whether it took the photo for a building or an object. When one record stands out, it is shown alone under "Meilleure correspondance", marked "Correspondance sûre", with the others below. When none stands out, there is no single answer: the page says **"Voici les œuvres les plus proches"** ("les monuments" for a building), marked "Pas de réponse sûre", and asks the person to compare them with their photo.
-5. **Record.** Every photo of the building or object, key facts, the description, and links to the full POP records.
+5. **Old photo on its card (archive print).** When the photo is a black-and-white print glued on a card with a caption, as Mémoire's are, the results say **"Cadre et légende détectés"** and show the caption Miroir read ("Légende lue : « BEAUNE (Côte d'Or) Eglise Notre-Dame… »"). Its words join the search. "Corriger la légende" opens a box to fix the text and search again; "Retirer la légende" searches with the photo alone. Other photos are not affected. On T1 archive prints the right building is in the top 10 for 87% of prints, against 46% before (results.md, T1 archive).
+6. **Record.** Every photo of the building or object, key facts, the description, and links to the full POP records.
 
 Light and dark themes: "Affichage" in the header or footer.
 
@@ -25,6 +26,7 @@ Light and dark themes: "Affichage" in the header or footer.
 | `Search` (Modal GPU class, L4) | EmbeddingGemma 2 (A7) and MegaLoc (A3) embed the photo with the same code and preprocessing as the R1 gallery runs (`miroir.remote.search` reuses `miroir.remote.models`); words go through EmbeddingGemma 2's "SearchQuery" prompt. Gallery vectors sit on the GPU. At most one container; it sleeps after 10 minutes |
 | `web` (Modal CPU container) | FastAPI: the page, login, record pages, example photos. At most one container |
 | Ranking (`miroir.web.engine`, NumPy) | The evaluation's steps: cosine per image, best image per entity, min-max per model, G4 weights. A logistic regression on the photo's A7 vector guesses building or object; buildings use A7 alone, objects 0.2 A7 + 0.8 A3 (R2 G4). Words: A7 text vector against the image vectors (0.9), mixed with French BM25 over record text (0.1), weights from T7 (results.md, step B); words refining a photo count half. When no record holds any of the words, the page says so and shows the closest images |
+| Archive prints | `miroir.images.mount.find_picture` (NumPy, about 6 ms) looks for a grey print on a plain card with writing around it. Only then does Qwen3-VL 4B Instruct (open, same GPU container, loaded in a thread) copy the caption line that names the place; its words join the photo search at the photo's weight (`SITE_ARCHIVE` in `miroir.web.archive`). The page can send the caption back corrected or empty (`caption` in `POST /api/search`), and the model is not asked again |
 | Outlines (F4) | Grounding DINO tiny (step C winner) in the same GPU container, loaded in a thread beside the search models so it never delays a search. It sees the photo at 1,024 px with step C's prompts; `miroir.outlines.pick_outlines` keeps sure boxes, drops repeats and the whole photo, sends the 40 surest, biggest and most central first, boxes around several works last, and none when the surest box covers 40% of the photo. `POST /api/detect` |
 | "Sure" or not | Buildings: the routed mix of the top result's cosines against the bucket's cut-off in `routing.json` (at most 10% of T8 tune searches still sure). Objects: the top result must beat every other of the top 30 by a margin of 0.09 (`sure.json`, `miroir web sure`): 36% of object searches are sure and 86% of those are right on the tune halves, against 8% and 28% with the cut-off |
 | Index | A bundle built on the Mac (`miroir web build-index`), stored in the `miroir-web-index` Modal volume. Which bundle is served is one line: `WEB_INDEX` in `src/miroir/config.py` |
@@ -40,6 +42,7 @@ Index `full` (since 2026-10-13): every image of the July exports the Modal runs 
 | Set | Queries | Hit@1 | Hit@10 | "Sure" answers | Right among sure |
 |---|---|---|---|---|---|
 | T1 archive building | 138 | 34.1 | 45.7 | 24.6% | 73% |
+| T1 with its caption read (next deploy) | 138 | 70.3 | 87.0 | | |
 | T3 painting in a room (crop) | 99 | 55.6 | 86.9 | 8.1% | 0% |
 | T5 museum object, other view | 493 | 27.2 | 43.2 | 10.3% | 22% |
 | T2 phone photo of a building (Commons) | 516 | 9.7 | 18.2 | 0% | |
@@ -58,9 +61,11 @@ The first index, `screening-v2` (21,785 publishable images), scored T1 50.7, T3 
 
 End-to-end check on the deployed site (2026-10-13): photos fetched from POP and Commons and posted to `/api/search`. Collection photos (T1, T3, T5) find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches the gallery's); Commons photos (T2, T2b) get the confidence computed offline from their stored query vectors (0.914, 0.859, 0.55…) and the right record first or second. Words: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" and "Nature morte au lièvre" first; "Pont du Gard" first; English words do less well.
 
-Timings: outlines take 0.27 s on the GPU once warm and about 0.7 s from the Mac (upload included); a warm search takes about 200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. A cold start takes 50–110 s (container start, models about 25 s, gallery 2.5 GB to the GPU, BM25 over 101,000 records).
+Timings: outlines take 0.27 s on the GPU once warm and about 0.7 s from the Mac (upload included); a warm search takes about 200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. An archive print adds its caption reading: 1.4 s median on the GPU (2.1 s at the 95th percentile), so about 2.3 s from a browser; other photos add 6 ms. A cold start takes 50–110 s (container start, models about 25 s, gallery 2.5 GB to the GPU, BM25 over 101,000 records).
 
 ## Run and deploy
+
+**Archive prints, not yet deployed (2026-10-13).** On main; the next `miroir web deploy` picks them up (no new bundle file). The first wake-up after it downloads Qwen3-VL 4B (about 9 GB) into the weights volume once.
 
 **Position (H2), not yet deployed (2026-10-13).** The code is on main; the next deploy picks it up once the bundle holds `places.npz` (one position per entity). `miroir web build-index` writes it when `~/miroir-data/places.parquet` exists (`miroir geo places`, about 30 s, already run). To add it to a built bundle without rebuilding: `miroir web places --index full --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
 
@@ -78,7 +83,7 @@ To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `WEB_IND
 
 ## Cost
 
-An L4 with 4 CPUs and 16 GB costs about $1.12 an hour while awake. Each wake-up costs about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Nothing runs when nobody uses the site. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
+An L4 with 4 CPUs and 24 GB costs about $1.18 an hour while awake. Each wake-up costs about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Nothing runs when nobody uses the site. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
 
 ## Known limits
 

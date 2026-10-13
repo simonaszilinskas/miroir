@@ -2,7 +2,7 @@
 
 - `Search`, a GPU class (L4): loads EmbeddingGemma 2, MegaLoc and the index once per
   container, then answers searches. It also finds the objects in a photo (F4 outlines,
-  `detect`) and reads an archive print's caption (Qwen3-VL 2B, only when the photo shows a
+  `detect`) and reads an archive print's caption (Qwen3-VL 4B, only when the photo shows a
   mounted print): both load in threads beside the search models, so they never delay a
   search. It sleeps after `SEARCH_IDLE_S` without a search; at most one container runs, so a
   burst queues instead of starting GPUs.
@@ -78,7 +78,7 @@ web_image = (
     image=gpu_image,
     gpu="L4",
     cpu=4.0,
-    memory=16 * _MIB,
+    memory=24 * _MIB,  # the caption reader's 9 GB of weights pass through host memory
     volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_WEB_INDEX_MOUNT: index_volume},
     secrets=[hf_secret],
     scaledown_window=SEARCH_IDLE_S,
