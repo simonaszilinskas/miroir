@@ -1,4 +1,4 @@
-"""No ML model library is ever imported on the Mac (CLAUDE.md hard rule 1).
+"""No ML model library is ever imported on the Mac (CLAUDE.md rule 1).
 
 Ruff bans torch and friends everywhere except `miroir.remote`, the code that runs inside
 Modal containers. These tests prove the rest of the package never pulls that code in: they

@@ -1,4 +1,4 @@
-"""Which images may leave the Mac (technical spec §9, CLAUDE.md hard rule 8).
+"""Which images may leave the Mac (technical spec §9, CLAUDE.md rule 8).
 
 Only images of `publishable` records go to an outside service: OpenRouter, Modal, any other.
 Commons photos (test queries T2, T2b, T8c) are openly licensed, so they may go to any service.

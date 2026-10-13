@@ -1,6 +1,6 @@
 """Embedding runs on OpenRouter: probe the cost, embed a gallery or a test set's queries.
 
-The privacy rule (CLAUDE.md hard rule 8) is enforced here, in `OpenRouterEmbedder`, not by
+The privacy rule (CLAUDE.md rule 8) is enforced here, in `OpenRouterEmbedder`, not by
 callers: it loads `publishable` from the record store itself, takes image ids (never image
 bytes), and refuses any id whose record is not publishable. Commons photos (T2, T2b, T8c
 queries) are openly licensed and pass; they are fetched from Wikimedia by `CommonsImages`.
