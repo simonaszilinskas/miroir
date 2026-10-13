@@ -215,6 +215,13 @@ $('#describe-form').addEventListener('submit', (event) => {
   runSearch({ text });
 });
 
+for (const chip of document.querySelectorAll('#describe-chips button')) {
+  chip.addEventListener('click', () => {
+    $('#describe-input').value = chip.textContent;
+    $('#describe-form').requestSubmit();
+  });
+}
+
 function alertHome(message) {
   const box = el('div', { class: 'fr-alert fr-alert--error fr-alert--sm fr-mb-2w', role: 'alert' }, el('p', { text: message }));
   $('#describe-form').before(box);
@@ -607,7 +614,13 @@ function renderResults(response) {
       rest.length ? grid(rest) : null);
     return;
   }
-  status.replaceChildren();
+  if (response.words_found === false) {
+    status.replaceChildren(el('div', { class: 'fr-alert fr-alert--info fr-mb-3w' },
+      el('h2', { class: 'fr-alert__title', text: 'Aucune notice ne contient ces mots' }),
+      el('p', { text: 'Voici les images qui ressemblent le plus à votre description. Vérifiez l’orthographe, ou décrivez autrement : la forme, la matière, le sujet, un lieu.' })));
+  } else {
+    status.replaceChildren();
+  }
   results.replaceChildren(
     el('div', { class: 'miroir-section-title' },
       el('h2', { class: 'fr-h4', text: `Résultats${filtered ? ' filtrés' : ''}` }),

@@ -71,12 +71,15 @@ class TextWeights:
 
     __pydantic_config__ = ConfigDict(extra="forbid")
 
-    a7: float = 0.5
-    """EmbeddingGemma 2 text vector against the image vectors."""
-    bm25: float = 0.5
+    a7: float = 0.9
+    """EmbeddingGemma 2 text vector against the image vectors. 0.9 from step B on T7 tune
+    (docs/results.md): hit@10 17.6 against 8.0 at 0.5; A7 alone scores 17.2 but loses
+    names ("Pont du Gard", "Corot"), which T7 leaves out by design."""
+    bm25: float = 0.1
     """French BM25 over record text (`miroir.eval.bm25`)."""
     refine: float = 0.5
-    """Weight of the words when they refine a photo search (the photo counts 1)."""
+    """Weight of the words when they refine a photo search (the photo counts 1). Left at 0.5:
+    a commune as words lifts T1 and T2 most at 1.0 but lowers T5 (step B, results.md)."""
 
 
 @dataclass(frozen=True, slots=True)
