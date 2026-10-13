@@ -2,7 +2,8 @@
 
 - `Search`, a GPU class (L4): loads EmbeddingGemma 2, MegaLoc and the index once per
   container, then answers searches. It also finds the objects in a photo (F4 outlines,
-  `detect`): the detector loads in a thread beside the search models, so it never delays a
+  `detect`) and reads an archive print's caption (Qwen3-VL 2B, only when the photo shows a
+  mounted print): both load in threads beside the search models, so they never delay a
   search. It sleeps after `SEARCH_IDLE_S` without a search; at most one container runs, so a
   burst queues instead of starting GPUs.
 - `web`, a small CPU container: the page, login, record pages and example photos. Only a
@@ -40,6 +41,8 @@ INDEX_VOLUME = "miroir-web-index"
 SEARCH_IDLE_S = 10 * 60
 #: A photo's outlines wait at most this long for the detector to finish loading (cold start).
 DETECTOR_WAIT_S = 60.0
+#: A print's caption waits at most this long for its reader to finish loading (cold start).
+CAPTIONS_WAIT_S = 60.0
 #: The web container waits this long for the next request.
 WEB_IDLE_S = 5 * 60
 _MIB = 1024
@@ -86,14 +89,17 @@ web_image = (
 class Search:
     @modal.enter()  # pyright: ignore[reportUnknownMemberType]
     def load(self) -> None:
+        from miroir.caption import SITE_CAPTION_MODEL  # noqa: PLC0415
         from miroir.logs import setup  # noqa: PLC0415
+        from miroir.remote.caption import BackgroundCaptions  # noqa: PLC0415 (container only)
         from miroir.remote.search import load_search  # noqa: PLC0415 (container only)
 
         setup()
         self.outlines: OutlineFinder | None = None
         self.outlines_ready = threading.Event()
         threading.Thread(target=self._load_outlines, daemon=True).start()
-        self.engine: Engine = load_search(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX)
+        captions = BackgroundCaptions(SITE_CAPTION_MODEL, CAPTIONS_WAIT_S)
+        self.engine: Engine = load_search(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX, captions)
 
     def _load_outlines(self) -> None:
         from miroir.remote.search import OutlineFinder  # noqa: PLC0415 (container only)

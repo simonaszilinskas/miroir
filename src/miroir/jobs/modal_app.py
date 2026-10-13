@@ -24,7 +24,16 @@ from miroir.config import (
     Settings,
 )
 from miroir.eval.rerank import MatchChunk, MatchTask
-from miroir.eval.wire import DetectChunk, Located, LocateTask, RoomPhoto, SiteMatches, SiteMatchTask
+from miroir.eval.wire import (
+    CaptionChunk,
+    CaptionPhoto,
+    DetectChunk,
+    Located,
+    LocateTask,
+    RoomPhoto,
+    SiteMatches,
+    SiteMatchTask,
+)
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
@@ -314,6 +323,28 @@ def match_site(tasks: list[SiteMatchTask]) -> list[SiteMatches]:
     return match_site_tasks(tasks)
 
 
+# --- archive prints: their caption, read by a small open vision model -------------------------
+
+
+@app.function(
+    image=image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    secrets=[hf_secret],
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def read_captions(model: str, photos: list[CaptionPhoto]) -> CaptionChunk:
+    from miroir.remote.caption import read_captions as read  # noqa: PLC0415 (container only)
+
+    result = read(model, photos)
+    weights.commit()  # keep downloaded weights for the next container
+    return result
+
+
 FAMILY_FUNCTIONS = {
     Family.DINO: embed_dino,
     Family.SIGLIP2: embed_siglip2,
@@ -445,6 +476,9 @@ class ModalCalls:
 
     def match_site(self, tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]:
         return match_site.remote(list(tasks))
+
+    def read_captions(self, model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
+        return read_captions.remote(model, list(photos))
 
 
 @contextmanager

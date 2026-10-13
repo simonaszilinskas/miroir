@@ -93,3 +93,22 @@ class SiteMatches:
     read_s: float = 0.0
     features_s: float = 0.0
     match_s: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionPhoto:
+    """An archive photo sent to the caption reader (`miroir.remote.caption`)."""
+
+    image_id: str
+    jpeg: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class CaptionChunk:
+    """What the caption reader read, one line per photo ("" for none), and how long each took
+    once the model was warm."""
+
+    ids: tuple[str, ...]
+    texts: tuple[str, ...]
+    seconds: tuple[float, ...]
+    load_s: float

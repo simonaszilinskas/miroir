@@ -60,10 +60,16 @@ class EntityPlaces:
         with np.errstate(invalid="ignore"):
             return distance_km(position.latitude, position.longitude, self.lat, self.lon)
 
-    def prior(self, position: Position) -> NDArray[np.float32]:
+    def prior(
+        self,
+        position: Position,
+        *,
+        bonus: float = PRIOR_BONUS,
+        scale_km: float = PRIOR_SCALE_KM,
+    ) -> NDArray[np.float32]:
         """The bonus each entity gets: highest where the photo was taken, 0 without a place."""
         d = np.nan_to_num(self.distances(position), nan=np.inf)
-        return (PRIOR_BONUS * np.exp(-d / PRIOR_SCALE_KM)).astype(np.float32)
+        return (bonus * np.exp(-d / scale_km)).astype(np.float32)
 
     def near(self, position: Position, km: float = NEAR_KM) -> Bools:
         """Entities placed within `km` of the position."""

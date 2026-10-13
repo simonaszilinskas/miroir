@@ -241,6 +241,12 @@ class Settings(BaseSettings):
         return self.data_root / "detect"
 
     @property
+    def archive_dir(self) -> Path:
+        """Archive prints (T1): the query photos as POP serves them, what the caption reader
+        read, and the vectors of the prints cut from their mounts."""
+        return self.data_root / "archive"
+
+    @property
     def index_dir(self) -> Path:
         """What the website needs beside the vectors: PCA matrices and the building-or-object
         guess, as small .npz files (technical spec §7.3)."""

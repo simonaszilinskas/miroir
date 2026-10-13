@@ -1364,3 +1364,49 @@ def web_sure(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
         f"margin {chosen.margin}: {chosen.all_sure:.0%} sure, {chosen.all_right:.0%} right "
         f"({', '.join(f'{k} {v:.0%}' for k, v in chosen.right.items())}); T8 {chosen.t8_sure:.0%}"
     )
+
+
+archive_app = typer.Typer(
+    no_args_is_help=True,
+    help="T1 archive prints: search the print without its mount, read its caption.",
+)
+app.add_typer(archive_app, name="archive")
+
+
+@archive_app.command("remote")
+def archive_remote(
+    model: Annotated[
+        list[str], typer.Option(help="Caption reader(s), from miroir.caption.CAPTION_MODELS.")
+    ],
+) -> None:
+    """On Modal: embed the T1 tune photos whole and cut from their mounts, read their
+    captions. Paid; each part is kept and not asked again."""
+    from miroir.eval.archive import run_remote  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
+
+    settings = get_settings()
+    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
+    with open_modal(settings) as calls:
+        cost = run_remote(settings, calls, paid, model)
+    typer.echo(f"done, ${cost:.4f}")
+
+
+@archive_app.command("score")
+def archive_score(
+    model: Annotated[str, typer.Option(help="Caption reader whose captions to use.")],
+    only: Annotated[
+        list[str] | None, typer.Option(help="Rules to score (miroir.eval.archive.RULES).")
+    ] = None,
+) -> None:
+    """Score each way of using the mount and caption on T1 tune, with the site's search."""
+    from miroir.eval.archive import RULES, score  # noqa: PLC0415
+
+    rules = {k: v for k, v in RULES.items() if not only or k in only}
+    rows = score(get_settings(), model, rules)
+    for row in rows:
+        hits = ", ".join(f"hit@{k} {100 * v:.1f}" for k, v in row.hits.items())
+        typer.echo(f"{row.label}: {hits} ({row.queries} queries)")
+    named, right = rows[0].with_place, rows[0].right_place
+    typer.echo(f"captions naming a known commune: {named}, the right one: {right}")

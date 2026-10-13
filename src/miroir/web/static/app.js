@@ -40,6 +40,9 @@ const state = {
   lastWarm: 0,
   searching: false,
   photoPosition: null, // where the current photo was taken (its EXIF GPS), or null
+  // An archive print on its card: the caption to send (null: the server reads it), and
+  // whether to search the print alone (true) or the whole photo.
+  archive: { caption: null, mount: true },
 };
 
 function emptyFilters() {
@@ -292,6 +295,7 @@ async function usePhoto(blob, position = null) {
   if (state.photo?.url) URL.revokeObjectURL(state.photo.url);
   const url = URL.createObjectURL(await toBlob(canvas, 0.92));
   state.photo = { canvas, url };
+  state.archive = { caption: null, mount: true };
   state.box = null;
   state.outline = null;
   $('#stage-image').src = url;
@@ -539,25 +543,25 @@ function drawOutlines() {
 async function searchPhoto(keepText = true) {
   state.text = keepText ? $('#refine-input').value.trim() : '';
   const image = await queryImage();
-  runSearch({ image, text: state.text });
+  runSearch({ image, text: state.text, ...state.archive });
 }
 
 $('#refine-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   state.text = $('#refine-input').value.trim();
   if (state.photo) {
-    runSearch({ image: await queryImage(), text: state.text });
+    runSearch({ image: await queryImage(), text: state.text, ...state.archive });
   } else if (state.text) {
     runSearch({ text: state.text });
   }
 });
 
 let searchId = 0;
-async function runSearch({ image = null, text = '' }) {
+async function runSearch({ image = null, text = '', caption = null, mount = true }) {
   const id = ++searchId;
   state.searching = true;
   state.text = text;
-  state.lastQuery = { image, text };
+  state.lastQuery = { image, text, caption, mount };
   go('#/resultats');
   renderQuery(null);
   renderWaiting();
@@ -569,6 +573,8 @@ async function runSearch({ image = null, text = '' }) {
       try {
         const body = { image, text, filters: state.filters };
         if (position) body.position = position;
+        if (image && caption !== null) body.caption = caption;
+        if (image && !mount) body.mount = false;
         response = await api('search', { method: 'POST', body });
         break;
       } catch (err) {
@@ -578,6 +584,11 @@ async function runSearch({ image = null, text = '' }) {
       }
     }
     if (id !== searchId) return;
+    if (response.caption_read) {
+      // Read once: later searches of this photo send it back instead of reading it again.
+      state.archive.caption = response.caption || '';
+      state.lastQuery.caption = state.archive.caption;
+    }
     state.response = response;
     renderQuery(response);
     renderResults(response);
@@ -676,11 +687,21 @@ function renderQuery(response) {
         : `Rien de connu à moins de ${km} km`,
     }));
   }
-  const title = photo
-    ? (state.box ? 'Votre photo (partie encadrée)' : 'Votre photo')
-    : `« ${words} »`;
+  const picture = photo ? response?.picture : null;
+  if (photo && response?.mount) {
+    meta.append(el('span', {
+      class: 'fr-tag fr-tag--sm fr-icon-image-line fr-tag--icon-left',
+      title: 'Miroir a reconnu un tirage d’archive sur son carton et a lu sa légende',
+      text: response.caption ? 'Cadre et légende détectés' : 'Cadre détecté',
+    }));
+  }
+  let title = `« ${words} »`;
+  if (photo) title = state.box ? 'Votre photo (partie encadrée)' : 'Votre photo';
+  if (picture) title = 'Votre photo (le tirage, sans son carton)';
+  const thumb = photo ? img(state.queryUrl, null, { class: 'miroir-query__thumb', alt: 'Votre photo' }) : null;
+  if (picture && !state.box) showPicture(thumb, picture);
   fill(box,
-    photo ? img(state.queryUrl, null, { class: 'miroir-query__thumb', alt: 'Votre photo' }) : null,
+    thumb,
     el('div', { class: 'miroir-query__text' },
       el('p', { class: 'miroir-query__title', text: title }),
       photo && words ? el('p', { class: 'fr-text--sm fr-mb-0', text: `Précisé par « ${words} »` }) : null,
@@ -690,7 +711,50 @@ function renderQuery(response) {
       el('li', { class: 'fr-hidden-md' }, el('button', { class: 'fr-btn fr-btn--sm fr-btn--tertiary fr-icon-filter-line fr-btn--icon-left', type: 'button', onclick: () => $('#refine').scrollIntoView({ behavior: 'smooth' }), text: 'Affiner' })),
       el('li', {}, el('a', { class: 'fr-btn fr-btn--sm fr-btn--tertiary-no-outline fr-icon-camera-line fr-btn--icon-left', href: '#/', text: 'Nouvelle recherche' }))),
   );
+  if (photo && response && (response.mount || response.caption)) box.append(captionPanel(response));
   $('#refine-label').firstChild.textContent = photo ? 'Préciser avec des mots ' : 'Modifier les mots ';
+}
+
+/** The thumbnail shows the print alone: what was searched. */
+async function showPicture(thumb, [x0, y0, x1, y1]) {
+  const { width, height } = state.photo.canvas;
+  const box = { x: x0 * width, y: y0 * height, w: (x1 - x0) * width, h: (y1 - y0) * height };
+  thumb.src = URL.createObjectURL(await cropBlob(box, 300));
+}
+
+/** What the caption says and where it places the print; the person can correct or remove it. */
+function captionPanel(response) {
+  const again = (archive) => {
+    state.archive = { ...state.archive, ...archive };
+    runSearch({ ...state.lastQuery, ...state.archive });
+  };
+  const input = el('input', { class: 'fr-input', type: 'text', id: 'caption-input', maxlength: '300', value: response.caption || '', autocomplete: 'off' });
+  const form = el('form', { class: 'miroir-caption__form', hidden: true },
+    el('label', { class: 'fr-label', for: 'caption-input', text: 'Légende du carton' }),
+    el('div', { class: 'miroir-caption__row' }, input,
+      el('button', { class: 'fr-btn fr-btn--sm', type: 'submit', text: 'Relancer' })));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    again({ caption: input.value.trim() });
+  });
+  const button = (label, icon, onclick) => el('li', {}, el('button', {
+    class: `fr-btn fr-btn--sm fr-btn--tertiary-no-outline ${icon} fr-btn--icon-left`, type: 'button', onclick, text: label,
+  }));
+  const edit = () => { form.hidden = false; input.focus(); };
+  const read = response.caption
+    ? el('p', { class: 'fr-text--sm fr-mb-0' },
+      el('strong', { text: response.caption_read ? 'Légende lue : ' : 'Légende : ' }), `« ${response.caption} »`)
+    : el('p', { class: 'fr-text--sm fr-mb-0', text: 'Aucune légende lue sur le carton.' });
+  let place = null;
+  if (response.caption_place) place = `Lieu : ${response.caption_place}. Les monuments de ce lieu passent devant.`;
+  else if (response.caption) place = 'Les mots de la légende servent à la recherche, avec la photo.';
+  return el('div', { class: 'miroir-caption' }, read,
+    place ? el('p', { class: 'fr-text--sm fr-mb-0 miroir-caption__place', text: place }) : null,
+    form,
+    el('ul', { class: 'fr-btns-group fr-btns-group--inline fr-btns-group--sm fr-btns-group--icon-left fr-mb-0' },
+      button(response.caption ? 'Corriger la légende' : 'Ajouter une légende', 'fr-icon-edit-line', edit),
+      response.caption ? button('Retirer la légende', 'fr-icon-delete-line', () => again({ caption: '' })) : null,
+      response.picture ? button('Chercher toute la photo', 'fr-icon-fullscreen-line', () => again({ mount: false })) : null));
 }
 
 let waitTimer = null;

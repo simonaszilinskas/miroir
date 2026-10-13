@@ -159,6 +159,12 @@ main { min-height: 60vh; }
 .miroir-query__title { font-weight: 700; margin: 0; }
 .miroir-query__meta { margin: 0.25rem 0 0; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .miroir-query .fr-tag { margin: 0; }
+.miroir-caption { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; padding-top: 0.75rem; border-top: 1px solid var(--border-default-grey); overflow-wrap: anywhere; }
+.miroir-caption__place { color: var(--text-mention-grey); }
+.miroir-caption__form { margin-top: 0.25rem; }
+.miroir-caption__row { display: flex; gap: 0.5rem; align-items: center; }
+.miroir-caption__row .fr-input { flex: 1 1 auto; min-width: 0; margin: 0; }
+.miroir-caption .fr-btns-group { margin-top: 0.25rem; }
 
 /* On phones the results come first; the words and filters follow them. */
 @media (max-width: 47.99em) {

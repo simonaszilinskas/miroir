@@ -31,6 +31,7 @@ from miroir.outlines import (
 )
 from miroir.remote.detect import detect_size, load_detector
 from miroir.remote.models import DEVICE, MegaLocEncoder, SentenceEncoder
+from miroir.web.archive import CaptionReader
 from miroir.web.engine import A3_FILE, A7_FILE, Engine, load_engine
 
 logger = logging.getLogger(__name__)
@@ -89,10 +90,10 @@ class GpuGallery:
         return self._cosines(self._a3, query)
 
 
-def load_search(directory: Path) -> Engine:
+def load_search(directory: Path, captions: CaptionReader | None = None) -> Engine:
     """Everything a search container needs, loaded once at start."""
     gallery = GpuGallery(directory)
-    return load_engine(directory, QueryModels(), gallery)
+    return load_engine(directory, QueryModels(), gallery, captions)
 
 
 class OutlineFinder:

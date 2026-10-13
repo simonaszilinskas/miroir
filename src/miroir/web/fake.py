@@ -65,9 +65,21 @@ class NumpyGallery:
         return self.a7_matrix @ query
 
 
+#: What the stand-in caption reader "reads" on any mounted print.
+FAKE_CAPTION = "BEAUNE (Côte-d'Or) Eglise Notre-Dame, façade ouest, porte centrale"
+
+
+class FakeCaptions:
+    """Reads the same made-up caption on every mounted print."""
+
+    def read(self, jpeg: bytes) -> str:
+        del jpeg
+        return FAKE_CAPTION
+
+
 def fake_engine(directory: Path) -> Engine:
     matrix = np.asarray(np.load(directory / A7_FILE), dtype=np.float32)
-    engine = load_engine(directory, FakeEncoders(matrix), NumpyGallery(matrix))
+    engine = load_engine(directory, FakeEncoders(matrix), NumpyGallery(matrix), FakeCaptions())
     engine.projection = None  # fake MegaLoc vectors live in the EmbeddingGemma 2 space
     return engine
 

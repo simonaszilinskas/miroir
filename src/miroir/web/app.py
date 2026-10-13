@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from miroir.caption import MAX_CAPTION
 from miroir.config import WIKIMEDIA_USER_AGENT
 from miroir.images.fetch import to_jpeg
 from miroir.outlines import Outlines
@@ -106,6 +107,14 @@ class SearchBody(BaseModel):
     text: str = Field(default="", max_length=MAX_TEXT)
     filters: FiltersBody = Field(default_factory=FiltersBody)
     position: PositionBody | None = None
+    mount: bool = Field(
+        default=True, description="Search the print alone when the photo shows a mounted print."
+    )
+    caption: str | None = Field(
+        default=None,
+        max_length=MAX_CAPTION,
+        description="The print's caption as the person corrected it; empty when removed.",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,7 +344,12 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
         None if body.position is None else Position(body.position.latitude, body.position.longitude)
     )
     request = SearchRequest(
-        image=image, text=body.text, filters=body.filters.filters(), position=position
+        image=image,
+        text=body.text,
+        filters=body.filters.filters(),
+        position=position,
+        mount=body.mount,
+        caption=body.caption,
     )
     start = time.monotonic()
     result = await _wait_for(site.backend.search(request), "search")
@@ -467,12 +481,14 @@ def _log_search(request: SearchRequest, result: SearchResponse, seconds: float) 
     """Technical spec §9: the query (image hash, text, filters), what came back, the time."""
     digest = hashlib.sha256(request.image).hexdigest()[:12] if request.image else "-"
     logger.info(
-        "search image=%s text=%r filters=%s mode=%s match=%s top=%s %.0f ms",
+        "search image=%s text=%r filters=%s mode=%s match=%s mount=%s caption=%s top=%s %.0f ms",
         digest,
         request.text[:80],
         request.filters,
         result.mode,
         result.match,
+        result.picture is not None,
+        result.caption_place,
         [c.entity_id for c in result.cards[:5]],
         1000 * seconds,
     )

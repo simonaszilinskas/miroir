@@ -19,10 +19,13 @@ from numpy.typing import NDArray
 from PIL import Image as PILImage
 from PIL import ImageOps
 
+from miroir.caption import CaptionPlace, Gazetteer, clean_caption
 from miroir.eval.bm25 import Bm25
 from miroir.images.colour import chroma_spread
 from miroir.images.fetch import JPEG_QUALITY, LONG_SIDE
+from miroir.images.mount import Picture, crop_picture, find_picture
 from miroir.web import ranking
+from miroir.web.archive import SITE_ARCHIVE, ArchiveRule, CaptionReader, gazetteer
 from miroir.web.catalog import (
     CARD_SIDE,
     CATALOG_FILE,
@@ -105,6 +108,14 @@ class SearchRequest:
     limit: int = RESULTS
     position: Position | None = None
     """Where the person stands, when they chose to share it (step H2). Used, never kept."""
+    mount: bool = True
+    """Look for an archive mount around the photo and search the print alone."""
+    caption: str | None = None
+    """The mount's caption as the person corrected it ("" when they removed it). None: read
+    it from the photo when it has a mount."""
+    exclude_images: tuple[str, ...] = ()
+    """Measurement only (not in the API): images taken out of the gallery, such as a test
+    query's own shoot."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +159,17 @@ class SearchResponse:
     words_found: bool | None = None
     """Searches with words: whether any record holds one of them. When none does, the
     cards come from the text vector alone, and the page says so."""
+    mount: bool = False
+    """The photo shows an archive print on its card (`images.mount`): its caption was read."""
+    picture: tuple[float, float, float, float] | None = None
+    """The print found inside an archive mount (left, top, right, bottom, in shares of the
+    photo), which was searched instead of the whole photo."""
+    caption: str | None = None
+    """The mount's caption the search used, read or as the person gave it."""
+    caption_read: bool = False
+    """The caption was read from the photo in this search (not given by the person)."""
+    caption_place: str | None = None
+    """The commune the caption names, as the index writes it; buildings near it rank higher."""
 
 
 class Engine:
@@ -162,6 +184,8 @@ class Engine:
         projection: Projection | None = None,
         places: EntityPlaces | None = None,
         sure: SureRule | None = None,
+        captions: CaptionReader | None = None,
+        archive: ArchiveRule = SITE_ARCHIVE,
     ) -> None:
         self.catalog = catalog
         self.places = places
@@ -171,6 +195,9 @@ class Engine:
         self.gallery = gallery
         self.projection = projection
         self.sure = sure
+        self.captions = captions
+        self.archive = archive
+        self.gazetteer: Gazetteer | None = None if places is None else gazetteer(catalog, places)
         start = time.monotonic()
         self.bm25 = Bm25([record_text(r) for r in catalog.records])
         logger.info(
@@ -185,14 +212,25 @@ class Engine:
             raise ValueError(msg)
         timings: dict[str, float] = {}
         mask = self.catalog.image_mask(request.filters)
+        if request.exclude_images:
+            row = self.catalog.image_row
+            mask = mask.copy()
+            mask[[row[i] for i in request.exclude_images if i in row]] = False
         signals: list[ranking.Signal] = []
         per_image: Floats | None = None
         photo: _Photo | None = None
         words_found: bool | None = None
+        archive = _Archive()
         if request.image is not None:
-            photo = self._photo(request.image, mask, timings)
+            archive = self._archive(request, timings)
+            photo = self._photo(archive.query or request.image, mask, timings)
             signals += photo.signals
             per_image = photo.per_image
+        if archive.caption and self.archive.words > 0:
+            words = self._words(archive.caption, mask, timings, key="caption")
+            signals += [
+                ranking.Signal(s.per_entity, s.weight * self.archive.words) for s in words.signals
+            ]
         if text:
             words = self._words(text, mask, timings)
             words_found = words.found
@@ -203,10 +241,8 @@ class Engine:
         assert per_image is not None
         tick = time.monotonic()
         fused = ranking.fuse(signals)
-        nearby = None
-        if request.position is not None and self.places is not None:
-            fused = fused + self.places.prior(request.position)  # -inf (filtered out) stays
-            nearby = int(self.places.near(request.position).sum())
+        place = archive.place if self.archive.place_bonus > 0 else None
+        fused, nearby = self._near(fused, place, request.position)
         top = ranking.top_entities(fused, max(1, min(request.limit, 100)))
         cards = tuple(
             card
@@ -234,6 +270,62 @@ class Engine:
             nearby=nearby,
             near_km=None if nearby is None else NEAR_KM,
             words_found=words_found,
+            mount=archive.mount,
+            picture=archive.box,
+            caption=archive.caption or None,
+            caption_read=archive.read,
+            caption_place=None if place is None else place.label,
+        )
+
+    def _near(
+        self, fused: Floats, place: CaptionPlace | None, position: Position | None
+    ) -> tuple[Floats, int | None]:
+        """Step H2's soft prior around the caption's commune, else around the person's
+        position; and how many entities lie near the person. -inf (filtered out) stays."""
+        if self.places is None:
+            return fused, None
+        if place is not None:
+            # A print's caption says where the building stands; the person's position does not.
+            around = Position(place.latitude, place.longitude)
+            rule = self.archive
+            prior = self.places.prior(around, bonus=rule.place_bonus, scale_km=rule.place_scale_km)
+            return fused + prior, None
+        if position is not None:
+            return fused + self.places.prior(position), int(self.places.near(position).sum())
+        return fused, None
+
+    # --- archive prints ----------------------------------------------------------------------
+
+    def _archive(self, request: SearchRequest, timings: dict[str, float]) -> _Archive:
+        """The print inside a mount, and its caption (read only when there is a mount and the
+        person gave none)."""
+        assert request.image is not None
+        tick = time.monotonic()
+        try:
+            picture = find_picture(request.image) if request.mount else None
+        except (OSError, PILImage.DecompressionBombError) as err:
+            msg = f"cannot read the photo: {err}"
+            raise ValueError(msg) from err
+        timings["mount"] = _ms(tick)
+        query = crop_picture(request.image, picture) if picture and self.archive.crop else None
+        read = False
+        if request.caption is not None:
+            caption = clean_caption(request.caption)
+        elif picture is not None and self.captions is not None:
+            tick = time.monotonic()
+            caption = clean_caption(self.captions.read(request.image))
+            timings["caption"] = _ms(tick)
+            read = True
+        else:
+            caption = ""
+        place = self.gazetteer.find(caption) if caption and self.gazetteer else None
+        return _Archive(
+            mount=picture is not None,
+            query=query,
+            box=None if query is None or picture is None else _shares(picture),
+            caption=caption,
+            read=read,
+            place=place,
         )
 
     # --- the two kinds of query ------------------------------------------------------------
@@ -268,15 +360,17 @@ class Engine:
             chroma=chroma,
         )
 
-    def _words(self, text: str, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Words:
+    def _words(
+        self, text: str, mask: NDArray[np.bool_], timings: dict[str, float], key: str = "text"
+    ) -> _Words:
         tick = time.monotonic()
         query = unit(self.encoders.text(text))
-        timings["embed_text"] = _ms(tick)
+        timings[f"embed_{key}"] = _ms(tick)
         tick = time.monotonic()
         a7 = np.where(mask, self.gallery.a7(query), -np.inf).astype(np.float32)
         per_record = self.bm25.scores(text)
         signals = word_signals(self.catalog, a7, per_record, mask, self.routing.text)
-        timings["vectors_text"] = _ms(tick)
+        timings[f"vectors_{key}"] = _ms(tick)
         return _Words(signals=signals, per_image=a7, found=bool((per_record > 0).any()))
 
     # --- cards -----------------------------------------------------------------------------
@@ -332,6 +426,27 @@ class _Photo:
         """The routed mix of the entity's raw cosines, as T8 measured it (`notfound`)."""
         w = self.a7_weight
         return float(w * self.e7[entity] + (1 - w) * self.e3[entity])
+
+
+@dataclass(frozen=True, slots=True)
+class _Archive:
+    mount: bool = False
+    query: bytes | None = None
+    """The print alone, when the photo has a mount: what the photo search embeds."""
+    box: tuple[float, float, float, float] | None = None
+    caption: str = ""
+    read: bool = False
+    place: CaptionPlace | None = None
+
+
+def _shares(picture: Picture) -> tuple[float, float, float, float]:
+    w, h = picture.width, picture.height
+    return (
+        round(picture.left / w, 4),
+        round(picture.top / h, 4),
+        round(picture.right / w, 4),
+        round(picture.bottom / h, 4),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,7 +531,12 @@ def read_projection(directory: Path) -> Projection | None:
         )
 
 
-def load_engine(directory: Path, encoders: Encoders, gallery: GalleryVectors) -> Engine:
+def load_engine(
+    directory: Path,
+    encoders: Encoders,
+    gallery: GalleryVectors,
+    captions: CaptionReader | None = None,
+) -> Engine:
     """An engine over one index bundle; the caller brings the models and the vectors."""
     start = time.monotonic()
     catalog = read_catalog(directory / CATALOG_FILE)
@@ -436,6 +556,7 @@ def load_engine(directory: Path, encoders: Encoders, gallery: GalleryVectors) ->
         projection=read_projection(directory),
         places=read_places(directory / PLACES_FILE, catalog.entity_ids),
         sure=read_sure(directory / SURE_FILE),
+        captions=captions,
     )
 
 
