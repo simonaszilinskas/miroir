@@ -259,11 +259,14 @@ class _NumpyGallery:
 
     def preload(self, path: Path, a7: Floats, a3: Floats) -> None:
         """Cosines of every photo query (unit rows) with every image, from `path` when it
-        holds them, else computed and saved there."""
+        holds them for this gallery, else computed and saved there."""
+        c7 = c3 = None
         if path.exists():
             with np.load(path) as data:
                 c7, c3 = data["a7"], data["a3"]
-        else:
+            if c7.shape != (len(a7), self._a7.shape[0]):  # another index's gallery
+                c7 = c3 = None
+        if c7 is None or c3 is None:
             c7 = _batch_cosines(self._a7, a7)
             c3 = _batch_cosines(self._a3, a3)
             np.savez(path, a7=c7, a3=c3)

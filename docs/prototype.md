@@ -37,37 +37,43 @@ Weights, cut-offs and buckets are data (`routing.json`), not code: a third bucke
 
 ## Scores of the deployed stack
 
-Index `full` (since 2026-10-13): every image of the July exports the Modal runs could fetch, 136,731 images of 101,039 records, 63,085 buildings and objects, publishable or not (the site sits behind a login, functional spec §8). Vectors from the full-sample runs (`A7-embeddinggemma-2-512-full`, `A3-megaloc-322-full`, MegaLoc at 8,448 dims), type guess from `miroir index guess`. Tune halves, the site's own ranking (the bundle's `report.json`):
+Index `full-f2` (since 2026-10-13): every image of the July exports the Modal runs could fetch (136,731 images of 101,039 records), plus 10,221 Commons photos of 2,726 Mérimée buildings (step F2, `miroir testsets commons-gallery --gallery full`): 146,952 images, 63,091 buildings and objects. No Commons photo used as a test query (T2, T2b, T8c, tune or sealed), no near-copy of one and no other frame of its visit is among them. Routing G5 (`routing.json`): a black-and-white building photo goes to A7 alone, a colour building photo to A3 alone, an object 0.2 A7 + 0.8 A3. Tune halves, the site's own ranking (the bundle's `report.json`), without the photo's position:
 
-| Set | Queries | Hit@1 | Hit@10 | "Sure" answers | Right among sure |
-|---|---|---|---|---|---|
-| T1 archive building | 138 | 34.1 | 45.7 | 24.6% | 73% |
-| T1 with its caption read (next deploy; measured on index `full`) | 138 | 70.3 | 87.0 | | |
-| T3 painting in a room (crop) | 99 | 55.6 | 86.9 | 8.1% | 0% |
-| T5 museum object, other view | 493 | 27.2 | 43.2 | 10.3% | 22% |
-| T2 phone photo of a building (Commons) | 516 | 9.7 | 18.2 | 0% | |
-| T2b museum work (Commons) | 291 | 82.1 | 94.5 | 4.1% | 75% |
-| T7 words for a hidden image (French) | 500 | 7.6 | 17.6 | | |
-| T7en the same words in English | 105 | 7.6 | 23.8 | | |
+| Set | Queries | Hit@1 | Hit@3 | Hit@10 | "Sure" answers | Right among sure |
+|---|---|---|---|---|---|---|
+| T1 archive building | 138 | 34.1 | 38.4 | 45.7 | 24.6% | 73% |
+| T1 with its caption read | 138 | 62.3 | | 79.7 | | |
+| T3 painting in a room (crop) | 99 | 55.6 | 76.8 | 86.9 | 8.1% | 0% |
+| T5 museum object, other view | 493 | 27.2 | 35.1 | 43.2 | 10.3% | 22% |
+| **T2 phone photo of a building (Commons)** | 516 | **25.8** | **32.6** | **36.8** | 17.4% | 72% |
+| T2b museum work (Commons) | 291 | 82.1 | 88.7 | 94.5 | 4.1% | 75% |
+| T7 words for a hidden image (French) | 500 | 7.6 | | 17.6 | | |
+| T7en the same words in English | 105 | 7.6 | | 23.8 | | |
+
+T2 before F2 and G5 (index `full`, G4 routing): hit@1 9.7, hit@10 18.2, no sure answer. G5 alone, without the Commons photos: hit@1 19.4, hit@10 26.9.
+
+T1 with its caption read is 79.7 hit@10 with the word weights of `e7154a9` (A7 text 0.9, BM25 0.1). With the earlier 0.5 / 0.5 it is 89.1 on the same index (87.0 on `full`): caption words are mostly place names, which BM25 finds and the text vector does not. The two choices pull against each other; one weight for typed words and another for read captions would keep both.
 
 | Not-found set | Searches still answered "sure" |
 |---|---|
 | T8 (in-collection photos, entity removed) | 9.6% (target: at most 10%) |
-| T8c (Commons photos with no record) | 0% |
+| T8c (Commons photos with no record) | 3.3% |
 
-Cut-offs: 0.934 for buildings (A7 cosine), 0.824 for objects (0.2 A7 + 0.8 A3). The gallery is six times the screening one, so every score drops (T5 most: Saint-Omer's coin and medal series look alike) and a "sure" object is often a near twin, not the right record. Since 2026-10-13 objects no longer use their cut-off: the margin rule above decides, and makes a sure object right 86% of the time on the tune halves (T3 73%, T5 73%, T2b 98%).
+Cut-offs, at most 10% of "not found" searches answered sure: 0.934 for archive buildings (A7 cosine, from T8), 0.247 for colour buildings (A3 cosine, from T8c: T8 holds almost no colour photo of a building), 0.824 for objects. Since 2026-10-13 objects use the margin rule instead of their cut-off; a sure object is right 86% of the time on the tune halves (T3 73%, T5 73%, T2b 98%).
 
 The first index, `screening-v2` (21,785 publishable images), scored T1 50.7, T3 89.9, T5 61.2, T2 24.8, T2b 94.3 hit@10; switch back with `WEB_INDEX = "screening-v2"`.
 
 End-to-end check on the deployed site (2026-10-13): photos fetched from POP and Commons and posted to `/api/search`. Collection photos (T1, T3, T5) find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches the gallery's); Commons photos (T2, T2b) get the confidence computed offline from their stored query vectors (0.914, 0.859, 0.55…) and the right record first or second. Words: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" and "Nature morte au lièvre" first; "Pont du Gard" first; English words do less well.
 
+Visitor check of phone photos of buildings (2026-10-13, on the deploy of `ccb4142`: G5 and `full-f2`, before captions). Ten T2 tune photos sent to the deployed search, seven without GPS, three with it (seeded draw). Before (index `full`, G4): the right building first for 2 of 10, in the top 10 for 3. After: **first for 7 of 10, top 3 for 7, top 10 for 8**; four of the seven were "sure" ("Correspondance sûre"). The three photos with GPS were all found first, with 1, 5 and 51 known places within the search radius. The two misses (a Paris hôtel particulier and an Avignon hôtel, both street façades among many alike) got "Pas de réponse sûre" and the closest buildings, nearly all in the right town. After a missed building photo the page now says what helps: turn on "Utiliser ma position" or add the commune with "Préciser avec des mots", and photograph the whole façade. Words: "Pont du Gard", "moulin à vent", "nature morte au lièvre" and "cathedral rose window" (the four chips) all put a fitting record first. The Jeu de Paume example drew 14 outlines (the detector found 14; up to 20 are shown).
+
 Timings: outlines take 0.27 s on the GPU once warm and about 0.7 s from the Mac (upload included); a warm search takes about 200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. An archive print adds its caption reading: 1.4 s median on the GPU (2.1 s at the 95th percentile), so about 2.3 s from a browser; other photos add 6 ms. A cold start takes 50–110 s (container start, models about 25 s, gallery 2.5 GB to the GPU, BM25 over 101,000 records).
 
 ## Run and deploy
 
-**Archive prints, not yet deployed (2026-10-13).** On main; the next `miroir web deploy` picks them up (no new bundle file). The first wake-up after it downloads Qwen3-VL 4B (about 9 GB) into the weights volume once.
+**Deploy state (2026-10-13, 14:00).** `full-f2` (with `places.npz`) is uploaded to the `miroir-web-index` volume. A deploy of main at 10:34 with the archive captions broke every photo search: the caption reader, loading in a thread beside EmbeddingGemma 2, left torch's default dtype at bfloat16 ("expected mat1 and mat2 to have the same dtype"). `71158de` fixes it (the reader loads after the other models, then the default is reset) but has not been deployed, and at 14:00 the `miroir-web` app was gone from Modal (the address answers 404). The next `miroir web deploy` from main should bring the site back with G5, F2, H2, words, outlines and captions; check one photo search before telling testers. The first wake-up after it downloads Qwen3-VL 4B (about 9 GB) into the weights volume once.
 
-**Position (H2), not yet deployed (2026-10-13).** The code is on main; the next deploy picks it up once the bundle holds `places.npz` (one position per entity). `miroir web build-index` writes it when `~/miroir-data/places.parquet` exists (`miroir geo places`, about 30 s, already run). To add it to a built bundle without rebuilding: `miroir web places --index full --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
+**Position (H2).** The `full-f2` bundle holds `places.npz` (one position per entity), so the next deploy uses the photo's GPS position or the visitor's. To add positions to another built bundle without rebuilding: `miroir web places --index <name> --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
 
 ```sh
 uv sync --extra api
@@ -90,11 +96,11 @@ An L4 with 4 CPUs and 24 GB costs about $1.18 an hour while awake. Each wake-up 
 - **Position.** Rose Valland works have no place (looted and moved), and Mémoire objects sit at their commune's centre, so with the position on they rank below precise neighbours. The visitor can turn the position off.
 
 - **Index.** The 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing.
-- **Phone photos of buildings.** T2: the right building is in the top 10 for a fifth of photos, and none reaches the "sure" bar. A3 does better than A7 on these photos (31.0 against 21.9 hit@10), but the router sends buildings to A7, which wins on archive photos; a third bucket for colour photos of buildings is being tuned.
+- **Phone photos of buildings.** Without the photo's position, the right building comes first for a quarter of photos (25.8%), in the top 3 for a third (32.6%) and in the top 10 for 36.8%. A building whose Commons photos are in the index is found far more often than one without (58.6% against 24.9% hit@10 on the screening gallery): 1,198 of 3,924 buildings have none. Interiors and close details stay hard. With the photo's GPS position (H2) the right building is in the top 10 for most photos.
 - **"Sure" is cautious.** A quarter of in-index archive photos and a third of object photos get a sure answer; the rest see the closest records to compare.
 - **Word search** finds the right record in the top 10 for about one description in six (T7: 17.6%; half and half scored 8.0%). Names work ("Pont du Gard" comes first); descriptions of common things (a church, a coin) match too many records, and Mémoire buildings are found only 7% of the time. A region in the words ("bourgogne") does not narrow the search; the region filter does. T6, written by hand, does not exist yet ([t6-guide.md](t6-guide.md)).
 - **Period filter** for Mémoire reads the date of the photo, not of the building.
 - **Outlines on a crowded wall.** On the Jeu de Paume room photos the right record is in the top 5 for 87% of works when every outline is shown, 78% with the 20 shown first (it was 52% with the 12 surest; results.md, step C): on the densest walls the visitor still needs "Afficher les N autres". Outlines' names come from the detector's prompts and are often wrong (it calls a statue a stained glass window); the page only uses them in labels for screen readers.
 - **Keypoint re-ranking (E1) is not on the site:** it lifts T3 hit@1 by 12 points but adds 3 s per search (6 s at the 95th percentile), mostly reading candidate images.
 - **Cold start** of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
-- **Type guess** read from the index agent's full-sample file; a three-bucket router (G5) can replace the two G4 buckets in `routing.json`.
+- **Type guess** read from the index agent's full-sample file. It calls more than half of phone photos of buildings objects (it partly learned colour); they then get 0.2 A7 + 0.8 A3, close to what a colour building gets.
