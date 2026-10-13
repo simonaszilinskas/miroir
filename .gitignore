@@ -3,6 +3,7 @@ data/
 *.jsonl
 *.parquet
 *.jpg
+!docs/images/*.jpg
 *.jpeg
 *.png
 *.gif

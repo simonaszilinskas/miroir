@@ -41,7 +41,7 @@ Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.
 1. **Photo d'un bâtiment.** Le site devine qu'il s'agit d'un bâtiment et cherche parmi les photos de POP et 10 221 photos de Wikimedia Commons rattachées à 2 726 monuments. Pourquoi Commons : les photos de POP sont souvent anciennes, en noir et blanc, prises sous un seul angle ; celles de Commons, sous licence libre, sont récentes, en couleur et prises de partout, comme celles d'un visiteur. Elles ont fait passer les bâtiments trouvés sans position de 27 % à 37 %. Elles servent seulement de repère : le visiteur ne voit que des notices et des images de POP. Si la photo porte sa position, ou si le visiteur active « Utiliser ma position », les monuments proches passent en tête. La position sert à cette recherche seulement et n'est pas gardée.
 2. **Photo d'une salle de musée.** Le site entoure jusqu'à 20 œuvres, les plus grandes et les plus centrales d'abord. Le visiteur touche celle qui l'intéresse.
 3. **Vieux tirage sur carton.** Le site repère le carton, lit la légende manuscrite (par exemple « Beaune (Côte-d'Or), église Notre-Dame ») et s'en sert pour chercher. Le visiteur peut corriger ou retirer la légende.
-4. **Recherche par mots**, en français ou dans une autre langue : « Pont du Gard », « nature morte au livre ».
+4. **Recherche par mots**, en français ou dans une autre langue : « Pont du Gard », « nature morte au lièvre ».
 
 Les résultats sont classés par ressemblance, du plus proche au plus lointain. Chacun porte un niveau : « Très proche », « Proche » ou « Ressemblance ». Sur les photos de test, un résultat « Très proche » est la bonne notice environ 8 fois sur 10. Des filtres (collection, région, département, domaine, période) restreignent la recherche.
 
@@ -59,9 +59,9 @@ Captures du site en ligne, sur ordinateur et sur téléphone :
 
 *Photo d'un monument prise par un visiteur (trouvée sur Wikimedia Commons) : le site retrouve la porte Saint-Julien à La Ferté-Bernard.*
 
-![Recherche par mots : nature morte au livre](docs/images/miroir-5-mots.jpg)
+![Recherche par mots : nature morte au lièvre](docs/images/miroir-5-mots.jpg)
 
-*Recherche par mots, « nature morte au livre » : les deux œuvres qui portent ce sujet arrivent en tête.*
+*Recherche par mots, « nature morte au lièvre » : les natures mortes au lièvre arrivent en tête.*
 
 ## Résultats mesurés
 
