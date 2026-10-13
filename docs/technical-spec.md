@@ -536,6 +536,8 @@ The $7.54 of §7.3 covered 137,775 images, but 21,785 of them reused earlier vec
 
 **What these figures assume.** Modal prices of 2026-10-12 (`jobs/modal_spec.py`). The same models, sizes and code as July; a GPU that ran faster or slower changes cost in step. Image mix: the July run held the same kinds of images, but more large Rose Valland scans (12% of images against 1%), which slow the fill; the models read 512 px copies, so file size does not change what they cost. Download speed from 14 minutes of July fill, not from hours; a slower bucket over hours lengthens the fill, not the cost (CPU time costs $1.74 per million). One percent of images will fail and get no vector.
 
+**Search vectors for all of POP (3 million images, results.md "Storage for all of POP").** Kept as today, both models in float16 on the GPU, they weigh 55 GB. Stored as `full-f2-shortlist` is (`IndexSpec.a3_shortlist_dims`, `miroir.web.store`): EmbeddingGemma 2 (4.6 GB) and MegaLoc reduced by PCA to 1,024 dims (6.1 GB in float16, 3.1 GB in int8) on the GPU, every MegaLoc vector in int8 (25 GB) in host memory. A photo search shortlists the 2,000 closest images by each model, then scores the shortlist exactly: every tune set within 1 point of today. One L4 (24 GB) with 48 GB of host memory runs it, about $1.37 an hour while awake (today $1.18).
+
 ## 12. Open technical questions
 
 1. ~~Which POP bases does the full export contain, and how many images?~~ Answered in 11.1: six bases with images, 2,119,202 records, 2,138,564 distinct image files.
