@@ -3,7 +3,8 @@ boxes the photo view shows.
 
 A detector (`miroir.remote.detect`, Modal only) returns raw boxes: every box it is at least a
 little sure of, in shares of the photo's width and height. `pick_outlines` keeps the ones worth
-drawing: sure enough, not twice the same object, not the whole photo, at most `MAX_OUTLINES`.
+drawing (sure enough, not twice the same object, not the whole photo, at most `ALL_OUTLINES`)
+and puts first the ones a visitor most likely means: big and near the photo's centre.
 The same rule runs in the GPU container for the website and on the Mac when scoring T3, so the
 outlines scored are the outlines shown.
 """
@@ -11,7 +12,8 @@ outlines scored are the outlines shown.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -29,8 +31,9 @@ PROMPTS: tuple[str, ...] = (
 )
 #: Longest side, in pixels, of the photo a detector sees. The page sends this size.
 DETECT_SIDE = 1024
-#: Outlines drawn at first on one photo (functional spec §5: a person picks one by eye).
-MAX_OUTLINES = 12
+#: Outlines drawn at first on one photo (functional spec §5: a person picks one by eye);
+#: `MAX_OUTLINES` in static/app.js. 20 still reads at 375 px on the densest room photo.
+MAX_OUTLINES = 20
 #: Outlines sent: past the first `MAX_OUTLINES`, the page shows the rest on request ("Afficher
 #: tous les objets"), for walls hung with dozens of pictures (docs/results.md, step C).
 ALL_OUTLINES = 40
@@ -160,10 +163,19 @@ class OutlineRule:
     max_outlines: int = ALL_OUTLINES
 
 
+def salience(box: Box) -> float:
+    """How likely a visitor means this box: people frame what they care about, so big boxes
+    near the photo's centre come first (docs/results.md, step C, order of the outlines)."""
+    cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+    near = 1 - math.hypot(cx - 0.5, cy - 0.5) / math.hypot(0.5, 0.5)
+    return math.sqrt(box.area) * near
+
+
 def pick_outlines(
     boxes: Sequence[Box], rule: OutlineRule, *, width: int, height: int
 ) -> tuple[Box, ...]:
-    """The outlines to draw, surest first (see `OutlineRule`)."""
+    """The outlines to draw (see `OutlineRule`): the surest boxes, put in the order a visitor
+    most likely means them (`salience`), boxes around several works last."""
     short = min(width, height)
     kept: list[Box] = []
     for box in sorted(boxes, key=lambda b: -b.score):
@@ -182,21 +194,24 @@ def pick_outlines(
         kept.append(box)
     if kept and kept[0].area >= rule.lone:
         return ()
-    # A box around several others (a whole wall) goes after the single objects, so the first
-    # view shows works, not groups.
+    return order_outlines(kept, salience)
+
+
+def order_outlines(outlines: Sequence[Box], key: Callable[[Box], float]) -> tuple[Box, ...]:
+    """Single works by `key`, highest first; a box around several others (a whole wall)
+    after them, so the first view shows works, not groups."""
+    ordered = sorted(outlines, key=lambda b: -key(b))
     groups = {
-        i
-        for i, box in enumerate(kept)
+        b
+        for b in ordered
         if sum(
-            intersection(other, box) >= GROUP_INSIDE * other.area
-            for other in kept
-            if other is not box
+            intersection(other, b) >= GROUP_INSIDE * other.area
+            for other in ordered
+            if other is not b
         )
         >= 2
     }
-    return tuple(b for i, b in enumerate(kept) if i not in groups) + tuple(
-        b for i, b in enumerate(kept) if i in groups
-    )
+    return tuple(b for b in ordered if b not in groups) + tuple(b for b in ordered if b in groups)
 
 
 #: The rule the website uses, with the detector it was tuned for (docs/results.md, step C).

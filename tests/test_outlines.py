@@ -6,7 +6,6 @@ import pytest
 
 from miroir.outlines import (
     ALL_OUTLINES,
-    MAX_OUTLINES,
     SITE_RULE,
     Box,
     OutlineRule,
@@ -14,6 +13,7 @@ from miroir.outlines import (
     fake_outlines,
     iou,
     pick_outlines,
+    salience,
 )
 
 RULE = OutlineRule(min_score=0.2)
@@ -59,7 +59,7 @@ def test_a_box_as_big_as_the_photo_is_never_an_outline() -> None:
     whole = box(0.0, 0.0, 1.0, 0.95, 0.99)
     painting = box(0.2, 0.2, 0.4, 0.5, 0.5)
     other = box(0.6, 0.2, 0.8, 0.5, 0.5)
-    assert pick([whole, painting, other]) == (painting, other)
+    assert set(pick([whole, painting, other])) == {painting, other}
 
 
 def test_a_photo_of_one_object_shows_no_outline() -> None:
@@ -73,10 +73,10 @@ def test_a_photo_of_one_object_shows_no_outline() -> None:
     assert pick([small]) == (small,)
     # A large box that is not the surest (a whole wall) does not hide the paintings on it.
     wall = box(0.0, 0.0, 0.7, 0.7, 0.3)
-    assert pick([wall, small]) == (small, wall)
+    assert set(pick([wall, small])) == {small, wall}
 
 
-def test_outlines_are_capped_surest_first() -> None:
+def test_the_surest_are_sent_and_big_central_ones_come_first() -> None:
     boxes = [
         box(
             0.04 * (i // 2),
@@ -89,16 +89,23 @@ def test_outlines_are_capped_surest_first() -> None:
     ]
     shown = pick(boxes)
     assert len(shown) == ALL_OUTLINES
-    assert [b.score for b in shown] == sorted((b.score for b in boxes), reverse=True)[:40]
-    first = pick(boxes, OutlineRule(min_score=0.2, max_outlines=MAX_OUTLINES))
-    assert first == shown[:MAX_OUTLINES]
+    surest = sorted(boxes, key=lambda b: -b.score)[:ALL_OUTLINES]
+    assert set(shown) == set(surest)
+    assert [salience(b) for b in shown] == sorted((salience(b) for b in shown), reverse=True)
+
+
+def test_a_big_work_in_the_middle_beats_a_surer_one_in_a_corner() -> None:
+    corner = box(0.0, 0.0, 0.1, 0.1, 0.9)
+    middle = box(0.35, 0.3, 0.65, 0.7, 0.3)
+    small = box(0.45, 0.8, 0.5, 0.85, 0.8)
+    assert pick([corner, middle, small]) == (middle, small, corner)
 
 
 def test_fake_outlines_depend_on_the_photo() -> None:
     a, b = fake_outlines(b"one photo"), fake_outlines(b"another photo")
     assert len(a.boxes) == 3
     assert a != b
-    assert pick(list(a.boxes)) == a.boxes
+    assert set(pick(list(a.boxes))) == set(a.boxes)
 
 
 def test_a_box_around_several_works_comes_after_the_works() -> None:
@@ -106,4 +113,4 @@ def test_a_box_around_several_works_comes_after_the_works() -> None:
     left = box(0.1, 0.1, 0.25, 0.3, 0.5)
     right = box(0.35, 0.1, 0.5, 0.3, 0.4)
     alone = box(0.7, 0.1, 0.9, 0.4, 0.3)
-    assert pick([wall, left, right, alone], SITE_RULE) == (left, right, alone, wall)
+    assert pick([wall, left, right, alone], SITE_RULE) == (alone, right, left, wall)

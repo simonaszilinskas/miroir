@@ -13,8 +13,9 @@ const SEND_SIDE = 1024;
 const KEEP_SIDE = 2048;
 /** Longest side, in pixels, of the photo sent to find its objects (`DETECT_SIDE`). */
 const DETECT_SIDE = 1024;
-/** Outlines drawn at first; the server sends up to 40, shown on request (walls of pictures). */
-const MAX_OUTLINES = 12;
+/** Outlines drawn at first (`MAX_OUTLINES` in outlines.py): the server sends up to 40, biggest
+ * and most central first; the rest are shown on request (walls of pictures). */
+const MAX_OUTLINES = 20;
 /** Smallest tap area, in CSS pixels, around an outline. */
 const TAP_SIDE = 44;
 /** A press that moves less than this many pixels is a tap, not a drawn box. */
@@ -484,7 +485,7 @@ function describeOutlines() {
 $('#more-outlines').addEventListener('click', () => {
   state.allOutlines = true;
   drawOutlines();
-  $('#outlines .miroir-outline:nth-child(13)')?.focus();
+  $(`#outlines .miroir-outline:nth-child(${MAX_OUTLINES + 1})`)?.focus();
 });
 
 /** An outline (shares of the photo) in canvas pixels. */
