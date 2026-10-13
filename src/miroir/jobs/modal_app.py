@@ -210,6 +210,27 @@ def embed_megaloc(
     return _embed(option, images, supplied or [])
 
 
+@app.function(
+    image=image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights},
+    secrets=[hf_secret],
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def embed_texts(option: ModalOption, ids: list[str], texts: list[str]) -> ChunkResult:
+    """Search words (T7 and other word queries), as the website embeds them."""
+    from miroir.remote.models import embed_texts as embed  # noqa: PLC0415 (container only)
+
+    result = embed(option, ids, texts)
+    if result.load_s > 0:
+        weights.commit()
+    return result
+
+
 # --- step E1: keypoint matching of each query against its shortlist ------------------------
 
 
@@ -316,6 +337,11 @@ class ModalCalls:
         supplied: Sequence[SuppliedImage] = (),
     ) -> ChunkResult:
         return FAMILY_FUNCTIONS[option.family].remote(option, list(images), list(supplied))
+
+    def embed_texts(
+        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+    ) -> ChunkResult:
+        return embed_texts.remote(option, list(ids), list(texts))
 
     def scale(self, option: ModalOption, containers: int) -> None:
         """Let the option's function run `containers` containers at once, for this app run."""

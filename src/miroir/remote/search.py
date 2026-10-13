@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 A7_OPTION = "A7-embeddinggemma-2-512"
 A3_OPTION = "A3-megaloc-322"
-TEXT_PROMPT = "SearchQuery"
 
 Floats = NDArray[np.float32]
 
@@ -46,10 +45,8 @@ class QueryModels:
             image = opened.convert("RGB")
         return self.a7.encode([image])[0], self.a3.encode([image])[0]
 
-    @torch.inference_mode()
     def text(self, text: str) -> Floats:
-        vectors = self.a7.model.encode([text], prompt_name=TEXT_PROMPT, convert_to_numpy=True)
-        return np.asarray(vectors, dtype=np.float32)[0]
+        return self.a7.encode_text([text])[0]
 
 
 class GpuGallery:

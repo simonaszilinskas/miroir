@@ -35,6 +35,11 @@ R0_TIMEOUT_S = 30 * 60
 MATCH_QUERIES = 40
 #: A warm container waits this long for the next call before it shuts down.
 SCALEDOWN_S = 120
+#: EmbeddingGemma 2's prompt for words searched against images: the website's query side
+#: (`miroir.remote.search`) and the T7 query runs (`embed_texts`) both use it.
+TEXT_PROMPT = "SearchQuery"
+#: Texts per remote call when embedding words.
+CHUNK_TEXTS = 2_000
 
 
 class Family(StrEnum):

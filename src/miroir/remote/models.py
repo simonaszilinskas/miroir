@@ -24,6 +24,7 @@ from miroir.config import MODAL_IMAGES_MOUNT
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
 from miroir.jobs.modal_spec import (
     MAX_ASPECT,
+    TEXT_PROMPT,
     ChunkResult,
     DType,
     Family,
@@ -209,6 +210,17 @@ class SentenceEncoder:
         )
         return np.asarray(vectors, dtype=np.float32)
 
+    @torch.inference_mode()
+    def encode_text(self, texts: list[str]) -> NDArray[np.float32]:
+        """Search words, with the query prompt the website uses (`TEXT_PROMPT`)."""
+        vectors = self.model.encode(
+            texts,
+            prompt_name=TEXT_PROMPT,
+            batch_size=self.option.batch_size,
+            convert_to_numpy=True,
+        )
+        return np.asarray(vectors, dtype=np.float32)
+
 
 # --- the two tasks ----------------------------------------------------------------------------
 
@@ -228,6 +240,20 @@ def embed_images(
         decoded = _decoded(chain(fetcher.fetch_all(images), given), skips)
         ids, vectors = _embed_batches(model, decoded, option.batch_size)
     return ChunkResult(ids, vectors, skips, load_s, time.monotonic() - start)
+
+
+def embed_texts(option: ModalOption, ids: Sequence[str], texts: Sequence[str]) -> ChunkResult:
+    """Search words as the website embeds them (EmbeddingGemma 2, `TEXT_PROMPT`)."""
+    model, load_s = encoder(option)
+    if not isinstance(model, SentenceEncoder):
+        msg = f"{option.id} cannot embed words"
+        raise TypeError(msg)
+    start = time.monotonic()
+    vectors = model.encode_text(list(texts))
+    if not np.isfinite(vectors).all():
+        msg = "the model returned NaN or infinite values"
+        raise FloatingPointError(msg)
+    return ChunkResult(tuple(ids), vectors, {}, load_s, time.monotonic() - start)
 
 
 def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, int]:

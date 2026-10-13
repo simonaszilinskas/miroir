@@ -74,6 +74,14 @@ class FakeCalls:
         vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
+    def embed_texts(
+        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+    ) -> ChunkResult:
+        self.calls.append((f"texts {option.id}", len(texts)))
+        self.clock.now += SECONDS_PER_CALL
+        vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
+        return ChunkResult(tuple(ids), vectors, {}, load_s=30.0, embed_s=1.0)
+
     def scale(self, option: ModalOption, containers: int) -> None:
         self.calls.append((f"scale {option.id}", containers))
 
@@ -164,6 +172,20 @@ def test_probe_then_run_writes_vectors_and_logs_modal_spend(built: Settings) -> 
     assert r.ledger.total(service=Service.MODAL) == pytest.approx(2 * probe.cost_usd)
     assert r.ledger.total(SpendKind.PROBE) == pytest.approx(probe.cost_usd)
     assert [c[0] for c in calls.calls] == [GEMMA, GEMMA]
+
+
+def test_words_are_embedded_without_a_probe_and_logged(built: Settings) -> None:
+    r, calls = runner(built)
+    done = r.embed_texts(GEMMA, "T7-words", ["T7-a", "T7-b"], ["église", "vase"], max_usd=1.0)
+    assert done.ids == ("T7-a", "T7-b")
+    assert done.info.pooling == "text"
+    assert "'SearchQuery' prompt" in done.info.notes
+    assert calls.calls == [(f"texts {GEMMA}", 2)]
+    assert r.ledger.total(service=Service.MODAL) == pytest.approx(SECONDS_PER_CALL * L4.usd_per_s)
+    with pytest.raises(ValueError, match="non-empty text"):
+        r.embed_texts(GEMMA, "other", ["x"], [""], max_usd=1.0)
+    with pytest.raises(ValueError, match="only EmbeddingGemma"):
+        r.embed_texts("A3-megaloc-322", "other", ["x"], ["y"], max_usd=1.0)
 
 
 def test_run_needs_a_probe(built: Settings) -> None:

@@ -41,6 +41,10 @@ vlm_app = typer.Typer(
     no_args_is_help=True, help="Step H1: ask a vision model about query photos, search its answer."
 )
 app.add_typer(vlm_app, name="vlm")
+words_app = typer.Typer(
+    no_args_is_help=True, help="Step B, search by words: test set T7, its vectors, its scores."
+)
+app.add_typer(words_app, name="words")
 web_app = typer.Typer(
     no_args_is_help=True, help="The prototype website: build its index, deploy it, run it locally."
 )
@@ -52,6 +56,8 @@ app.add_typer(geo_app, name="geo")
 
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
+#: The model whose text tower the website searches words with (A7).
+TEXT_OPTION = "A7-embeddinggemma-2-512"
 
 
 @app.callback()
@@ -903,6 +909,123 @@ def vlm_score(
         h3, weight = vlm.score_h3(settings, prepared, image_run, image_label, round_id=round_id)
         typer.echo(f"H3 {image_label}+H1, image weight {weight:.1f}: {h3.vectors.notes}")
         _echo_scores(h3.scores)
+
+
+@words_app.command("ask")
+def words_ask(
+    *,
+    probe: Annotated[
+        bool, typer.Option("--probe", help="Write for 100 images; print the projection.")
+    ] = False,
+    max_usd: Annotated[float, typer.Option(help="Refuse or stop a run past this.")] = 1.0,
+) -> None:
+    """T7: a vision model writes the words a visitor would type for each drawn image. Paid."""
+    from miroir.eval import words  # noqa: PLC0415
+    from miroir.jobs import describe  # noqa: PLC0415
+    from miroir.jobs.factory import open_vision  # noqa: PLC0415
+
+    settings = get_settings()
+    draws = words.draw_from_settings(settings, _web_index_ids())
+    ids = [d.query.query_image_id for d in draws]
+    prompts = {d.query.query_image_id: d.prompt for d in draws}
+    with open_vision(settings, words.WRITER, prompts) as writer:
+        if probe:
+            result = describe.probe(writer, ids, words.SET_ID)
+            typer.echo(
+                f"T7 writer probe: {result.images} images cost ${result.cost_usd:.4f}. "
+                f"Projected for {len(ids)} images: ${result.projected_usd(len(ids)):.3f}"
+            )
+            return
+        done = describe.run(writer, ids, max_usd=max_usd)
+    typer.echo(
+        f"T7 writer: {done.answered} new answers, ${done.cost_usd:.4f}, skipped {done.skips}"
+    )
+
+
+@words_app.command("sets")
+def words_sets() -> None:
+    """Write T7 and T7en (both halves) from the draw and the writer's saved answers."""
+    from miroir.eval import words  # noqa: PLC0415
+
+    settings = get_settings()
+    counts = words.build_sets_from_answers(
+        settings, words.draw_from_settings(settings, _web_index_ids())
+    )
+    for label, count in counts.items():
+        typer.echo(f"{label}: {count} queries")
+
+
+@words_app.command("embed")
+def words_embed(
+    *,
+    max_usd: Annotated[float, typer.Option(help="Stop before a call once spent.")] = 0.5,
+) -> None:
+    """Embed T7/T7en tune words and the refine communes with EmbeddingGemma 2 on Modal. Paid."""
+    from miroir.eval.wordsearch import TEXT_LABEL, text_inputs  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+
+    settings = get_settings()
+    ids, texts = text_inputs(settings)
+    with open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        done = runner.embed_texts(TEXT_OPTION, TEXT_LABEL, ids, texts, max_usd=max_usd)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@words_app.command("score")
+def words_score(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")] = "R2",
+    refine: Annotated[
+        bool, typer.Option("--refine/--no-refine", help="Also score words refining a photo.")
+    ] = True,
+) -> None:
+    """Score word search on T7 tune with the site's ranking; one result file per option."""
+    from miroir.eval import wordsearch  # noqa: PLC0415
+    from miroir.eval.router3 import query_chroma  # noqa: PLC0415
+    from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
+    from miroir.web.routing import TextWeights  # noqa: PLC0415
+
+    settings = get_settings()
+    run = f"{TEXT_OPTION}-{wordsearch.TEXT_LABEL}"
+    t7 = wordsearch.score_t7(settings, run, round_id=round_id)
+    typer.echo(
+        "T7 hit@10 by A7 weight: " + ", ".join(f"{w:.1f} {100 * h:.1f}" for w, h in t7.grid.items())
+    )
+    typer.echo(f"best A7 weight {t7.best_weight:.1f}")
+    for part in t7.subsets:
+        line = ", ".join(
+            f"{name} {100 * wordsearch.hit_at(wordsearch.ranks(part.signals, mixer)):.1f}"
+            for name, mixer in (
+                ("BM25", wordsearch.weighted(0.0)),
+                ("A7", wordsearch.weighted(1.0)),
+                ("0.5", wordsearch.weighted(0.5)),
+                (f"{t7.best_weight:.1f}", wordsearch.weighted(t7.best_weight)),
+            )
+        )
+        typer.echo(f"{part.label} ({len(part.signals.query_ids)} q) hit@10: {line}")
+    if not refine:
+        return
+    catalog = read_catalog(settings.web_index_dir(WEB_INDEX) / CATALOG_FILE)
+    # Colour matters for Commons photos of buildings (T2); POP photos route by type alone.
+    places = wordsearch.place_queries(settings, catalog)
+    chroma = query_chroma(settings, sorted({q.query_image_id for q in places if q.set_id == "T2"}))
+    words = TextWeights(a7=t7.best_weight, bm25=round(1 - t7.best_weight, 1))
+    found = wordsearch.score_refine(settings, run, words, chroma)
+    for set_id, hits in found.hits.items():
+        typer.echo(
+            f"refine {set_id} ({found.queries[set_id]} q) hit@10 by words weight: "
+            + ", ".join(f"{w:g} {100 * h:.1f}" for w, h in hits.items())
+        )
+
+
+def _web_index_ids() -> set[str]:
+    """Image ids of the website's index (`WEB_INDEX`): T7 draws only images the site holds."""
+    from miroir.web.bundle import IDS_FILE  # noqa: PLC0415
+
+    path = get_settings().web_index_dir(WEB_INDEX) / IDS_FILE
+    return set(path.read_text(encoding="utf-8").split())
 
 
 @rerank_app.command("modal")

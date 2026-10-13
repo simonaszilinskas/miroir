@@ -248,7 +248,10 @@ class Describer:
         request_concurrency: int = REQUEST_CONCURRENCY,
         batch_size: int = BATCH_SIZE,
         batch_poll_s: float = 30.0,
+        prompts: Mapping[str, str] | None = None,
     ) -> None:
+        """`prompts` gives some images a prompt of their own (T7's writer); the rest get
+        `PROMPT`."""
         self.settings = settings
         self.option = option
         self._client = client
@@ -256,6 +259,7 @@ class Describer:
         self._concurrency = request_concurrency
         self._batch_size = batch_size
         self._poll_s = batch_poll_s
+        self._prompts = prompts or {}
         self.ledger = SpendLedger(settings.spend_ledger)
         self.budget = Budget.from_settings(settings)
         self._store = PublishableImages.load(settings)
@@ -332,7 +336,8 @@ class Describer:
     def _chat_one(self, fetched: Fetched) -> tuple[str, ChatAnswer | OpenRouterError]:
         try:
             data_url = "data:image/jpeg;base64," + base64.b64encode(fetched.jpeg or b"").decode()
-            return fetched.image_id, self._client.chat(self.option.model, self._body(data_url))
+            body = self._body(fetched.image_id, data_url)
+            return fetched.image_id, self._client.chat(self.option.model, body)
         except OpenRouterError as err:
             return fetched.image_id, err
 
@@ -356,7 +361,7 @@ class Describer:
             msg = f"{self.option.model} has no :batch variant on OpenRouter"
             raise OpenRouterError(msg)
         for chunk in batched(images, self._batch_size):
-            requests = {i.image_id: self._body(i.url) for i in chunk}
+            requests = {i.image_id: self._body(i.image_id, i.url) for i in chunk}
             batch_id = self._client.submit_batch("/v1/chat/completions", model, requests)
             self._add_pending(batch_id, [i.image_id for i in chunk])
             yield self._collect(batch_id, len(chunk), kind, skips)
@@ -406,9 +411,9 @@ class Describer:
         text = "".join(f"{b}\t{','.join(ids)}\n" for b, ids in kept.items())
         self._pending_path.write_text(text, encoding="utf-8")
 
-    def _body(self, image_url: str) -> dict[str, JSON]:
+    def _body(self, image_id: str, image_url: str) -> dict[str, JSON]:
         content: list[JSON] = [
-            {"type": "text", "text": PROMPT},
+            {"type": "text", "text": self._prompts.get(image_id, PROMPT)},
             {"type": "image_url", "image_url": {"url": image_url}},
         ]
         return {

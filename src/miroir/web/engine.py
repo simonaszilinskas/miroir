@@ -42,6 +42,7 @@ from miroir.web.routing import (
     Guess,
     PhotoType,
     Routing,
+    TextWeights,
     read_guess,
     read_routing,
 )
@@ -143,6 +144,9 @@ class SearchResponse:
     nearby: int | None = None
     """With a position: entities known within `near_km` of it (the near ones rank higher)."""
     near_km: float | None = None
+    words_found: bool | None = None
+    """Searches with words: whether any record holds one of them. When none does, the
+    cards come from the text vector alone, and the page says so."""
 
 
 class Engine:
@@ -181,12 +185,14 @@ class Engine:
         signals: list[ranking.Signal] = []
         per_image: Floats | None = None
         photo: _Photo | None = None
+        words_found: bool | None = None
         if request.image is not None:
             photo = self._photo(request.image, mask, timings)
             signals += photo.signals
             per_image = photo.per_image
         if text:
             words = self._words(text, mask, timings)
+            words_found = words.found
             scale = 1.0 if photo is None else self.routing.text.refine
             signals += [ranking.Signal(s.per_entity, s.weight * scale) for s in words.signals]
             if per_image is None:
@@ -221,6 +227,7 @@ class Engine:
             timings_ms=timings,
             nearby=nearby,
             near_km=None if nearby is None else NEAR_KM,
+            words_found=words_found,
         )
 
     # --- the two kinds of query ------------------------------------------------------------
@@ -262,16 +269,9 @@ class Engine:
         tick = time.monotonic()
         a7 = np.where(mask, self.gallery.a7(query), -np.inf).astype(np.float32)
         per_record = self.bm25.scores(text)
-        records = self.catalog.image_record
-        bm25 = np.where(records >= 0, per_record[np.maximum(records, 0)], 0.0)
-        bm25 = np.where(mask, bm25, -np.inf).astype(np.float32)
-        weights = self.routing.text
-        signals = [
-            ranking.Signal(ranking.entity_max(a7, self.catalog), weights.a7),
-            ranking.Signal(ranking.entity_max(bm25, self.catalog), weights.bm25),
-        ]
+        signals = word_signals(self.catalog, a7, per_record, mask, self.routing.text)
         timings["vectors_text"] = _ms(tick)
-        return _Words(signals=[s for s in signals if s.weight > 0], per_image=a7)
+        return _Words(signals=signals, per_image=a7, found=bool((per_record > 0).any()))
 
     # --- cards -----------------------------------------------------------------------------
 
@@ -332,6 +332,29 @@ class _Photo:
 class _Words:
     signals: list[ranking.Signal]
     per_image: Floats
+    found: bool
+    """Some record holds one of the words (BM25 matched)."""
+
+
+def word_signals(
+    catalog: Catalog,
+    a7: Floats,
+    bm25_per_record: Floats,
+    mask: NDArray[np.bool_],
+    weights: TextWeights,
+) -> list[ranking.Signal]:
+    """The two word signals per entity, weighted: the A7 text vector's cosine with every
+    image (`a7`, in catalog order) and BM25 over the record text, each image taking its
+    record's score. Images `mask` removes score -inf. T7 scoring (`miroir.eval.wordsearch`)
+    calls this too, so the measured ranking is the site's."""
+    records = catalog.image_record
+    bm25 = np.where(records >= 0, bm25_per_record[np.maximum(records, 0)], 0.0)
+    bm25 = np.where(mask, bm25, -np.inf).astype(np.float32)
+    signals = [
+        ranking.Signal(ranking.entity_max(np.where(mask, a7, -np.inf), catalog), weights.a7),
+        ranking.Signal(ranking.entity_max(bm25, catalog), weights.bm25),
+    ]
+    return [s for s in signals if s.weight > 0]
 
 
 def prepare_photo(data: bytes) -> bytes:

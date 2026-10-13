@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 
@@ -12,7 +12,7 @@ from miroir.commons.images import open_commons_images
 from miroir.config import Settings
 from miroir.images.fetch import CONCURRENCY, ImageCache, ImageFetcher
 from miroir.jobs.describe import OPTIONS as DESCRIBE_OPTIONS
-from miroir.jobs.describe import Describer
+from miroir.jobs.describe import DescribeOption, Describer
 from miroir.jobs.embed import OPTIONS, OpenRouterEmbedder
 from miroir.jobs.openrouter import OpenRouterClient
 
@@ -49,6 +49,16 @@ def open_describer(settings: Settings, model: str, *, batch: bool = True) -> Gen
     if model not in DESCRIBE_OPTIONS:
         msg = f"unknown vision model {model!r}; known: {', '.join(DESCRIBE_OPTIONS)}"
         raise ValueError(msg)
+    option = DESCRIBE_OPTIONS[model]
+    with open_vision(settings, option if batch else replace(option, batch=False)) as describer:
+        yield describer
+
+
+@contextmanager
+def open_vision(
+    settings: Settings, option: DescribeOption, prompts: Mapping[str, str] | None = None
+) -> Generator[Describer]:
+    """A `Describer` for any vision option, with per-image prompts if given (T7's writer)."""
     if settings.openrouter_api_key is None:
         msg = "OPENROUTER_API_KEY is not set (see .env.example)"
         raise RuntimeError(msg)
@@ -57,9 +67,8 @@ def open_describer(settings: Settings, model: str, *, batch: bool = True) -> Gen
     cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http:
         try:
-            option = DESCRIBE_OPTIONS[model]
-            if not batch:
-                option = replace(option, batch=False)
-            yield Describer(settings, option, client, ImageFetcher(images_http, cache))
+            yield Describer(
+                settings, option, client, ImageFetcher(images_http, cache), prompts=prompts
+            )
         finally:
             client.close()

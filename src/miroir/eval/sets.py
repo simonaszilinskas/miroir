@@ -29,6 +29,8 @@ class Query:
     """Take these out of the gallery before searching this query."""
     scene_image_ids: tuple[str, ...] = ()
     """T3 only: the Jeu de Paume room photo(s) the artwork appears in."""
+    text: str = ""
+    """T7 only: the words searched. `query_image_id` is then the hidden image they describe."""
 
 
 _QUERY = TypeAdapter(Query)
@@ -43,7 +45,15 @@ def write_set(
             msg = f"{set_id} {half}: a query belongs to another set"
             raise ValueError(msg)
         path = settings.testset_path(set_id, half, allow_sealed=True)  # writing, not reading
-        _write_lines(path, (json.dumps(asdict(q), ensure_ascii=False) for q in queries))
+        _write_lines(path, (json.dumps(_fields(q), ensure_ascii=False) for q in queries))
+
+
+def _fields(query: Query) -> dict[str, object]:
+    """A query as written: `text` only where a set has one, so other sets stay as they were."""
+    fields = asdict(query)
+    if not query.text:
+        del fields["text"]
+    return fields
 
 
 def load_queries(

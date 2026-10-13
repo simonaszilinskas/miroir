@@ -46,6 +46,7 @@ from miroir.images.fetch import Fetched
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.modal_spec import (
     CHUNK_IMAGES,
+    CHUNK_TEXTS,
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
     DOWNLOAD_TIMEOUT_S,
@@ -58,6 +59,7 @@ from miroir.jobs.modal_spec import (
     R0_MACHINE,
     R0_OPTIONS,
     R0_TIMEOUT_S,
+    TEXT_PROMPT,
     ChunkResult,
     Family,
     Machine,
@@ -103,6 +105,9 @@ class RemoteCalls(Protocol):
         option: ModalOption,
         images: Sequence[Image],
         supplied: Sequence[SuppliedImage] = (),
+    ) -> ChunkResult: ...
+    def embed_texts(
+        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
     def scale(self, option: ModalOption, containers: int) -> None: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
@@ -409,6 +414,71 @@ class ModalRunner:
         written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
         checkpoint.remove()
         return written
+
+    def embed_texts(
+        self,
+        option_id: str,
+        label: str,
+        ids: Sequence[str],
+        texts: Sequence[str],
+        *,
+        max_usd: float,
+    ) -> VectorSet:
+        """Embed search words (no image leaves the Mac) into the run `<option>-<label>`.
+
+        Words are tiny next to images, so no probe: each call's worst case is checked against
+        the budget, and the run stops before a call once it has cost `max_usd`.
+        """
+        opt = option(option_id)
+        if opt.family is not Family.EMBEDDINGGEMMA:
+            msg = f"{opt.id}: only EmbeddingGemma 2 embeds words here"
+            raise ValueError(msg)
+        if len(ids) != len(texts) or len(set(ids)) != len(ids) or not all(texts):
+            msg = "embed_texts needs one non-empty text per id, and distinct ids"
+            raise ValueError(msg)
+        run = run_name(opt, label)
+        out = self.settings.vectors_path(run)
+        _refuse_existing(out)
+        start = self._clock()
+        cost = 0.0
+        done_ids: list[str] = []
+        rows: list[NDArray[np.float32]] = []
+        for chunk in batched(range(len(ids)), CHUNK_TEXTS):
+            if cost >= max_usd:
+                msg = f"{run}: cost ${cost:.4f}, at its ${max_usd:.2f} limit; stopped"
+                raise BudgetError(msg)
+            chunk_ids = [ids[i] for i in chunk]
+            chunk_texts = [texts[i] for i in chunk]
+            paid = self._paid(
+                lambda a=chunk_ids, b=chunk_texts: self._calls.embed_texts(opt, a, b),
+                machine=opt.machine,
+                timeout_s=CHUNK_TIMEOUT_S,
+                kind=SpendKind.RUN,
+                option=opt.id,
+                run=run,
+                model=opt.model,
+                items=len(chunk_ids),
+            )
+            cost += paid.cost_usd
+            _check_chunk(paid.result, opt)
+            if list(paid.result.ids) != chunk_ids:
+                msg = f"{run}: the answer's ids do not match the words sent"
+                raise ValueError(msg)
+            done_ids.extend(chunk_ids)
+            rows.append(paid.result.vectors)
+        info = replace(
+            self._info(
+                opt,
+                gallery=label,
+                machine=opt.machine,
+                cost=cost,
+                wall=self._clock() - start,
+                skips={},
+            ),
+            pooling="text",
+        )
+        info = replace(info, notes=f"{info.notes}; words with the {TEXT_PROMPT!r} prompt")
+        return write_vectors(out, done_ids, np.concatenate(rows), info)
 
     def embed_supplied(
         self,

@@ -202,7 +202,16 @@ def test_words_alone_have_no_match_flag_and_use_bm25() -> None:
     response = engine.search(SearchRequest(text="lièvre"))
     assert response.mode == "text"
     assert response.match is None
+    assert response.words_found is True
     assert response.cards[0].entity_id == "OBJ2"
+
+
+def test_words_no_record_holds_are_flagged_and_still_answered() -> None:
+    engine, _ = h.engine()
+    response = engine.search(SearchRequest(text="qsdfghjk"))
+    assert response.words_found is False
+    assert response.cards  # the text vector still ranks images
+    assert engine.search(SearchRequest(image=h.photo(130))).words_found is None
 
 
 def test_words_refine_a_photo_search() -> None:
