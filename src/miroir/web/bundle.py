@@ -24,7 +24,7 @@ import logging
 import math
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -78,10 +78,16 @@ DESCRIPTION_CHARS = 700
 QUERY_BATCH = 128
 GALLERY_CHUNK = 8192
 
-#: G4 weights from R2 (docs/results.md, "G4"): the grid picked EmbeddingGemma 2 at 1.0 for
-#: buildings and 0.2 for objects (blend), mean hit@10 67.6 on T1, T3 and T5 tune.
-BUILDING_A7_WEIGHT = 1.0
+#: G5 weights from R2 (docs/results.md, "F2"): with Commons photos in the gallery the grid
+#: picked EmbeddingGemma 2 at 1.0 for black-and-white building photos, 0.0 (MegaLoc alone)
+#: for colour building photos and 0.2 for objects (hard switch), on T1, T2, T3 and T5 tune.
+ARCHIVE_A7_WEIGHT = 1.0
+COLOUR_BUILDING_A7_WEIGHT = 0.0
 OBJECT_A7_WEIGHT = 0.2
+#: A bucket with fewer T8 searches than this takes its cut-off from T8c (Commons photos with
+#: no record) instead: T8 is drawn from archive prints and museum photos, so it holds almost
+#: no colour photo of a building.
+MIN_CALIBRATION_QUERIES = 20
 
 Floats = NDArray[np.float32]
 
@@ -118,6 +124,16 @@ INDEXES: dict[str, IndexSpec] = {
         name="full",
         a7_run="A7-embeddinggemma-2-512-full",
         a3_run="A3-megaloc-322-full",
+        a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
+        a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+        saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
+    ),
+    # The same, plus up to 5 Commons photos per Mérimée building (step F2, `miroir testsets
+    # commons-gallery --gallery full`), merged into the full-sample runs.
+    "full-f2": IndexSpec(
+        name="full-f2",
+        a7_run="A7-embeddinggemma-2-512-full+F2",
+        a3_run="A3-megaloc-322-full+F2",
         a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
         a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
         saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
@@ -274,7 +290,9 @@ def _commons(settings: Settings, ids: Sequence[str]) -> dict[str, CatalogImage]:
     if not wanted:
         return {}
     out: dict[str, CatalogImage] = {}
-    for photo in read_commons(settings.commons_parquet):
+    tables = [settings.commons_parquet, *settings.commons_gallery_parquets()]
+    photos = [p for t in tables if t.exists() for p in read_commons(t)]
+    for photo in photos:
         if photo.image_id in wanted and photo.image_id not in out:
             out[photo.image_id] = CatalogImage(
                 image_id=photo.image_id,
@@ -365,6 +383,8 @@ class _Asked:
     a3: Floats
     hidden: tuple[tuple[str, ...], ...]
     right: tuple[tuple[str, ...], ...]
+    chroma: tuple[float, ...]
+    """Each query photo's chroma spread (`images.colour`), as the server measures it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,15 +395,17 @@ class _QuerySets:
     def load(
         cls, settings: Settings, spec: IndexSpec, ids: Sequence[str], projection: Projection | None
     ) -> _QuerySets:
+        from miroir.eval.router3 import query_chroma  # noqa: PLC0415 (fetches photos)
+
         index = set(ids)
         gallery_a7 = read_vectors(settings.vectors_path(spec.a7_run))
         gallery_a3 = read_vectors(settings.vectors_path(spec.a3_run))
-        out: dict[str, _Asked] = {}
+        chosen: dict[str, tuple[list[Query], VectorSet, VectorSet, Projection | None]] = {}
         for set_id in ("T1", "T3", "T5", "T8"):
             queries = [
                 q for q in load_queries(settings, set_id, "tune") if q.query_image_id in index
             ]
-            out[set_id] = _asked(set_id, queries, gallery_a7, gallery_a3, None)
+            chosen[set_id] = (queries, gallery_a7, gallery_a3, None)
         if spec.a7_query_run and spec.a3_query_run:
             q7 = read_vectors(settings.vectors_path(spec.a7_query_run))
             q3 = read_vectors(settings.vectors_path(spec.a3_query_run))
@@ -392,8 +414,12 @@ class _QuerySets:
                 queries = [
                     q for q in load_queries(settings, set_id, "tune") if q.query_image_id in have
                 ]
-                out[set_id] = _asked(set_id, queries, q7, q3, projection)
-        return cls(out)
+                chosen[set_id] = (queries, q7, q3, projection)
+        photos = [q.query_image_id for qs, *_ in chosen.values() for q in qs]
+        chroma = query_chroma(settings, list(dict.fromkeys(photos)))
+        return cls(
+            {s: _asked(s, qs, v7, v3, p, chroma=chroma) for s, (qs, v7, v3, p) in chosen.items()}
+        )
 
 
 def _asked(
@@ -402,6 +428,8 @@ def _asked(
     a7: VectorSet,
     a3: VectorSet,
     projection: Projection | None,
+    *,
+    chroma: Mapping[str, float],
 ) -> _Asked:
     row7, row3 = a7.index(), a3.index()
     v7 = np.asarray(a7.vectors[[row7[q.query_image_id] for q in queries]], dtype=np.float32)
@@ -415,6 +443,7 @@ def _asked(
         a3=v3,
         hidden=tuple((q.query_image_id, *q.exclude_image_ids) for q in queries),
         right=tuple(q.expected_entity_ids for q in queries),
+        chroma=tuple(chroma[q.query_image_id] for q in queries),
     )
 
 
@@ -438,7 +467,7 @@ def _search_set(
     buckets: list[str] = []
     for j in range(len(asked.query_ids)):
         photo_type, _ = guess.photo_type(asked.a7[j])
-        bucket = routing.choose(photo_type, None)
+        bucket = routing.choose(photo_type, asked.chroma[j])
         w = bucket.a7_weight
         signals = [
             s for s in (ranking.Signal(e7[j], w), ranking.Signal(e3[j], 1 - w)) if s.weight > 0
@@ -483,56 +512,88 @@ def entity_cosines(
 def calibrate(
     catalog: Catalog, vectors: _Vectors, guess: Guess, queries: _QuerySets, index: str
 ) -> tuple[Routing, dict[str, object]]:
-    """Weights from R2's G4; one cut-off per bucket from T8 (at most WRONG_TARGET confident)."""
+    """Weights from R2's G5; one cut-off per bucket from T8 (at most WRONG_TARGET confident).
+
+    A bucket that T8 barely reaches (colour photos of buildings) takes its cut-off from T8c,
+    Commons photos with no record, against T2 and T2b as the searches that should match.
+    """
     draft = Routing(
         buckets=(
-            Bucket("building", BUILDING_A7_WEIGHT, math.inf, PhotoType.BUILDING),
+            Bucket(
+                "archive-building", ARCHIVE_A7_WEIGHT, math.inf, PhotoType.BUILDING, greyscale=True
+            ),
+            Bucket(
+                "colour-building",
+                COLOUR_BUILDING_A7_WEIGHT,
+                math.inf,
+                PhotoType.BUILDING,
+                greyscale=False,
+            ),
             Bucket("object", OBJECT_A7_WEIGHT, math.inf, PhotoType.OBJECT),
         )
     )
-    not_found = _search_set(catalog, vectors, guess, draft, queries.sets["T8"])
-    in_index = [_search_set(catalog, vectors, guess, draft, queries.sets[s]) for s in ("T1", "T5")]
-    found_conf = np.concatenate([s.confidence for s in in_index])
-    found_buckets = tuple(b for s in in_index for b in s.buckets)
-    found_hit1 = np.concatenate([s.ranks == 1 for s in in_index])
+
+    def searched(set_ids: Sequence[str]) -> list[_Searched]:
+        return [
+            _search_set(catalog, vectors, guess, draft, queries.sets[s])
+            for s in set_ids
+            if s in queries.sets
+        ]
+
+    pools = {
+        "T8": (searched(["T8"]), searched(["T1", "T5"]), "T1+T5"),
+        "T8c": (searched(["T8c"]), searched(["T2", "T2b"]), "T2+T2b"),
+    }
     date = datetime.now(UTC).date().isoformat()
     buckets: list[Bucket] = []
     report: dict[str, object] = {}
     for draft_bucket in draft.buckets:
-        lost = not_found.confidence[np.asarray(not_found.buckets) == draft_bucket.name]
-        mine = np.asarray(found_buckets) == draft_bucket.name
+        source = "T8"
+        lost_runs, found_runs, found_sets = pools[source]
+        lost = _in_bucket(lost_runs, draft_bucket.name)[0]
+        if lost.size < MIN_CALIBRATION_QUERIES and pools["T8c"][0]:
+            source = "T8c"
+            lost_runs, found_runs, found_sets = pools[source]
+            lost = _in_bucket(lost_runs, draft_bucket.name)[0]
+        found_conf, found_hit1 = _in_bucket(found_runs, draft_bucket.name)
         cutoff = cutoff_for(lost, WRONG_TARGET)
-        matched = found_conf[mine] >= cutoff
+        matched = found_conf >= cutoff
         stats = {
             "cutoff": cutoff,
-            "t8_queries": int(lost.size),
-            "t8_confident": float((lost >= cutoff).mean()) if lost.size else 0.0,
-            "in_index_queries": int(mine.sum()),
+            "calibrated_on": source,
+            "not_found_queries": int(lost.size),
+            "not_found_confident": float((lost >= cutoff).mean()) if lost.size else 0.0,
+            "in_index_sets": found_sets,
+            "in_index_queries": int(found_conf.size),
             "in_index_matched": float(matched.mean()) if matched.size else 0.0,
-            "matched_right_at_1": float(found_hit1[mine][matched].mean()) if matched.any() else 0.0,
+            "matched_right_at_1": float(found_hit1[matched].mean()) if matched.any() else 0.0,
         }
         report[draft_bucket.name] = stats
         note = (
-            f"A7 weight {draft_bucket.a7_weight} from R2 G4 (docs/results.md). Cut-off: lowest "
-            f"confidence keeping at most {WRONG_TARGET:.0%} of T8 tune searches confident "
-            f"({stats['t8_queries']} {draft_bucket.name} queries, index {index}, {date}); "
-            f"it lets {stats['in_index_matched']:.0%} of {stats['in_index_queries']} T1+T5 "
-            f"tune searches match, {stats['matched_right_at_1']:.0%} of those right at rank 1"
+            f"A7 weight {draft_bucket.a7_weight} from R2 G5 with F2 (docs/results.md). Cut-off: "
+            f"lowest confidence keeping at most {WRONG_TARGET:.0%} of {source} tune searches "
+            f"confident ({stats['not_found_queries']} {draft_bucket.name} queries, index "
+            f"{index}, {date}); it lets {stats['in_index_matched']:.0%} of "
+            f"{stats['in_index_queries']} {found_sets} tune searches match, "
+            f"{stats['matched_right_at_1']:.0%} of those right at rank 1"
         )
-        buckets.append(
-            Bucket(
-                draft_bucket.name,
-                draft_bucket.a7_weight,
-                cutoff,
-                draft_bucket.photo_type,
-                note=note,
-            )
-        )
+        buckets.append(replace(draft_bucket, cutoff=cutoff, note=note))
     routing = Routing(
         buckets=tuple(buckets),
         source=f"miroir web build-index {index}, {date}",
     )
     return routing, report
+
+
+def _in_bucket(
+    runs: Sequence[_Searched], bucket: str
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Confidences of the searches that went to `bucket`, and whether each was right at 1."""
+    conf = [r.confidence[np.asarray(r.buckets) == bucket] for r in runs]
+    hit1 = [(r.ranks == 1)[np.asarray(r.buckets) == bucket] for r in runs]
+    if not conf:
+        return np.zeros(0), np.zeros(0, dtype=bool)
+    return np.concatenate(conf), np.concatenate(hit1)
 
 
 def cutoff_for(confidences: NDArray[np.float64], wrong_target: float) -> float:

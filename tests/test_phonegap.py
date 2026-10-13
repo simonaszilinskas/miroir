@@ -20,6 +20,9 @@ from miroir.eval.router3 import Bucket, SetGrid, bucket_of, one, pick_weights, t
 from miroir.eval.scoring import QueryScore, ScoreResult
 from miroir.images.colour import GREY_BELOW, already_grey, chroma_spread, greyscale
 from miroir.images.phash import phash
+from miroir.web.routing import Bucket as SiteBucket
+from miroir.web.routing import PhotoType as SitePhotoType
+from miroir.web.routing import Routing as SiteRouting
 
 
 def jpeg(pixels: np.ndarray) -> bytes:
@@ -177,3 +180,16 @@ def test_each_bucket_gets_its_own_best_weight() -> None:
     assert len(set(pick_weights(grids, one).values())) == 1
     scored = grids[1].at(best)
     assert all(q.rank == 1 for q in scored.per_query)
+
+
+def test_site_routing_sends_colour_building_photos_to_megaloc() -> None:
+    routing = SiteRouting(
+        buckets=(
+            SiteBucket("archive-building", 1.0, 0.9, SitePhotoType.BUILDING, greyscale=True),
+            SiteBucket("colour-building", 0.0, 0.5, SitePhotoType.BUILDING, greyscale=False),
+            SiteBucket("object", 0.2, 0.8, SitePhotoType.OBJECT),
+        )
+    )
+    assert routing.choose(SitePhotoType.BUILDING, 0.0).name == "archive-building"
+    assert routing.choose(SitePhotoType.BUILDING, 9.0).a7_weight == 0.0
+    assert routing.choose(SitePhotoType.OBJECT, 9.0).name == "object"

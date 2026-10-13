@@ -13,8 +13,8 @@ No test query may reach the gallery this way. A candidate is left out when it is
   leaves out the museum's own reproduction;
 - by the same author on the same day as a query photo of the same building: another frame
   of that visit;
-- within `NEAR_COPY_BITS` of a POP image of the same building, so no T1 query finds a copy
-  of itself.
+- within `NEAR_COPY_BITS` of a POP image of the same building that a test query needs
+  (`COPY_CHECK_GALLERY`), so no T1 query finds a copy of itself.
 
 Photos are read as the 500 px copies Commons keeps ready (`build.small_thumb`): faster to
 serve than the 960 px ones queries use, and the models see 512 px at most. Every answer is
@@ -322,6 +322,16 @@ def building_communes(settings: Settings) -> dict[str, str]:
     return {e: c.most_common(1)[0][0] for e, c in counts.items()}
 
 
+#: Every image a test query needs, tune and sealed (technical spec §7): the POP images a
+#: query could find a Commons copy of. Other building images are not hashed, so the full
+#: sample needs no download of its 40,000 building photos.
+COPY_CHECK_GALLERY = "screening-v2"
+
+
+def _copy_check_images(settings: Settings) -> frozenset[str]:
+    return frozenset(read_gallery(settings, COPY_CHECK_GALLERY))
+
+
 def fetch_gallery_photos(settings: Settings, gallery: str) -> FetchReport:
     """Find F2 photos for the buildings of `gallery`; write `commons-gallery-<gallery>.parquet`.
 
@@ -340,9 +350,12 @@ def fetch_gallery_photos(settings: Settings, gallery: str) -> FetchReport:
         guard = query_guard(queries, lambda p: client.get_jpeg(p.thumb_url))
         hashed: dict[str, list[int]] = {}
 
+        checked = _copy_check_images(settings)
+
         def pop_hashes(entity: str) -> list[int]:
             if entity not in hashed:
-                found = (fetcher.fetch(i).jpeg for i in buildings.get(entity, []))
+                own = [i for i in buildings.get(entity, []) if i.image_id in checked]
+                found = (fetcher.fetch(i).jpeg for i in own)
                 hashed[entity] = [phash(j) for j in found if j is not None]
             return hashed[entity]
 
