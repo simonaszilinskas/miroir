@@ -55,7 +55,7 @@ Each POP export is a folder holding `<base>.jsonl` (one record per line, POP fie
 
 "Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table.
 
-The full export of every POP record with an image (3.4) uses the same format. It will include bases with no mapper yet (Mérimée, Palissy and others). Section 3.2 limits each new mapper to the fields search needs.
+The full export of every POP record with an image (3.4) uses the same format and adds Mérimée, Palissy and Muséofile. `uv run miroir records build-full` maps it into separate tables (11.1); each new mapper keeps only the fields of 3.2.
 
 ### 3.2 Common record model
 
@@ -442,15 +442,102 @@ miroir/
 
 ## 11. Sizing
 
-| Item | First 101k records | Full POP |
+| Item | First 101k records | Full POP (11.1) |
 |---|---|---|
-| Images | about 138,000 | Unknown until the export |
-| Image vectors | 2 × 138,000 | 2 × images |
+| Records with an image | 101,386 | 2,119,202 |
+| Images | about 138,000 | 2,138,564 distinct files |
+| Image vectors | 2 × 138,000 | 2 × 2.14 million |
 | Tile vectors | about 240,000 for Rose Valland, about 1.9 million for all | about 14 × images |
-| Embedding time | a few hours on one GPU | scale linearly |
+| Embedding | $7.54 and about 40 minutes per model on Modal | $124 and about 14 hours (11.1, option a) |
+
+### 11.1 Full POP: what it holds and what indexing it costs
+
+Measured 2026-10-13 for an investment decision. Every figure below comes from the October export (§3.4), a download test on Modal, or the Modal bills of the July full run (§7.3); each says which.
+
+```sh
+uv run miroir records build-full              # exports-full -> full-pop/ tables and counts, about 2 minutes
+uv run miroir records build-full --count-only # recount only, 40 s
+uv run miroir records fetch-probe --max-usd 0.4   # download test on Modal, 2 minutes, $0.02
+```
+
+`build-full` writes `MIROIR_DATA_DIR/full-pop/records.parquet` and `images.parquet` (same schema as the July tables, which it leaves alone), `report.json` with every count below, and `lists/<name>.txt`, one `image_id` per distinct file, for each option: `unique`, `covers`, `entity-covers`, `buildings`, `objects`, `unlinked`. An embedding run takes a list as its gallery.
+
+**Mappers.** Joconde, Mémoire and Rose Valland keep their July fields. Mérimée: title `TICO`, period `SCLE` and `DATE`, place `REG`, `DPT_LETTRE`, `COM`. Palissy: title `TITR` then `TICO`, domain `CATE`, same places. Muséofile: museum name `NOMOFF`, `HIST` and `ATOUT`, domains `DOMPAL`. Two skips are new. The bucket keeps copies of Joconde images under other names (`M500145_0001074_P.JPG` beside `0001074.jpg`, or the same name in other letter case): the mapper keeps one file per name (`RENAMED_COPY`, 800,401 files, half of Joconde). Old links and documents in image lists (12,761 PDFs, web addresses, `[object Object]`) are skipped (`NOT_AN_IMAGE`).
+
+**Publishable.** Same rule as today where the field exists: Mémoire `DIFF`. The open-data Joconde file has no `DIFFU`, so a Joconde record is publishable only when the July export holds it with `DIFFU` other than "non": 28,404 of 605,160. Mérimée and Palissy have no rights field; a record is publishable when every Mémoire photo it lists belongs to a Mémoire record that allows reproduction. Rose Valland and Muséofile: publishable, as today. Unknown means not publishable. In all, 1,097,443 distinct images (51%) may go to outside services. This does not limit our open models on Modal (§9).
+
+**What "all of POP" holds.** Every POP record with an image and an open-data record (Enluminures, 76,373 records read one page at a time, is not in the export):
+
+| Base | Records with an image | Image rows | Files no other base lists |
+|---|---|---|---|
+| Mémoire (photos) | 1,269,145 | 1,269,145 | 1,269,145 |
+| Joconde (museum objects) | 605,160 | 850,241 | 850,241 |
+| Palissy (objects in buildings) | 201,642 | 555,504 | 33 |
+| Mérimée (buildings) | 39,642 | 787,724 | 0 |
+| Rose Valland (MNR) | 2,400 | 17,180 | 17,180 |
+| Muséofile (museums) | 1,213 | 1,965 | 1,965 |
+| **All** | **2,119,202** | **3,481,759** | **2,138,564** |
+
+The export's metadata counts 4.3 million images; half are copies. Mérimée and Palissy add no file: their images are Mémoire photos that point to them (1,253,329 files are listed by two bases or more), and the July full run already treats those photos as views of the building or object. The bucket also holds Mémoire photos for about 2.15 million refs with no open-data record; with no record to describe them, they are left out.
+
+| Kind | Distinct images | Buildings or objects |
+|---|---|---|
+| Building: Mérimée, Muséofile, Mémoire photos linked to a PA record | 729,402 | 41,001 |
+| Object: Joconde, Palissy, Rose Valland, Mémoire photos linked to a PM record | 1,394,180 | 809,454 |
+| Mémoire photo linked to neither | 14,982 | 19,194 |
+
+Buildings have many views (18 images each on average); objects mostly one or two.
+
+**Download test** (`fetch-probe`, 922 images drawn with seed 20261012 from the distinct files, Modal CPU containers with 2 cores, one download each, no retry). One container, a fresh batch of 120 images at each level:
+
+| Requests at once | Images/s | MB/s | Median download | 95th percentile | Failed |
+|---|---|---|---|---|---|
+| 4 | 14.9 | 10.4 | 0.14 s | 0.60 s | 0 |
+| 8 | 24.6 | 19.5 | 0.13 s | 0.61 s | 0 |
+| 16 | 40.0 | 29.4 | 0.15 s | 0.77 s | 1 (empty file) |
+| 32 | 50.3 | 32.7 | 0.29 s | 0.94 s | 0 |
+
+The test stops climbing when the median download doubles: at 32 it did, so 16 is the safe level per container. Four containers at 16 at once (193 images) gave 65 images/s with no error. The batches last 1 to 8 seconds, too short to show what the bucket does over hours. The July image fill gives that: 137,775 images, billed as 14 minutes of 8 containers at 16 requests each (128 at once), 161 images/s (20 per container, writes to the volume included), with 3 refusals (HTTP 403) and no sign of throttling. Plans below use 161 images/s.
+
+Failures: 2 of 922 in the test (0.2%: one empty file, one file Pillow cannot read), no 404, no timeout, no server error. The July fill lost 0.8% (missing from bucket and IIIF, or unreadable); plan on 1%. Mean file size, by base (test sample): Mémoire 0.18 MB, Joconde 0.24 MB, Muséofile 0.37 MB, Rose Valland 4.8 MB (12 megapixel scans). Weighted by base: 0.24 MB a file, so 0.52 TB to download for everything; a 512 px JPEG keeps 48 KB (mean of 23,490 in the local cache), 102 GB for everything.
+
+Within a record, one picture saved twice is rare once renamed copies go: 4 of 77 images in 30 Joconde records with several images (3 the same file, 1 the same picture by perceptual hash), 1 of 52 in 25 Muséofile records. About 1% of all images; not worth a pass of its own.
+
+**Answer to §12 question 2:** the bucket is fast enough. At the level already used in July, all 2.14 million files come down in about 4 hours; no bulk copy from the POP team is needed. Tell them before the run: 0.5 TB over 4 hours from one address range.
+
+**Cost model.** From the Modal bills of the July full run (spend ledger, L4 GPU with 4 cores and 16 GB, $1.12 an hour):
+
+| Step | Paid | Images | Per million images | Speed |
+|---|---|---|---|---|
+| Fill: download, shrink to 512 px, store | $0.24 | 137,775 | $1.74 | 161/s with 8 CPU containers |
+| A7 EmbeddingGemma 2 | $5.08 | 121,442 | $41.81 | 7.4/s per L4 |
+| A3 MegaLoc | $2.14 | 118,961 | $17.98 | 17.2/s per L4 |
+| **Both models** | | | **$61.52** | |
+
+The $7.54 of §7.3 covered 137,775 images, but 21,785 of them reused earlier vectors; per image paid, the July run cost $61.52 per million, not $55. Its bills include one crash and restart (a scan over Pillow's pixel limit), so the rate already carries some waste. The Commons gallery run (F2, 10,221 images) cost $49.5 per million; the July rate is the cautious one. The 119,188 images already embedded in July keep their ids and are reused (`--reuse`).
+
+**Options.** Times assume the July set-up: 8 containers fill, then 8 L4s run A7 while 3 run A3. A7 and A3 take about the same time; twice the GPUs halves the time at the same cost, if Modal grants them. The "with margin" column adds 25% for failed chunks and restarts.
+
+| Option | Images | New to embed | Cost | With margin | Wall time | A7 vectors (fp16) | A3 vectors fp16 / fp32 |
+|---|---|---|---|---|---|---|---|
+| (a) everything | 2,138,564 | 2,019,376 | $124 | $155 | 14 h (fill 3.5 h, then A3 10.8 h) | 3.3 GB | 36.1 / 72.3 GB |
+| (b) each record's cover | 1,877,951 | 1,795,330 | $110 | $138 | 12.7 h | 2.9 GB | 31.7 / 63.5 GB |
+| (b′) one image per building or object | 859,906 | 820,807 | $51 | $63 | 5.8 h | 1.3 GB | 14.5 / 29.1 GB |
+| (c) step 1: buildings | 729,402 | 689,227 | $42 | $53 | 4.9 h | 1.1 GB | 12.3 / 24.6 GB |
+| (c) step 2: objects and unlinked photos | 1,409,162 | 1,330,149 | $82 | $102 | 9.4 h | 2.2 GB | 23.8 / 47.6 GB |
+
+(b) as asked saves little: a Mémoire record is one photo, and Mémoire is 59% of the files. (b′) keeps one image per building or object: the cover of its own Mérimée, Palissy or Joconde record, else its first Mémoire photo. It halves the cost, but a building then has one view, where today's results on phone photos of buildings come from having many (T2: buildings with Commons views in the index are found 58.6% of the time in the top 10, against 24.9% without; §7.3, prototype.md). (c) costs the same as (a) in two steps and lets us stop after step 1. Every option is far above what is left on Modal this month (about €7).
+
+**What the serving side must hold.** Raw, no compression (another agent tests compression). A7 is 768 numbers a vector, A3 8,448; fp16 takes 2 bytes a number, fp32 4. Today's site keeps 147,000 vectors of each model, about 2.5 GB, on one L4 (24 GB) beside four models, the caption reader alone about 9 GB.
+
+- (a): 39 GB in fp16 (79 GB in fp32). No longer fits an L4: it needs an 80 GB GPU (an A100 costs about 2.7 times the site's L4 per hour while awake), the vectors in CPU memory (a container with 48 GB or more; one search reads all 36 GB of A3 vectors, an estimated 2 s on CPU against 20 ms on an A100), or compression. A cold start must also load 39 GB from the volume, where today's 2.5 GB take part of the 50–110 s.
+- (c) step 1: 13.4 GB in fp16. Fits an L4 only if the caption reader leaves the GPU; else an L40S (48 GB, about twice the L4's price).
+- Records: 2.1 million instead of 101,000 for the record pages and the BM25 word index; the tables take 330 MB on disk.
+
+**What these figures assume.** Modal prices of 2026-10-12 (`jobs/modal_spec.py`). The same models, sizes and code as July; a GPU that ran faster or slower changes cost in step. Image mix: the July run held the same kinds of images, but more large Rose Valland scans (12% of images against 1%), which slow the fill; the models read 512 px copies, so file size does not change what they cost. Download speed from 14 minutes of July fill, not from hours; a slower bucket over hours lengthens the fill, not the cost (CPU time costs $1.74 per million). One percent of images will fail and get no vector.
 
 ## 12. Open technical questions
 
-1. Which POP bases does the full export contain, and how many images? Answered when the export arrives (week 4).
-2. Is the POP asset bucket fast enough to download millions of images, or do we need a bulk copy from the POP team?
+1. ~~Which POP bases does the full export contain, and how many images?~~ Answered in 11.1: six bases with images, 2,119,202 records, 2,138,564 distinct image files.
+2. ~~Is the POP asset bucket fast enough to download millions of images, or do we need a bulk copy from the POP team?~~ Answered in 11.1: fast enough, about 4 hours for everything at 128 requests at once.
 3. Does fp16 or byte encoding of tile vectors cost too much accuracy on T4?

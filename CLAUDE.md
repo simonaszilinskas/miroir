@@ -13,6 +13,8 @@ make check                     # ruff format check, ruff lint, pyright strict, p
 make fmt                       # format and auto-fix
 uv run miroir --help           # every entry point is a subcommand
 uv run miroir records build    # exports -> records.parquet + images.parquet (about 6 s)
+uv run miroir records build-full   # exports-full -> full-pop/ tables, counts, image lists (2 min; spec §11.1)
+uv run miroir records fetch-probe  # POP bucket download speed on Modal (2 min, $0.02)
 uv run miroir testsets build   # records -> test sets T1, T3, T5, T8 + galleries (about 1 s)
 uv run miroir testsets commons # Commons photos -> T2, T2b, T8c, screening-v2 (cached; 20 s)
 uv run miroir eval run ...      # score a vector run on a test set (technical spec §7.2)
