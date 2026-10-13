@@ -557,6 +557,55 @@ What we learned:
 
 T6 (50 descriptions written by hand) does not exist yet; [t6-guide.md](t6-guide.md) says how to write it.
 
+## R3: outlines (step C), sure answers, keypoints in the website (E1)
+
+### C: outlines on the Jeu de Paume room photos (2026-10-13)
+
+Method. `miroir detect locate`, `miroir detect rooms --option <id>`, `miroir eval detect --option <id>` (technical spec §7, T3). Each detector sees the 14 room photos at 1,024 px, as the page sends them, with step C's seven prompts. Every box is cut from the photo at 2,048 px (what the page holds), shrunk like any query photo and searched with the site's own ranking on the full index. The export has no boxes, so we found where each T3 tune artwork hangs by matching its crops to the room photo (ALIKED + LightGlue + homography): 95 of 115 (photo, artwork) pairs, 81 of 99 artworks. A hit: the outline a visitor would tap (highest IoU with the artwork, at least 0.3) puts the artwork in its top 5. The outline rule (score threshold, overlap, size) was tuned per detector on T3 tune. Results: `eval/results/R3/C-*.json`, details in `C-detail/`.
+
+The page draws the 12 surest outlines, then "Afficher les N autres objets repérés" shows up to 40. T3 tune, 99 queries, hit@5 of the tapped outline, 95% interval:
+
+| Detector | Every outline | First 12 | Outlines per photo | Box recall (IoU 0.5) | Detection, warm L4 |
+|---|---|---|---|---|---|
+| **C2 Grounding DINO tiny** | **86.9** [79.8, 92.9] | 52.5 | 17 | 81% | 284 ms |
+| C1 OWLv2 base | 84.8 [77.8, 91.9] | 50.5 | 32 | 69% | 197 ms |
+| C1 OWLv2 large | 84.8 [77.8, 91.9] | 51.5 | 33 | 78% | 887 ms |
+| C2 Grounding DINO base | 84.8 [77.8, 91.9] | 52.5 | 26 | 74% | 357 ms |
+| Located artworks (a perfect detector) | 88.9 [82.8, 94.9] | 71.7 | 6 | 100% | |
+
+Paired, Grounding DINO tiny minus each other detector: +2.0 points, intervals from −5 to +9. C4 (Qwen3-VL 8B on Modal) was stopped before it finished: it writes its boxes one token at a time, tens of seconds a photo, too slow for the page. Modal cost of step C: about $0.60, the stopped Qwen3-VL run included.
+
+What we learned:
+
+- Once an outline covers an artwork, the search finds it: every tapped outline put its artwork in the top 5. What fails is coverage: these rooms hold 20 to 50 pictures, so 12 outlines cannot cover them. With every outline shown, the pass bar (70% in the top 5) is met with room to spare; with 12, it is not.
+- The four detectors tie within the error bar. Grounding DINO tiny scores highest with half the outlines of OWLv2, so the photo stays readable. The website uses it.
+- Photos of one object (20 T5 museum views, 20 T2b Commons photos): when the surest box covers 40% of the photo or more, the page shows no outline. That leaves outlines on 4 of 20 Commons photos and 13 of 20 museum views (often the object plus a detail).
+
+### Sure answers for objects (2026-10-13)
+
+The site said "sure" for 8% of object searches and was right for 28% of those (T3 0%, T5 21%, T2b 75%). Its cosine cut-off cannot fix this: many records share an image (a pair of candlesticks photographed together, crops shared by neighbouring works), so the top answer scores 1.0 and is still the wrong record; raising the cut-off only removes right answers. What tells a right answer is how far it stands above the next one.
+
+New rule (`miroir web sure`, `sure.json` in the bundle): an object search is sure when its top entity's confidence beats every other of its top 30 by at least a margin. The margin is the smallest that keeps at least 70% of sure answers right on T3, T5 and T2b tune (together and each) and at most 10% of T8 object searches sure. Result: **0.09**.
+
+| Object searches, tune | Sure | Right among sure |
+|---|---|---|
+| Cut-off 0.824 (before) | 8% | 28% |
+| Margin 0.09 (now) | 36% | **86%** (T3 73%, T5 73%, T2b 98%) |
+| T8, entity removed (any answer is wrong) | 10% before, 9% now | |
+
+Buildings keep their cut-off. Details: `eval/results/R3/G-detail/sure-margin.json`.
+
+### E1 in the website: keypoint re-ranking of object searches (2026-10-13)
+
+`miroir rerank site`, `miroir eval rerank-site`. For object searches only, the best image of each of the site's top 30 entities matched with ALIKED + LightGlue (E1's code), re-ranked by E1's mix (cosine + inliers / 100), timed on an L4 the way the site would run it: candidates read from the image volume, every keypoint computed at search time.
+
+| Set (object queries matched) | Hit@1 before | after | Difference | Hit@10 before / after |
+|---|---|---|---|---|
+| T3 (99) | 55.6 | 67.7 | +12.1 [+4.0, +20.2] | 86.9 / 91.9 |
+| T5 (299 of 494) | 27.1 | 30.4 | +3.3 [0.0, +6.7] | 43.8 / 44.8 |
+
+Added time per search: median 3.1 s, 95th percentile 6.1 s. Reading the 30 candidate images from the volume takes most of it (median 3.1 s on T5, where files are read for the first time); keypoints 0.4 s, matching 0.6 s. **Not kept**: the time rule (95th percentile under 2 s) fails by a wide margin, so the run was stopped before T2b and the rest of T5. Cost: about $0.55.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -881,6 +930,20 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T7en | tune | web-full | B-B2-A7-text | google/embeddinggemma-2 text + BM25 | 512 | words | 105 | 7.6 [2.9, 13.3] | 16.2 [9.5, 23.8] | 21.9 [14.3, 30.5] | 12.3 [7.5, 17.9] |
 | R2 | T7en | tune | web-full | B-B2+B4-mix0.5 | google/embeddinggemma-2 text + BM25 | 512 | words | 105 | 0.0 [0.0, 0.0] | 1.0 [0.0, 2.9] | 4.8 [1.0, 9.5] | 1.8 [1.2, 2.5] |
 | R2 | T7en | tune | web-full | B-B4-bm25 | google/embeddinggemma-2 text + BM25 | 512 | words | 105 | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.1] |
+| R3 | T3 | tune | web-full | C-C0-located-all | located crops (ALIKED + LightGlue) | 1024 | boxes | 99 | 74.7 [65.7, 82.8] | 88.9 [82.8, 94.9] | 93.9 [88.9, 98.0] | 81.6 [75.0, 87.7] |
+| R3 | T3 | tune | web-full | C-C2-gdino-tiny-all | IDEA-Research/grounding-dino-tiny | 1024 | boxes | 99 | 74.7 [66.7, 83.8] | 86.9 [79.8, 92.9] | 89.9 [83.8, 94.9] | 80.5 [74.0, 87.3] |
+| R3 | T3 | tune | web-full | C-C2-gdino-base-all | IDEA-Research/grounding-dino-base | 1024 | boxes | 99 | 73.7 [65.7, 82.8] | 84.8 [77.8, 91.9] | 87.9 [80.8, 93.9] | 79.1 [72.1, 86.2] |
+| R3 | T3 | tune | web-full | E-E1-site-mix | site ranking + ALIKED/LightGlue on objects | 512 | site | 99 | 67.7 [58.6, 76.8] | 90.9 [84.8, 96.0] | 91.9 [85.9, 97.0] | 78.2 [71.7, 84.5] |
+| R3 | T3 | tune | web-full | C-C1-owlv2-base-all | google/owlv2-base-patch16-ensemble | 1024 | boxes | 99 | 71.7 [63.6, 80.8] | 84.8 [77.8, 91.9] | 88.9 [82.8, 94.9] | 78.0 [70.6, 84.7] |
+| R3 | T3 | tune | web-full | C-C1-owlv2-large-all | google/owlv2-large-patch14-ensemble | 1024 | boxes | 99 | 69.7 [60.6, 78.8] | 84.8 [77.8, 91.9] | 87.9 [80.8, 93.9] | 76.6 [68.8, 83.5] |
+| R3 | T3 | tune | web-full | C-C0-located | located crops (ALIKED + LightGlue) | 1024 | boxes | 99 | 62.6 [52.5, 71.7] | 71.7 [62.6, 80.8] | 76.8 [68.7, 84.8] | 68.1 [59.1, 76.1] |
+| R3 | T3 | tune | web-full | E-E1-site-base | site ranking | 512 | site | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
+| R3 | T3 | tune | web-full | C-C2-gdino-tiny | IDEA-Research/grounding-dino-tiny | 1024 | boxes | 99 | 45.5 [36.4, 54.6] | 52.5 [42.4, 61.6] | 57.6 [47.5, 66.7] | 50.1 [41.3, 59.3] |
+| R3 | T3 | tune | web-full | C-C2-gdino-base | IDEA-Research/grounding-dino-base | 1024 | boxes | 99 | 45.5 [35.4, 54.5] | 52.5 [42.4, 61.6] | 55.6 [45.5, 64.6] | 49.9 [40.5, 58.8] |
+| R3 | T3 | tune | web-full | C-C1-owlv2-large | google/owlv2-large-patch14-ensemble | 1024 | boxes | 99 | 43.4 [34.3, 52.5] | 51.5 [42.4, 60.6] | 52.5 [43.4, 61.6] | 48.2 [39.8, 57.2] |
+| R3 | T3 | tune | web-full | C-C1-owlv2-base | google/owlv2-base-patch16-ensemble | 1024 | boxes | 99 | 42.4 [33.3, 51.5] | 50.5 [40.4, 59.6] | 51.5 [41.4, 60.6] | 47.1 [38.3, 55.8] |
+| R3 | T5 | tune | web-full | E-E1-site-mix | site ranking + ALIKED/LightGlue on objects | 512 | site | 299 | 30.4 [25.4, 36.1] | 41.8 [36.1, 47.5] | 44.8 [39.5, 50.5] | 35.8 [31.0, 41.1] |
+| R3 | T5 | tune | web-full | E-E1-site-base | site ranking | 512 | site | 299 | 27.1 [22.4, 31.8] | 37.1 [31.8, 42.5] | 43.8 [38.5, 49.8] | 33.0 [28.5, 37.6] |
 
 Not found (T8): confidence is the top entity's score. Lower is better for "wrong but confident", higher for "matched".
 
