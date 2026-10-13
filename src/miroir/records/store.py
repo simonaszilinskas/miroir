@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from miroir.commons.model import CommonsPhoto, CommonsSet, Source, View
+from miroir.geo.model import Place, PlaceSource, PositionSource, QueryPosition
 from miroir.records.model import Collection, Image, ImageType, Record
 
 _STRINGS = pa.list_(pa.string())
@@ -81,6 +82,24 @@ COMMONS_SCHEMA = pa.schema(
         pa.field("category", pa.string(), nullable=False),
         pa.field("view", pa.string(), nullable=False),
         pa.field("phash_distance", pa.int32()),
+    ]
+)
+
+PLACES_SCHEMA = pa.schema(
+    [
+        pa.field("entity_id", pa.string(), nullable=False),
+        pa.field("latitude", pa.float64(), nullable=False),
+        pa.field("longitude", pa.float64(), nullable=False),
+        pa.field("source", pa.string(), nullable=False),
+    ]
+)
+
+POSITIONS_SCHEMA = pa.schema(
+    [
+        pa.field("image_id", pa.string(), nullable=False),
+        pa.field("latitude", pa.float64(), nullable=False),
+        pa.field("longitude", pa.float64(), nullable=False),
+        pa.field("source", pa.string(), nullable=False),
     ]
 )
 
@@ -239,6 +258,60 @@ def read_commons(path: Path) -> list[CommonsPhoto]:
             phash_distance=None if row["phash_distance"] is None else int(row["phash_distance"]),
         )
         for row in _read(path, COMMONS_SCHEMA).to_pylist()
+    ]
+
+
+def write_places(places: Sequence[Place], path: Path) -> None:
+    """One position per entity (step H2)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "entity_id": p.entity_id,
+            "latitude": p.latitude,
+            "longitude": p.longitude,
+            "source": p.source.value,
+        }
+        for p in places
+    ]
+    _write(pa.Table.from_pylist(rows, schema=PLACES_SCHEMA), path)
+
+
+def read_places(path: Path) -> list[Place]:
+    return [
+        Place(
+            entity_id=str(row["entity_id"]),
+            latitude=float(row["latitude"]),
+            longitude=float(row["longitude"]),
+            source=PlaceSource(row["source"]),
+        )
+        for row in _read(path, PLACES_SCHEMA).to_pylist()
+    ]
+
+
+def write_positions(positions: Sequence[QueryPosition], path: Path) -> None:
+    """Where each query photo was taken, when known (step H2)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "image_id": p.image_id,
+            "latitude": p.latitude,
+            "longitude": p.longitude,
+            "source": p.source.value,
+        }
+        for p in positions
+    ]
+    _write(pa.Table.from_pylist(rows, schema=POSITIONS_SCHEMA), path)
+
+
+def read_positions(path: Path) -> list[QueryPosition]:
+    return [
+        QueryPosition(
+            image_id=str(row["image_id"]),
+            latitude=float(row["latitude"]),
+            longitude=float(row["longitude"]),
+            source=PositionSource(row["source"]),
+        )
+        for row in _read(path, POSITIONS_SCHEMA).to_pylist()
     ]
 
 

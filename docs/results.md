@@ -490,6 +490,47 @@ What we learned:
 - "Not found" improves for both models: right answers now match a near-identical colour photo, so their confidences rise above those of photos with no answer.
 - Full sample: 3,924 buildings, about 13,000 requests, about 2.6 hours at the pace measured here (0.9 hours at the 4-a-second cap) and about 9,800 photos; embedding them with A3 and A7 costs about $0.60.
 
+## H2: where the photo was taken (2026-10-13)
+
+Expected (written before the run): a visitor stands next to the building they photograph, so keeping what lies within 2 km should help T2 a lot; less in the full index, where a town centre holds dozens of buildings, than in the sparse screening gallery.
+
+Method. `miroir geo places` gives each building or object one position: Mérimée's own point for a Mémoire building (`coordonnees_au_format_WGS84`, whole POP download), Muséofile's point for a Joconde object's museum, else the centre of the commune the record names (INSEE code, geo.api.gouv.fr). `miroir geo positions` reads where each Commons query photo was taken: EXIF GPS, else the camera location on its file page (never the page's "object location", which is the monument's own point). `miroir eval location` ranks with the G5 weights picked with F2 photos (archive building A7 alone, colour building A3 alone, object 0.2 A7), then changes each query's ranking: a hard filter (only entities placed within 2 km), or a soft prior (each placed entity gains `b · exp(−d / s)` on a fused score running 0–1; `b` and `s` picked on T2 tune by hit@10 from a 6 × 6 grid). Noise moves the photo's position 50 m or 300 m in a seeded random direction. The same command also cuts the gallery to the answer's département, commune or museum, as if the visitor had named it. Full index: `full-fetched` (136,731 images, no F2 photos yet); screening: `screening-v2-publishable-fetched+F2`.
+
+Coverage. 59,876 of 63,407 entities have a place (94%): every Joconde object (its museum), 26,879 of 28,010 Mémoire entities (3,744 Mérimée points, 23,135 commune centres; 347 carry an old commune code, 784 none), no Rose Valland work. Query photos with a position: T2 288 of 1,000 (106 EXIF, 182 file page), **152 of 516 in the tune half**; T2b 43 of 573 (8 of the 122 publishable tune queries); T8c 101 of 300 (45 tune). A T2 photo lies a median 30 m from its building's point; 99% within 2 km.
+
+T2 tune photos with a position (152), hit@10 and paired difference with no position:
+
+| Policy | Full index | Hit@1 (full) | Screening gallery |
+|---|---|---|---|
+| No position | 31.6 | 21.7 | 48.0 |
+| Hard filter, 2 km | 82.9; **+51.3** [+44.1, +59.2] | 63.8 | 94.7; +46.7 |
+| Hard filter, 2 km, position off by 300 m | 82.9; +51.3 | | 94.7 |
+| **Soft prior, b = 1, s = 1 km** | **97.4; +65.8** [+58.6, +73.7] | **79.6** | 100.0; +52.0 |
+| Soft prior, position off by 50 m | 97.4; +65.8 | | 99.3 |
+| Soft prior, position off by 300 m | 90.1; +58.6 [+51.3, +66.4] | 68.4 | 96.1 |
+
+Split-half check of the soft prior (picked on half the buildings, scored on the other half): 97.4 on the full index. Around a T2 photo the full index holds a median 5 entities within 1 km and 16 within 2 km (screening: 2 and 3).
+
+"Not found" (T8c tune photos with a position, 45, against the 160 T2 and T2b photos with one; share of not-found photos answered "sure" at the cut-off that matches half the in-index ones): no position 48.9%, hard filter 17.8% (44% of these photos have nothing placed within 2 km), soft prior 48.9%.
+
+A field the visitor names, all tune queries, full index (hit@10; paired difference with nothing named):
+
+| Field named | T1 (138) | T2 (516) | T5 (443) | T2b (122) |
+|---|---|---|---|---|
+| Nothing | 45.7 | 26.7 | 42.2 | 91.0 |
+| Département | 65.9; +20.3 [+13.8, +27.5] | 32.2; +5.4 [+3.7, +7.6] | 42.4; +0.2 | 97.5; +6.6 [+2.5, +11.5] |
+| Commune | 82.6; +37.0 [+29.7, +44.2] | 33.5; +6.8 [+4.8, +8.9] | 42.2; 0.0 | 97.5; +6.6 |
+| Museum (Joconde only) | | | 42.4; +0.2 [0.0, +0.7] | 97.5; +6.6 |
+
+What we learned:
+
+- The photo's position is the largest gain on phone photos of buildings so far: from 32% to 97% in the top 10 on the full index, and from 22% to 80% first. A building's photo is taken a few dozen metres from Mérimée's point, so nearness picks it out of the 16 or so known buildings within 2 km; the picture then orders the near ones.
+- The soft prior scores 14.5 points above the hard filter and stays ahead with a position 300 m off. It keeps far entities, so nothing breaks when the visitor is far from anything known, but it does not help "not found": the hard filter does (48.9% to 17.8% sure-but-wrong), because half the not-found photos have nothing known within 2 km.
+- Naming the commune helps archive prints (T1 +37) far more than phone photos (T2 +7): Paris or Toulouse hold too many buildings for a commune to single one out. GPS does what the commune cannot.
+- Naming the museum barely helps (T5 +0.2; T2b reaches 97.5 as with the département, since it is one museum): a photo of an object already finds records of its own museum. No "Musée" filter on the site for now. The museum could be guessed from the phone's position (the nearest Muséofile museum within 300 m was the right one for 12 of 12 T2b tune photos that close), but the soft prior already favours that museum's objects.
+- 28% of T2 photos carry a position, and phones often strip it when a web page reads a photo: on the site, the visitor's own position (one tap, the browser asks) matters more than EXIF.
+- For the site: the soft prior (b = 1, s = 1 km), on when the photo carries GPS or the visitor turns on "Utiliser ma position". Rose Valland works have no place, so a photo of one taken with the position on ranks it lower; the visitor can turn it off.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
@@ -585,6 +626,10 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A8-qwen3-vl-embedding-2b-512 | Qwen/Qwen3-VL-Embedding-2B | 512 | head | 443 | 26.4 [22.3, 30.5] | 37.7 [33.0, 42.2] | 42.0 [37.2, 46.5] | 32.4 [28.4, 36.5] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-nocrop-cls | facebook/dinov2-giant | 224 | cls | 443 | 28.2 [23.9, 32.5] | 35.4 [31.2, 40.2] | 39.5 [34.8, 44.2] | 32.3 [28.2, 36.6] |
 | R1 | T5 | tune | screening-20k-publishable-fetched | A-A1-dinov2-g-224-cls | facebook/dinov2-giant | 224 | cls | 443 | 27.8 [23.5, 31.8] | 36.1 [31.8, 40.6] | 39.7 [34.8, 44.7] | 31.9 [27.8, 35.9] |
+| R2 | T1 | tune | full-fetched | H-known-commune-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 59.4 [51.4, 67.4] | 76.1 [69.6, 82.6] | 82.6 [76.8, 88.4] | 67.4 [60.8, 73.8] |
+| R2 | T1 | tune | full-fetched | H-known-departement-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 39.9 [31.9, 47.8] | 60.9 [53.6, 68.8] | 65.9 [58.7, 73.2] | 48.7 [42.0, 55.7] |
+| R2 | T1 | tune | full-fetched | H-known-museum-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 34.1 [26.8, 41.3] | 42.0 [34.1, 50.0] | 45.7 [38.4, 54.3] | 37.6 [30.4, 45.0] |
+| R2 | T1 | tune | full-fetched | H-known-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 34.1 [26.8, 41.3] | 42.0 [34.1, 50.0] | 45.7 [38.4, 54.3] | 37.6 [30.4, 45.0] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-gemini-3.5-flash-lite | google/gemini-3.5-flash-lite | 512 | bm25 | 138 | 86.2 [80.4, 92.0] | 96.4 [93.5, 99.3] | 97.1 [94.2, 99.3] | 90.9 [87.0, 94.8] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H3-A7+H1-gemini-3.5-flash-lite | google/embeddinggemma-2 + google/gemini-3.5-flash-lite | 512 | fusion | 138 | 75.4 [68.1, 82.6] | 89.1 [84.1, 94.2] | 89.1 [84.1, 94.2] | 81.0 [75.3, 86.5] |
 | R2 | T1 | tune | screening-20k-publishable-fetched | H-H1-qwen3-vl-30b-a3b | qwen/qwen3-vl-30b-a3b-instruct | 512 | bm25 | 138 | 65.2 [57.2, 73.2] | 82.6 [76.1, 88.4] | 87.0 [81.2, 92.0] | 72.7 [66.2, 79.1] |
@@ -620,10 +665,25 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-query-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
 | R2 | T1 | tune | screening-v2-publishable-fetched | F-base-A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
 | R2 | T1 | tune | screening-v2-publishable-fetched | F-F1-both-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.5] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | H-known-commune | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 83.3 [76.8, 89.1] | 93.5 [89.1, 97.1] | 95.7 [92.0, 98.6] | 87.6 [82.7, 91.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | H-known-departement | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 52.9 [44.9, 61.6] | 73.9 [66.7, 80.4] | 85.5 [79.7, 90.6] | 63.3 [56.9, 70.0] |
 | R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
 | R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | H-known-museum | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
+| R2 | T1 | tune | screening-v2-publishable-fetched+F2 | H-known-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 37.0 [29.0, 44.9] | 47.8 [40.6, 55.8] | 50.7 [43.5, 58.7] | 42.6 [35.7, 49.9] |
 | R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 36.2 [29.0, 44.2] | 47.1 [39.9, 55.1] | 50.0 [42.8, 58.0] | 41.9 [35.0, 49.1] |
 | R2 | T1 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 138 | 20.3 [14.5, 26.8] | 25.4 [18.1, 32.6] | 28.3 [21.0, 35.5] | 22.9 [16.9, 29.6] |
+| R2 | T2 | tune | full-fetched | H-H2-soft-1-1km-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 79.6 [73.0, 85.5] | 93.4 [89.5, 96.7] | 97.4 [94.7, 99.3] | 85.5 [80.5, 89.7] |
+| R2 | T2 | tune | full-fetched | H-H2-soft-1-1km-noise50m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 77.0 [71.0, 83.6] | 92.8 [88.8, 96.7] | 97.4 [94.7, 99.3] | 83.6 [78.8, 88.3] |
+| R2 | T2 | tune | full-fetched | H-H2-soft-1-1km-noise300m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 68.4 [61.2, 75.0] | 82.9 [77.0, 88.8] | 90.1 [84.9, 94.7] | 75.4 [69.5, 80.8] |
+| R2 | T2 | tune | full-fetched | H-H2-hard-2km-noise300m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 65.8 [57.9, 73.0] | 78.9 [72.4, 84.9] | 82.9 [77.0, 88.2] | 72.0 [65.4, 78.1] |
+| R2 | T2 | tune | full-fetched | H-H2-hard-2km-noise50m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 65.1 [57.9, 73.0] | 78.3 [71.7, 84.2] | 82.9 [77.0, 88.2] | 71.1 [64.6, 77.5] |
+| R2 | T2 | tune | full-fetched | H-H2-hard-2km-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 63.8 [55.9, 71.1] | 78.3 [71.7, 84.2] | 82.9 [77.0, 88.2] | 70.5 [64.0, 76.9] |
+| R2 | T2 | tune | full-fetched | H-known-commune-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 25.8 [22.3, 29.7] | 31.8 [27.9, 35.9] | 33.5 [29.7, 37.6] | 28.8 [25.3, 32.5] |
+| R2 | T2 | tune | full-fetched | H-known-departement-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 23.4 [20.2, 27.1] | 30.4 [26.7, 34.3] | 32.2 [28.5, 36.2] | 26.9 [23.5, 30.6] |
+| R2 | T2 | tune | full-fetched | H-H2-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 21.7 [15.8, 27.6] | 28.9 [22.4, 35.5] | 31.6 [24.3, 38.2] | 25.2 [19.0, 31.4] |
+| R2 | T2 | tune | full-fetched | H-known-museum-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 19.2 [16.1, 23.1] | 25.4 [21.7, 29.3] | 26.7 [23.3, 30.6] | 22.1 [18.9, 25.7] |
+| R2 | T2 | tune | full-fetched | H-known-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 19.2 [16.1, 23.1] | 25.4 [21.7, 29.3] | 26.7 [23.3, 30.6] | 22.1 [18.9, 25.7] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.2 [20.7, 28.1] | 29.3 [25.8, 33.3] | 32.4 [28.7, 36.4] | 27.1 [23.7, 30.8] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-query-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.2 [20.7, 28.1] | 28.9 [25.2, 32.9] | 32.9 [29.1, 37.0] | 26.9 [23.5, 30.6] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-both-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 24.0 [20.5, 27.9] | 28.7 [25.0, 32.8] | 32.4 [28.7, 36.6] | 26.7 [23.3, 30.4] |
@@ -635,15 +695,52 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T2 | tune | screening-v2-publishable-fetched | F-F1-both-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 8.3 [6.2, 10.9] | 17.4 [14.5, 20.9] | 20.2 [16.7, 23.6] | 12.7 [10.4, 15.4] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | A-A3-megaloc-322-pca1024-T2 | gmberton/MegaLoc | 322 | salad | 516 | 9.3 [7.0, 11.8] | 12.4 [9.7, 15.3] | 13.2 [10.3, 16.1] | 10.6 [8.2, 13.2] |
 | R2 | T2 | tune | screening-v2-publishable-fetched | A-A3-megaloc-322-pca512-T2 | gmberton/MegaLoc | 322 | salad | 516 | 4.1 [2.5, 5.6] | 7.0 [4.8, 9.1] | 7.9 [5.8, 10.3] | 5.5 [3.8, 7.2] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 87.5 [82.2, 92.1] | 98.0 [95.4, 100.0] | 100.0 [100.0, 100.0] | 91.8 [88.0, 95.1] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise50m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 84.2 [78.3, 89.5] | 96.1 [92.8, 98.7] | 99.3 [98.0, 100.0] | 89.7 [85.8, 93.2] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise300m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 80.9 [74.3, 86.8] | 94.7 [91.4, 98.0] | 96.1 [92.8, 98.7] | 86.7 [82.0, 91.0] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise300m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 77.0 [69.7, 82.9] | 92.1 [87.5, 96.1] | 94.7 [90.8, 98.0] | 84.1 [78.9, 88.5] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise50m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 76.3 [69.1, 82.9] | 92.1 [87.5, 96.1] | 94.7 [90.8, 98.0] | 83.7 [78.3, 88.3] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 75.7 [68.4, 82.2] | 92.1 [87.5, 96.1] | 94.7 [90.8, 98.0] | 83.4 [78.2, 87.9] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-known-commune | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 46.9 [42.8, 51.6] | 57.6 [53.5, 61.8] | 62.2 [58.1, 66.7] | 52.2 [48.4, 56.2] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-known-departement | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 39.9 [35.9, 44.4] | 53.5 [49.4, 57.9] | 57.6 [53.5, 61.6] | 46.2 [42.6, 50.5] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-H2-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 152 | 37.5 [29.6, 44.7] | 46.7 [38.8, 54.6] | 48.0 [39.5, 55.9] | 41.9 [34.4, 49.4] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.6 [28.1, 35.7] | 38.0 [34.1, 42.2] | 40.5 [36.6, 45.0] | 34.9 [31.4, 39.0] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | gmberton/MegaLoc | 322 | salad | 516 | 31.6 [28.1, 35.7] | 38.0 [34.1, 42.2] | 40.5 [36.6, 45.0] | 34.9 [31.4, 39.0] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.2 [27.7, 35.3] | 38.6 [34.7, 42.8] | 40.5 [36.6, 45.0] | 34.6 [31.2, 38.6] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-known-museum | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.2 [27.7, 35.3] | 38.6 [34.7, 42.8] | 40.5 [36.6, 45.0] | 34.6 [31.2, 38.6] |
+| R2 | T2 | tune | screening-v2-publishable-fetched+F2 | H-known-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 31.2 [27.7, 35.3] | 38.6 [34.7, 42.8] | 40.5 [36.6, 45.0] | 34.6 [31.2, 38.6] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 29.8 [26.4, 33.7] | 37.0 [33.1, 41.5] | 38.4 [34.7, 42.6] | 33.1 [29.6, 36.9] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 516 | 14.3 [11.4, 17.4] | 19.4 [16.1, 22.9] | 21.9 [18.4, 25.6] | 17.1 [14.2, 20.1] |
 | R2 | T2 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | google/embeddinggemma-2 | 512 | head | 516 | 14.3 [11.4, 17.4] | 19.4 [16.1, 22.9] | 21.9 [18.4, 25.6] | 17.1 [14.2, 20.1] |
+| R2 | T2b | tune | full-fetched | H-H2-hard-2km-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-hard-2km-noise300m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-hard-2km-noise50m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-soft-1-1km-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-soft-1-1km-noise300m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-H2-soft-1-1km-noise50m-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | full-fetched | H-known-museum-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 75.4 [68.0, 82.8] | 92.6 [87.7, 97.5] | 97.5 [94.3, 100.0] | 82.4 [76.7, 88.3] |
+| R2 | T2b | tune | full-fetched | H-known-commune-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 75.4 [68.0, 82.8] | 92.6 [87.7, 97.5] | 97.5 [94.3, 100.0] | 82.4 [76.6, 88.3] |
+| R2 | T2b | tune | full-fetched | H-known-departement-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 75.4 [68.0, 82.8] | 92.6 [87.7, 97.5] | 97.5 [94.3, 100.0] | 82.4 [76.6, 88.3] |
+| R2 | T2b | tune | full-fetched | H-known-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 72.1 [64.7, 80.3] | 86.1 [79.5, 91.8] | 91.0 [86.0, 95.9] | 78.0 [71.3, 84.5] |
 | R2 | T2b | tune | screening-v2-publishable-fetched | G-G1-A7+A3-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 90.2 [85.2, 95.9] | 95.9 [91.8, 99.2] | 98.4 [95.9, 100.0] | 92.5 [88.3, 96.8] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise300m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise50m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise300m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise50m | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 8 | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-known-commune | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 90.2 [84.4, 95.9] | 99.2 [97.5, 100.0] | 100.0 [100.0, 100.0] | 94.1 [90.8, 97.5] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-known-departement | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 90.2 [84.4, 95.9] | 99.2 [97.5, 100.0] | 100.0 [100.0, 100.0] | 94.1 [90.8, 97.5] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-known-museum | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 90.2 [84.4, 95.9] | 99.2 [97.5, 100.0] | 100.0 [100.0, 100.0] | 94.1 [90.8, 97.5] |
+| R2 | T2b | tune | screening-v2-publishable-fetched+F2 | H-known-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 122 | 86.9 [80.3, 92.6] | 92.6 [87.7, 96.7] | 94.3 [90.2, 98.4] | 89.9 [84.5, 94.5] |
 | R2 | T2b | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | google/embeddinggemma-2 | 512 | head | 122 | 86.1 [79.5, 91.8] | 92.6 [87.7, 96.7] | 97.5 [94.3, 100.0] | 89.5 [84.7, 94.1] |
 | R2 | T2b | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | gmberton/MegaLoc | 322 | salad | 122 | 82.8 [75.4, 89.3] | 92.6 [87.7, 96.7] | 92.6 [87.7, 96.7] | 87.2 [81.9, 92.3] |
+| R2 | T3 | tune | full-fetched | H-known-commune-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
+| R2 | T3 | tune | full-fetched | H-known-departement-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
+| R2 | T3 | tune | full-fetched | H-known-museum-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
+| R2 | T3 | tune | full-fetched | H-known-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-mix | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 72.7 [63.6, 81.8] | 92.9 [87.9, 98.0] | 92.9 [87.9, 98.0] | 82.0 [75.6, 87.9] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A7-embeddinggemma-2-512-inliers | google/embeddinggemma-2 + ALIKED/LightGlue | 512 | head | 99 | 71.7 [62.6, 80.8] | 91.9 [85.9, 97.0] | 91.9 [85.9, 97.0] | 80.9 [74.1, 86.8] |
 | R2 | T3 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 99 | 66.7 [57.6, 75.8] | 92.9 [87.9, 97.0] | 92.9 [87.9, 97.0] | 78.7 [72.0, 84.8] |
@@ -675,6 +772,14 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T3 | tune | screening-v2-publishable-fetched | G-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
 | R2 | T3 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
 | R2 | T3 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | H-known-commune | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | H-known-departement | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | H-known-museum | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T3 | tune | screening-v2-publishable-fetched+F2 | H-known-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 99 | 56.6 [47.4, 66.7] | 85.9 [78.8, 91.9] | 89.9 [83.8, 96.0] | 68.7 [61.3, 76.4] |
+| R2 | T5 | tune | full-fetched | H-known-departement-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 36.1 [31.6, 40.4] | 42.4 [37.7, 47.0] | 32.2 [28.3, 35.9] |
+| R2 | T5 | tune | full-fetched | H-known-commune-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 36.1 [31.6, 40.4] | 42.2 [37.7, 47.0] | 32.1 [28.3, 35.9] |
+| R2 | T5 | tune | full-fetched | H-known-museum-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 36.1 [31.6, 40.4] | 42.4 [37.7, 47.0] | 32.1 [28.3, 35.9] |
+| R2 | T5 | tune | full-fetched | H-known-none-full | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 36.1 [31.6, 40.4] | 42.2 [37.7, 46.7] | 31.9 [28.1, 35.7] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | E-E1-A3-megaloc-322-mix | gmberton/MegaLoc + ALIKED/LightGlue | 322 | salad | 443 | 44.7 [40.2, 49.2] | 56.7 [51.9, 61.2] | 63.2 [58.9, 67.5] | 51.1 [46.9, 55.4] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.4 [35.7, 44.7] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.3 [43.0, 51.2] |
 | R2 | T5 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 40.2 [35.4, 44.5] | 53.0 [48.3, 57.3] | 61.4 [56.9, 65.9] | 47.1 [42.8, 51.1] |
@@ -710,8 +815,12 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R2 | T5 | tune | screening-v2-publishable-fetched | F-base-A7-v2 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 43.1 [38.4, 47.6] | 47.9 [43.1, 52.4] | 38.4 [34.4, 42.5] |
 | R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-both-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.4 [22.3, 30.5] | 38.6 [33.9, 42.9] | 44.5 [39.7, 49.2] | 32.6 [28.5, 36.6] |
 | R2 | T5 | tune | screening-v2-publishable-fetched | F-F1-query-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 26.2 [22.1, 30.7] | 35.4 [31.2, 40.2] | 40.0 [35.4, 44.5] | 31.3 [27.2, 35.3] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | H-known-museum | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 54.6 [49.9, 59.4] | 62.1 [57.6, 66.6] | 47.2 [43.0, 51.3] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | H-known-commune | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.5 [35.0, 43.8] | 54.9 [50.1, 59.6] | 62.3 [57.8, 66.6] | 47.2 [43.0, 51.2] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | H-known-departement | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.5 [35.0, 43.8] | 54.9 [50.1, 59.6] | 62.3 [57.8, 66.6] | 47.2 [43.0, 51.2] |
 | R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.7 [42.5, 50.8] |
 | R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-G5-router3-A7+A3-fixed | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.7 [42.5, 50.8] |
+| R2 | T5 | tune | screening-v2-publishable-fetched+F2 | H-known-none | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.7 [35.0, 44.0] | 53.0 [48.3, 57.3] | 61.2 [56.4, 65.7] | 46.7 [42.5, 50.8] |
 | R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-A3 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 39.1 [34.5, 43.6] | 53.5 [48.8, 58.0] | 62.1 [57.8, 66.6] | 46.3 [42.1, 50.4] |
 | R2 | T5 | tune | screening-v2-publishable-fetched+F2 | F-F2-A7 | google/embeddinggemma-2 + gmberton/MegaLoc | 512 | fusion | 443 | 33.2 [28.9, 37.5] | 43.1 [38.4, 47.6] | 47.9 [43.1, 52.4] | 38.4 [34.4, 42.5] |
 
@@ -731,7 +840,21 @@ Not found (T8): confidence is the top entity's score. Lower is better for "wrong
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-switch-A7+A3 | T1 + T5 | 581 | 232 | 36.2 [30.2, 43.5] | 16.5 [8.6, 22.4] |
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3-guessA7A3 | T1 + T5 | 581 | 232 | 40.1 [31.5, 47.8] | 14.8 [9.0, 19.3] |
 | R2 | T8 | tune | screening-20k-publishable-fetched | G-G4-router-A7+A3 | T1 + T5 | 581 | 232 | 42.2 [35.3, 50.4] | 14.8 [7.9, 20.0] |
+| R2 | T8c | tune | full-fetched | H-H2-hard-2km-full | T2 + T2b | 160 | 45 | 17.8 [8.9, 35.6] | 15.6 [1.9, 35.0] |
+| R2 | T8c | tune | full-fetched | H-H2-hard-2km-noise50m-full | T2 + T2b | 160 | 45 | 17.8 [8.9, 35.6] | 15.6 [1.9, 35.0] |
+| R2 | T8c | tune | full-fetched | H-H2-hard-2km-noise300m-full | T2 + T2b | 160 | 45 | 24.4 [8.9, 35.6] | 15.6 [1.9, 36.3] |
+| R2 | T8c | tune | full-fetched | H-H2-none-full | T2 + T2b | 160 | 45 | 48.9 [31.1, 64.4] | 3.1 [0.6, 11.2] |
+| R2 | T8c | tune | full-fetched | H-H2-soft-1-1km-full | T2 + T2b | 160 | 45 | 48.9 [33.3, 64.4] | 6.2 [1.9, 17.5] |
+| R2 | T8c | tune | full-fetched | H-H2-soft-1-1km-noise50m-full | T2 + T2b | 160 | 45 | 48.9 [33.3, 64.4] | 6.2 [1.9, 17.5] |
+| R2 | T8c | tune | full-fetched | H-H2-soft-1-1km-noise300m-full | T2 + T2b | 160 | 45 | 51.1 [35.6, 66.7] | 6.2 [1.9, 17.5] |
 | R2 | T8c | tune | screening-v2-publishable-fetched | G-G1-A7+A3-v2 | T2 + T2b | 638 | 150 | 35.3 [27.3, 43.3] | 21.8 [16.9, 27.6] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise300m | T2 + T2b | 160 | 45 | 4.4 [0.0, 15.6] | 53.1 [18.8, 65.0] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km | T2 + T2b | 160 | 45 | 6.7 [0.0, 15.6] | 48.1 [18.8, 65.0] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-hard-2km-noise50m | T2 + T2b | 160 | 45 | 6.7 [0.0, 15.6] | 48.1 [18.8, 65.0] |
 | R2 | T8c | tune | screening-v2-publishable-fetched+F2 | F-F2-A7-embeddinggemma-2-512-T8c | T2 + T2b | 638 | 150 | 11.3 [6.0, 16.7] | 31.5 [26.3, 43.1] |
 | R2 | T8c | tune | screening-v2-publishable-fetched+F2 | F-F2-A3-megaloc-322-T8c | T2 + T2b | 638 | 150 | 26.7 [17.3, 34.7] | 35.4 [29.5, 40.1] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-none | T2 + T2b | 160 | 45 | 28.9 [15.6, 42.2] | 25.0 [16.9, 39.4] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km | T2 + T2b | 160 | 45 | 46.7 [19.9, 62.2] | 23.8 [16.9, 40.0] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise300m | T2 + T2b | 160 | 45 | 46.7 [17.8, 60.1] | 23.8 [16.9, 39.4] |
+| R2 | T8c | tune | screening-v2-publishable-fetched+F2 | H-H2-soft-1-1km-noise50m | T2 + T2b | 160 | 45 | 46.7 [19.9, 60.1] | 23.8 [16.9, 40.0] |
 <!-- summary:end -->

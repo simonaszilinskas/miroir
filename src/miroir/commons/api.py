@@ -301,3 +301,56 @@ def _exif_gps(exif: dict[str, JsonValue]) -> tuple[float | None, float | None]:
 def titles(items: Sequence[WikidataItem]) -> list[str]:
     """Every P18 file of these items."""
     return sorted({t for item in items for t in item.images})
+
+
+class _Coordinate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    lat: float
+    lon: float
+    primary: bool = False
+    type: str = ""
+
+
+class _CoordinatePage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: str
+    coordinates: list[_Coordinate] = []
+
+
+class _CoordinateQuery(BaseModel):
+    pages: list[_CoordinatePage] = []
+
+
+class _CoordinateAnswer(BaseModel):
+    query: _CoordinateQuery | None = None
+
+
+def camera_positions(
+    client: WikimediaClient, file_titles: Iterable[str]
+) -> dict[str, tuple[float, float]]:
+    """(latitude, longitude) where each file was taken, as its page's {{Location}} gives it,
+    50 titles per call. Only the camera's position: a file page's "object location" is the
+    monument's own point and would give the answer away."""
+    found: dict[str, tuple[float, float]] = {}
+    for chunk in batched(sorted(set(file_titles)), TITLES_PER_CALL):
+        params = {
+            "action": "query",
+            "format": "json",
+            "formatversion": "2",
+            "maxlag": str(MAXLAG_S),
+            "prop": "coordinates",
+            "coprop": "type|dim|globe",
+            "coprimary": "all",
+            "colimit": "max",
+            "titles": "|".join(chunk),
+        }
+        answer = _CoordinateAnswer.model_validate(client.get_json(COMMONS_API_URL, params))
+        for page in [] if answer.query is None else answer.query.pages:
+            camera = [c for c in page.coordinates if c.primary and c.type == "camera"]
+            if camera and _valid(camera[0].lat, camera[0].lon):
+                found[page.title] = (camera[0].lat, camera[0].lon)
+    return found
+
+
+def _valid(lat: float, lon: float) -> bool:
+    return -90 <= lat <= 90 and -180 <= lon <= 180 and not (lat == 0 and lon == 0)

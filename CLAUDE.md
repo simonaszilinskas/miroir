@@ -25,6 +25,9 @@ uv run miroir rerank modal --vectors <run> --set T3 --max-usd 0.5   # E1: keypoi
 uv run miroir eval rerank --round R2 --label <label> --vectors <run> --set T3   # score E1
 uv run miroir embed modal --option A3-megaloc-322 --queries T2 --queries T2b --queries T8c  # Commons queries
 uv run miroir r0 run           # AmsterTime on Modal; then `miroir eval amstertime score`
+uv run miroir geo places        # H2: one position per entity (Mérimée, Muséofile, commune centre)
+uv run miroir geo positions     # H2: where each Commons query photo was taken (EXIF, file page)
+uv run miroir eval location --vectors <A7> --vectors <A3> --query-vectors <A7 q> --query-vectors <A3 q> --gallery <list>   # H2
 uv run miroir vlm ask --model qwen3-vl-30b-a3b --probe   # H1: a vision model describes query photos
 uv run miroir vlm score --model qwen3-vl-30b-a3b --image-run <A7 run>   # H1 BM25, H3 mix
 ```

@@ -1,0 +1,1736 @@
+{
+ "schema_version": 1,
+ "round": "R2",
+ "step": "H",
+ "option": "H2-soft-1-1km-noise300m",
+ "updated": "2026-10-13",
+ "vector_run": "A7-embeddinggemma-2-512-screening-v2-publishable+F2+A3-megaloc-322-screening-v2-publishable+F2",
+ "query_vector_run": "A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries+A3-megaloc-322-T2-T2b-T8c-tune-queries",
+ "vectors": {
+  "option": "A7+A3",
+  "model": "google/embeddinggemma-2 + gmberton/MegaLoc",
+  "resolution": 512,
+  "pooling": "fusion",
+  "gallery": "screening-v2-publishable-fetched+F2",
+  "created": "2026-10-12",
+  "cost_usd": 1.7467203480027773,
+  "wall_time_s": 5389.197338416037,
+  "route": "hosted",
+  "notes": "H2-soft-1-1km-noise300m: As H2-soft-1-1km, the photo's position moved 300 m in a seeded random direction. Stack: G5 at the weights picked with F2 photos, A7 weight per bucket (archive-building 1, colour-building 0, object 0.2), A3 the rest, min-max per model; buckets as in G5"
+ },
+ "bootstrap_resamples": 1000,
+ "bootstrap_seed": 20261012,
+ "scores": [
+  {
+   "test_set": "T2",
+   "half": "tune",
+   "gallery": "screening-v2-publishable-fetched+F2",
+   "gallery_images": 26373,
+   "gallery_entities": 5811,
+   "queries": 152,
+   "skipped_no_answer": 0,
+   "ap_max_rank": null,
+   "hit_at_1": {
+    "value": 0.8092105263157895,
+    "low": 0.743421052631579,
+    "high": 0.868421052631579
+   },
+   "hit_at_5": {
+    "value": 0.9473684210526315,
+    "low": 0.9143092105263159,
+    "high": 0.9802631578947368
+   },
+   "hit_at_10": {
+    "value": 0.9605263157894737,
+    "low": 0.9276315789473685,
+    "high": 0.9868421052631579
+   },
+   "map": {
+    "value": 0.8670005519543649,
+    "low": 0.8201704755930698,
+    "high": 0.9103145487053778
+   },
+   "per_query": [
+    {
+     "query_id": "T2-commons-01791d96fdeb6e00",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-01b71e293df5dd76",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-01c732d0459b3958",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-03357338ef4f7fc4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-0a0bbb2124fd4bc1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-0c7afb51b7614b35",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-10a5cbf7c745526e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-13084053ed908281",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1352d3bbe2d96bd9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-137ee2b347044974",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-13c6fb012fd39d8c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-147e7b4e7b8ef9a4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-15311d8a84a75a02",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-15a60c92be757fcc",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-16628727b1c82063",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1723e52701023e9d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1777dd99ff2ab92f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1782acd640f2f52c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1870cfbf94f7cddb",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1b90788f2165a38e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1d97eec71102ce27",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-1ede9e43770e2ef7",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-1fdf0b0e6de90e96",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-203c4de63f07c7c1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-2b0e0e6553d08d24",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-2c96ce3a7d19278c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-2f598e56314d4e4e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-30202fa639adb712",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-3214c165ff6f801e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-337abc919f38b4f4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-348757aa9dff31db",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-3568030513a9a3a0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-358d5bc133986668",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-3706130819603a4a",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-371af9f809e82324",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-37e9dfe42341ed89",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-3bd2cfa91b285b09",
+     "rank": 8,
+     "ap": 0.125
+    },
+    {
+     "query_id": "T2-commons-3e10ab43b2226650",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-3f2f285fbee75469",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-40617a6ee714495d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-40746f78cc01009c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-419bbc177c577f59",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-45da76e3353c7dda",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-4c7b58a61f935e66",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-4cc172a553ba3d41",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-4d11348097cfac34",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-4d4a1aa9e4d4eac3",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-4dd496ba1b620ca8",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-4ea5ffc6a2d3ebc4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-50d4d0f7759cfb85",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-50ef10928f4ca747",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-51b2b82b2e289c89",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-5511619f1e54a239",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-56dd50aba6aef9f1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-5a658039ba70bc56",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-64397de9855d4a15",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-654b7d4d1620a943",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-660f67950be5da6e",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-678b3301f98395e5",
+     "rank": 11,
+     "ap": 0.09090909090909091
+    },
+    {
+     "query_id": "T2-commons-69faeef0d2e101d6",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-6a47ba5bdf956347",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-6a678e197afd1307",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-6ba9a4024bf7e208",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-6c243b1296c541eb",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-6ead0421c70ba5ab",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-716b340cd0bd360b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-74227a259426e10b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-7656061654dea207",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-76e25147b5fa6e09",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-777a7c1e4372a3fe",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-77e40ff7bca9b3d6",
+     "rank": 17,
+     "ap": 0.058823529411764705
+    },
+    {
+     "query_id": "T2-commons-7d20f22bd4e27329",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-7e31928c835abbdd",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-7eaec51c2068842d",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-829f316bee28bd1d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-841a83acfb01d1ff",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-8857f6427bb4d6e6",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-8cbfede4b4d1c9aa",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-8d06de5cdb305542",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-8d4b41157f559876",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-8e397af975625fd3",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-9356f3de0fc9ecca",
+     "rank": 9,
+     "ap": 0.1111111111111111
+    },
+    {
+     "query_id": "T2-commons-958a23773dc2b59d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-95f084a2fe9bdbe0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-96e2eb8a89e4fb3c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-96e9d892e6b6f9b0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-97429cd9107913ad",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-97d43b83c15a7996",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-97d64184f9738b87",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-98b25dfb382e5662",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-9b4eae396b20c8eb",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-9bf28c180c666144",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-9d9028bc58734ca0",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-9dbd77bfaae579f0",
+     "rank": 4,
+     "ap": 0.25
+    },
+    {
+     "query_id": "T2-commons-9e666725285f1051",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-9e8019b20cb0963f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a4177c9790eec396",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a462f87024dda11d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a4ce7d2847f2dac6",
+     "rank": 4,
+     "ap": 0.25
+    },
+    {
+     "query_id": "T2-commons-a727e4d9c3b5237b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a79facd2c0f1ff24",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a83e6cab6bebdcce",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-a9e12f148198a3ec",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-abd08a099c482508",
+     "rank": 15,
+     "ap": 0.06666666666666667
+    },
+    {
+     "query_id": "T2-commons-ac24f1cabc0cc292",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-acc3b403b35f704c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-af98bd8f5e3543ee",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-b2708a46a18af6c1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-c2435af4abcb9b61",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-c3ba71e2af6f7d2c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-c4c2603b4a9e0c74",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-c582062cc4a7f651",
+     "rank": 23,
+     "ap": 0.043478260869565216
+    },
+    {
+     "query_id": "T2-commons-c90bd76ec2147b40",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-cabc33ecbf48cd0e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-cc2fd3b5a3c3e947",
+     "rank": 4,
+     "ap": 0.25
+    },
+    {
+     "query_id": "T2-commons-cf36ab70e46307ff",
+     "rank": 14,
+     "ap": 0.07142857142857142
+    },
+    {
+     "query_id": "T2-commons-d0012b917e49fd86",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d08d43b9a33208d9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d30a80e2f2b6cf45",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d4b8577fc61880cc",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d5a39c9a5d620d91",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d5c5530b42cb1704",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-d7523583cdb5a515",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d818aa01c1bab8ee",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-d8cb844557238031",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-db7637e5d7d3a3e1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-dc76db2c129c4a22",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T2-commons-dd2552a5ee496c5e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-dd7d073012fb6d24",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-de0a52714283f529",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-de7ae90cf640cf66",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e0b3b97ec835f475",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e27c49862d8b1baa",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T2-commons-e2cb0cf820082fd2",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e3eccb69b068c7fc",
+     "rank": 4,
+     "ap": 0.25
+    },
+    {
+     "query_id": "T2-commons-e49a78c561a35661",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e513434de576cf3f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e5cf87e5f1f3ec95",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e5f465db4d1ea149",
+     "rank": 20,
+     "ap": 0.05
+    },
+    {
+     "query_id": "T2-commons-e6ea41fc2b3f2ccd",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e72b3b15ad38391b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e74f18e14bfbfcfc",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e7a50656d954a2d5",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-e8c3f8b20e9647d4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-ec38d1332fd10af0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-ecf02395ec855cb5",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-eeb7454c6b3ae874",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-ef0cebd7b0b413b4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-f34ca0149237d03d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-f4b8e2b58ee3653f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-f79cf502050be3aa",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2-commons-ff7f97875de4b2df",
+     "rank": 1,
+     "ap": 1.0
+    }
+   ]
+  },
+  {
+   "test_set": "T2b",
+   "half": "tune",
+   "gallery": "screening-v2-publishable-fetched+F2",
+   "gallery_images": 26373,
+   "gallery_entities": 5811,
+   "queries": 8,
+   "skipped_no_answer": 0,
+   "ap_max_rank": null,
+   "hit_at_1": {
+    "value": 1.0,
+    "low": 1.0,
+    "high": 1.0
+   },
+   "hit_at_5": {
+    "value": 1.0,
+    "low": 1.0,
+    "high": 1.0
+   },
+   "hit_at_10": {
+    "value": 1.0,
+    "low": 1.0,
+    "high": 1.0
+   },
+   "map": {
+    "value": 1.0,
+    "low": 1.0,
+    "high": 1.0
+   },
+   "per_query": [
+    {
+     "query_id": "T2b-commons-032994e1c1c96fda",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-7dcff5dc67e45edd",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-7feaad5fb1985b1c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-8bf94943c29174f8",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-982ce1d277d27112",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-b4862955ad5e6fcd",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-d3c595d54674a952",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T2b-commons-ea50cd515873405a",
+     "rank": 1,
+     "ap": 1.0
+    }
+   ]
+  }
+ ],
+ "not_found": [
+  {
+   "test_set": "T8c",
+   "half": "tune",
+   "gallery": "screening-v2-publishable-fetched+F2",
+   "in_index_sets": [
+    "T2",
+    "T2b"
+   ],
+   "match_rate": 0.5,
+   "wrong_confident": {
+    "value": 0.4666666666666667,
+    "low": 0.17777777777777778,
+    "high": 0.6005555555555551
+   },
+   "wrong_target": 0.05,
+   "match_rate_at_target": {
+    "value": 0.2375,
+    "low": 0.16875,
+    "high": 0.39375
+   },
+   "in_index": [
+    {
+     "query_id": "T2-commons-01791d96fdeb6e00",
+     "score": 0.9136111736297607
+    },
+    {
+     "query_id": "T2-commons-01b71e293df5dd76",
+     "score": 0.37923471927642827
+    },
+    {
+     "query_id": "T2-commons-01c732d0459b3958",
+     "score": 0.18659795820713046
+    },
+    {
+     "query_id": "T2-commons-03357338ef4f7fc4",
+     "score": 0.17820210754871368
+    },
+    {
+     "query_id": "T2-commons-0a0bbb2124fd4bc1",
+     "score": 0.5607622623443603
+    },
+    {
+     "query_id": "T2-commons-0c7afb51b7614b35",
+     "score": 0.3880564570426941
+    },
+    {
+     "query_id": "T2-commons-10a5cbf7c745526e",
+     "score": 0.3404499888420105
+    },
+    {
+     "query_id": "T2-commons-13084053ed908281",
+     "score": 0.11377453804016113
+    },
+    {
+     "query_id": "T2-commons-1352d3bbe2d96bd9",
+     "score": 0.5354866981506348
+    },
+    {
+     "query_id": "T2-commons-137ee2b347044974",
+     "score": 0.49744516611099243
+    },
+    {
+     "query_id": "T2-commons-13c6fb012fd39d8c",
+     "score": 0.33334305286407473
+    },
+    {
+     "query_id": "T2-commons-147e7b4e7b8ef9a4",
+     "score": 0.05063692480325699
+    },
+    {
+     "query_id": "T2-commons-15311d8a84a75a02",
+     "score": 0.302684485912323
+    },
+    {
+     "query_id": "T2-commons-15a60c92be757fcc",
+     "score": 0.1788804441690445
+    },
+    {
+     "query_id": "T2-commons-16628727b1c82063",
+     "score": 0.03226413205265999
+    },
+    {
+     "query_id": "T2-commons-1723e52701023e9d",
+     "score": 0.7354601979255677
+    },
+    {
+     "query_id": "T2-commons-1777dd99ff2ab92f",
+     "score": 0.04178481549024582
+    },
+    {
+     "query_id": "T2-commons-1782acd640f2f52c",
+     "score": 0.16409146785736084
+    },
+    {
+     "query_id": "T2-commons-1870cfbf94f7cddb",
+     "score": 0.1719276249408722
+    },
+    {
+     "query_id": "T2-commons-1b90788f2165a38e",
+     "score": 0.20292863547801973
+    },
+    {
+     "query_id": "T2-commons-1d97eec71102ce27",
+     "score": 0.32038652896881104
+    },
+    {
+     "query_id": "T2-commons-1ede9e43770e2ef7",
+     "score": 0.18178102374076843
+    },
+    {
+     "query_id": "T2-commons-1fdf0b0e6de90e96",
+     "score": 0.27896082401275635
+    },
+    {
+     "query_id": "T2-commons-203c4de63f07c7c1",
+     "score": 0.3804316520690918
+    },
+    {
+     "query_id": "T2-commons-2b0e0e6553d08d24",
+     "score": 0.3470425963401795
+    },
+    {
+     "query_id": "T2-commons-2c96ce3a7d19278c",
+     "score": 0.27348692417144777
+    },
+    {
+     "query_id": "T2-commons-2f598e56314d4e4e",
+     "score": 0.06882306933403015
+    },
+    {
+     "query_id": "T2-commons-30202fa639adb712",
+     "score": 0.05803411081433296
+    },
+    {
+     "query_id": "T2-commons-3214c165ff6f801e",
+     "score": 0.21015011668205263
+    },
+    {
+     "query_id": "T2-commons-337abc919f38b4f4",
+     "score": 0.5166757702827454
+    },
+    {
+     "query_id": "T2-commons-348757aa9dff31db",
+     "score": 0.3417646646499634
+    },
+    {
+     "query_id": "T2-commons-3568030513a9a3a0",
+     "score": 0.22908520698547363
+    },
+    {
+     "query_id": "T2-commons-358d5bc133986668",
+     "score": 0.2026643455028534
+    },
+    {
+     "query_id": "T2-commons-3706130819603a4a",
+     "score": 0.21041893959045413
+    },
+    {
+     "query_id": "T2-commons-371af9f809e82324",
+     "score": 0.578808867931366
+    },
+    {
+     "query_id": "T2-commons-37e9dfe42341ed89",
+     "score": 0.09764150530099869
+    },
+    {
+     "query_id": "T2-commons-3bd2cfa91b285b09",
+     "score": 0.15356294810771942
+    },
+    {
+     "query_id": "T2-commons-3e10ab43b2226650",
+     "score": 0.6223115801811219
+    },
+    {
+     "query_id": "T2-commons-3f2f285fbee75469",
+     "score": 0.0525631308555603
+    },
+    {
+     "query_id": "T2-commons-40617a6ee714495d",
+     "score": 0.209881991147995
+    },
+    {
+     "query_id": "T2-commons-40746f78cc01009c",
+     "score": 0.3240187406539917
+    },
+    {
+     "query_id": "T2-commons-419bbc177c577f59",
+     "score": 0.2567018628120422
+    },
+    {
+     "query_id": "T2-commons-45da76e3353c7dda",
+     "score": 0.2984567761421204
+    },
+    {
+     "query_id": "T2-commons-4c7b58a61f935e66",
+     "score": 0.04959769919514656
+    },
+    {
+     "query_id": "T2-commons-4cc172a553ba3d41",
+     "score": 0.43968307971954346
+    },
+    {
+     "query_id": "T2-commons-4d11348097cfac34",
+     "score": 0.18250225186347963
+    },
+    {
+     "query_id": "T2-commons-4d4a1aa9e4d4eac3",
+     "score": 0.11059693247079849
+    },
+    {
+     "query_id": "T2-commons-4dd496ba1b620ca8",
+     "score": 0.3209207057952881
+    },
+    {
+     "query_id": "T2-commons-4ea5ffc6a2d3ebc4",
+     "score": 0.4162565231323242
+    },
+    {
+     "query_id": "T2-commons-50d4d0f7759cfb85",
+     "score": 0.5374997138977051
+    },
+    {
+     "query_id": "T2-commons-50ef10928f4ca747",
+     "score": 0.2720926880836487
+    },
+    {
+     "query_id": "T2-commons-51b2b82b2e289c89",
+     "score": 0.36708658933639526
+    },
+    {
+     "query_id": "T2-commons-5511619f1e54a239",
+     "score": 0.15860082507133486
+    },
+    {
+     "query_id": "T2-commons-56dd50aba6aef9f1",
+     "score": 0.12642832100391388
+    },
+    {
+     "query_id": "T2-commons-5a658039ba70bc56",
+     "score": 0.2174236297607422
+    },
+    {
+     "query_id": "T2-commons-64397de9855d4a15",
+     "score": 0.30325644016265874
+    },
+    {
+     "query_id": "T2-commons-654b7d4d1620a943",
+     "score": 0.4755622029304505
+    },
+    {
+     "query_id": "T2-commons-660f67950be5da6e",
+     "score": 0.2847596526145935
+    },
+    {
+     "query_id": "T2-commons-678b3301f98395e5",
+     "score": 0.18132098019123077
+    },
+    {
+     "query_id": "T2-commons-69faeef0d2e101d6",
+     "score": 0.19518830180168154
+    },
+    {
+     "query_id": "T2-commons-6a47ba5bdf956347",
+     "score": 0.17718527019023894
+    },
+    {
+     "query_id": "T2-commons-6a678e197afd1307",
+     "score": 0.06300225853919983
+    },
+    {
+     "query_id": "T2-commons-6ba9a4024bf7e208",
+     "score": 0.28857487440109253
+    },
+    {
+     "query_id": "T2-commons-6c243b1296c541eb",
+     "score": 0.04231586679816246
+    },
+    {
+     "query_id": "T2-commons-6ead0421c70ba5ab",
+     "score": 0.1545002803206444
+    },
+    {
+     "query_id": "T2-commons-716b340cd0bd360b",
+     "score": 0.19778853356838227
+    },
+    {
+     "query_id": "T2-commons-74227a259426e10b",
+     "score": 0.2479701817035675
+    },
+    {
+     "query_id": "T2-commons-7656061654dea207",
+     "score": 0.692920732498169
+    },
+    {
+     "query_id": "T2-commons-76e25147b5fa6e09",
+     "score": 0.19377191364765167
+    },
+    {
+     "query_id": "T2-commons-777a7c1e4372a3fe",
+     "score": 0.14055253565311432
+    },
+    {
+     "query_id": "T2-commons-77e40ff7bca9b3d6",
+     "score": 0.23440892100334168
+    },
+    {
+     "query_id": "T2-commons-7d20f22bd4e27329",
+     "score": 0.19105595648288726
+    },
+    {
+     "query_id": "T2-commons-7e31928c835abbdd",
+     "score": 0.5393884181976318
+    },
+    {
+     "query_id": "T2-commons-7eaec51c2068842d",
+     "score": 0.2509178698062897
+    },
+    {
+     "query_id": "T2-commons-829f316bee28bd1d",
+     "score": 0.5776506662368774
+    },
+    {
+     "query_id": "T2-commons-841a83acfb01d1ff",
+     "score": 0.0834435448050499
+    },
+    {
+     "query_id": "T2-commons-8857f6427bb4d6e6",
+     "score": 0.06085210293531418
+    },
+    {
+     "query_id": "T2-commons-8cbfede4b4d1c9aa",
+     "score": 0.19242956936359407
+    },
+    {
+     "query_id": "T2-commons-8d06de5cdb305542",
+     "score": 0.19987170100212098
+    },
+    {
+     "query_id": "T2-commons-8d4b41157f559876",
+     "score": 0.31501904726028446
+    },
+    {
+     "query_id": "T2-commons-8e397af975625fd3",
+     "score": 0.20961271524429323
+    },
+    {
+     "query_id": "T2-commons-9356f3de0fc9ecca",
+     "score": 0.13883519172668457
+    },
+    {
+     "query_id": "T2-commons-958a23773dc2b59d",
+     "score": 0.05756624415516853
+    },
+    {
+     "query_id": "T2-commons-95f084a2fe9bdbe0",
+     "score": 0.5777136445045471
+    },
+    {
+     "query_id": "T2-commons-96e2eb8a89e4fb3c",
+     "score": 0.27104958295822146
+    },
+    {
+     "query_id": "T2-commons-96e9d892e6b6f9b0",
+     "score": 0.34651505947113037
+    },
+    {
+     "query_id": "T2-commons-97429cd9107913ad",
+     "score": 0.01442771591246128
+    },
+    {
+     "query_id": "T2-commons-97d43b83c15a7996",
+     "score": 0.30772567987442023
+    },
+    {
+     "query_id": "T2-commons-97d64184f9738b87",
+     "score": 0.20634665191173554
+    },
+    {
+     "query_id": "T2-commons-98b25dfb382e5662",
+     "score": 0.17872157692909243
+    },
+    {
+     "query_id": "T2-commons-9b4eae396b20c8eb",
+     "score": 0.2961398661136627
+    },
+    {
+     "query_id": "T2-commons-9bf28c180c666144",
+     "score": 0.3371639609336853
+    },
+    {
+     "query_id": "T2-commons-9d9028bc58734ca0",
+     "score": 0.19509604573249817
+    },
+    {
+     "query_id": "T2-commons-9dbd77bfaae579f0",
+     "score": 0.2937443494796753
+    },
+    {
+     "query_id": "T2-commons-9e666725285f1051",
+     "score": 0.22777215838432313
+    },
+    {
+     "query_id": "T2-commons-9e8019b20cb0963f",
+     "score": 0.3758910775184632
+    },
+    {
+     "query_id": "T2-commons-a4177c9790eec396",
+     "score": 0.3137308359146118
+    },
+    {
+     "query_id": "T2-commons-a462f87024dda11d",
+     "score": 0.1707198902964592
+    },
+    {
+     "query_id": "T2-commons-a4ce7d2847f2dac6",
+     "score": 0.1440463662147522
+    },
+    {
+     "query_id": "T2-commons-a727e4d9c3b5237b",
+     "score": 0.2834198474884033
+    },
+    {
+     "query_id": "T2-commons-a79facd2c0f1ff24",
+     "score": 0.2453129142522812
+    },
+    {
+     "query_id": "T2-commons-a83e6cab6bebdcce",
+     "score": 0.18314981758594515
+    },
+    {
+     "query_id": "T2-commons-a9e12f148198a3ec",
+     "score": 0.5006249904632569
+    },
+    {
+     "query_id": "T2-commons-abd08a099c482508",
+     "score": 0.19832237362861635
+    },
+    {
+     "query_id": "T2-commons-ac24f1cabc0cc292",
+     "score": 0.03277770057320595
+    },
+    {
+     "query_id": "T2-commons-acc3b403b35f704c",
+     "score": 0.44700562953948975
+    },
+    {
+     "query_id": "T2-commons-af98bd8f5e3543ee",
+     "score": 0.1750736862421036
+    },
+    {
+     "query_id": "T2-commons-b2708a46a18af6c1",
+     "score": 0.2503166735172272
+    },
+    {
+     "query_id": "T2-commons-c2435af4abcb9b61",
+     "score": 0.7192111015319824
+    },
+    {
+     "query_id": "T2-commons-c3ba71e2af6f7d2c",
+     "score": 0.4299720227718353
+    },
+    {
+     "query_id": "T2-commons-c4c2603b4a9e0c74",
+     "score": 0.5716557145118714
+    },
+    {
+     "query_id": "T2-commons-c582062cc4a7f651",
+     "score": 0.32075165510177617
+    },
+    {
+     "query_id": "T2-commons-c90bd76ec2147b40",
+     "score": 0.20921171307563785
+    },
+    {
+     "query_id": "T2-commons-cabc33ecbf48cd0e",
+     "score": 0.14907547626644374
+    },
+    {
+     "query_id": "T2-commons-cc2fd3b5a3c3e947",
+     "score": 0.3447331070899964
+    },
+    {
+     "query_id": "T2-commons-cf36ab70e46307ff",
+     "score": 0.23592774271965028
+    },
+    {
+     "query_id": "T2-commons-d0012b917e49fd86",
+     "score": 0.35335233211517336
+    },
+    {
+     "query_id": "T2-commons-d08d43b9a33208d9",
+     "score": 0.37710630893707275
+    },
+    {
+     "query_id": "T2-commons-d30a80e2f2b6cf45",
+     "score": 0.19716888666152954
+    },
+    {
+     "query_id": "T2-commons-d4b8577fc61880cc",
+     "score": 0.2116042196750641
+    },
+    {
+     "query_id": "T2-commons-d5a39c9a5d620d91",
+     "score": 0.6613414287567139
+    },
+    {
+     "query_id": "T2-commons-d5c5530b42cb1704",
+     "score": 0.1948640823364258
+    },
+    {
+     "query_id": "T2-commons-d7523583cdb5a515",
+     "score": 0.3481869101524353
+    },
+    {
+     "query_id": "T2-commons-d818aa01c1bab8ee",
+     "score": 0.41050122976303105
+    },
+    {
+     "query_id": "T2-commons-d8cb844557238031",
+     "score": 0.2695841908454895
+    },
+    {
+     "query_id": "T2-commons-db7637e5d7d3a3e1",
+     "score": 0.3659868359565735
+    },
+    {
+     "query_id": "T2-commons-dc76db2c129c4a22",
+     "score": 0.028830636292696
+    },
+    {
+     "query_id": "T2-commons-dd2552a5ee496c5e",
+     "score": 0.11646348983049393
+    },
+    {
+     "query_id": "T2-commons-dd7d073012fb6d24",
+     "score": 0.1642855390906334
+    },
+    {
+     "query_id": "T2-commons-de0a52714283f529",
+     "score": 0.31582963466644287
+    },
+    {
+     "query_id": "T2-commons-de7ae90cf640cf66",
+     "score": 0.5050122737884521
+    },
+    {
+     "query_id": "T2-commons-e0b3b97ec835f475",
+     "score": 0.2588481068611145
+    },
+    {
+     "query_id": "T2-commons-e27c49862d8b1baa",
+     "score": 0.22713798880577088
+    },
+    {
+     "query_id": "T2-commons-e2cb0cf820082fd2",
+     "score": 0.452975857257843
+    },
+    {
+     "query_id": "T2-commons-e3eccb69b068c7fc",
+     "score": 0.33484207391738896
+    },
+    {
+     "query_id": "T2-commons-e49a78c561a35661",
+     "score": 0.042397692799568176
+    },
+    {
+     "query_id": "T2-commons-e513434de576cf3f",
+     "score": 0.4127990365028381
+    },
+    {
+     "query_id": "T2-commons-e5cf87e5f1f3ec95",
+     "score": 0.20269537866115572
+    },
+    {
+     "query_id": "T2-commons-e5f465db4d1ea149",
+     "score": 0.26239705085754395
+    },
+    {
+     "query_id": "T2-commons-e6ea41fc2b3f2ccd",
+     "score": 0.20475207567214965
+    },
+    {
+     "query_id": "T2-commons-e72b3b15ad38391b",
+     "score": 0.142571821808815
+    },
+    {
+     "query_id": "T2-commons-e74f18e14bfbfcfc",
+     "score": 0.5101418495178223
+    },
+    {
+     "query_id": "T2-commons-e7a50656d954a2d5",
+     "score": 0.08964193612337112
+    },
+    {
+     "query_id": "T2-commons-e8c3f8b20e9647d4",
+     "score": 0.45843690633773804
+    },
+    {
+     "query_id": "T2-commons-ec38d1332fd10af0",
+     "score": 0.39988476037979126
+    },
+    {
+     "query_id": "T2-commons-ecf02395ec855cb5",
+     "score": 0.11740701645612717
+    },
+    {
+     "query_id": "T2-commons-eeb7454c6b3ae874",
+     "score": 0.22611633539199832
+    },
+    {
+     "query_id": "T2-commons-ef0cebd7b0b413b4",
+     "score": 0.14696897566318512
+    },
+    {
+     "query_id": "T2-commons-f34ca0149237d03d",
+     "score": 0.45214333534240725
+    },
+    {
+     "query_id": "T2-commons-f4b8e2b58ee3653f",
+     "score": 0.6088741421699524
+    },
+    {
+     "query_id": "T2-commons-f79cf502050be3aa",
+     "score": 0.32118168473243713
+    },
+    {
+     "query_id": "T2-commons-ff7f97875de4b2df",
+     "score": 0.1896344840526581
+    },
+    {
+     "query_id": "T2b-commons-032994e1c1c96fda",
+     "score": 0.5302603483200073
+    },
+    {
+     "query_id": "T2b-commons-7dcff5dc67e45edd",
+     "score": 0.46007459163665776
+    },
+    {
+     "query_id": "T2b-commons-7feaad5fb1985b1c",
+     "score": 0.6023226618766785
+    },
+    {
+     "query_id": "T2b-commons-8bf94943c29174f8",
+     "score": 0.4774856209754944
+    },
+    {
+     "query_id": "T2b-commons-982ce1d277d27112",
+     "score": 0.4572603702545166
+    },
+    {
+     "query_id": "T2b-commons-b4862955ad5e6fcd",
+     "score": 0.5447084903717041
+    },
+    {
+     "query_id": "T2b-commons-d3c595d54674a952",
+     "score": 0.6272007346153259
+    },
+    {
+     "query_id": "T2b-commons-ea50cd515873405a",
+     "score": 0.49654110670089724
+    }
+   ],
+   "not_found": [
+    {
+     "query_id": "T8c-commons-0624088093da4b2f",
+     "score": 0.17331352829933167
+    },
+    {
+     "query_id": "T8c-commons-0ccd3b26dae34668",
+     "score": 0.2713351607322693
+    },
+    {
+     "query_id": "T8c-commons-0cd3245b34ab59c1",
+     "score": 0.26030885577201845
+    },
+    {
+     "query_id": "T8c-commons-199e885a3b1c5743",
+     "score": 0.1899437725543976
+    },
+    {
+     "query_id": "T8c-commons-20a5724c55776384",
+     "score": 0.20000317692756653
+    },
+    {
+     "query_id": "T8c-commons-2220196bf9f72318",
+     "score": 0.08805191516876221
+    },
+    {
+     "query_id": "T8c-commons-2389a4d3e86217ab",
+     "score": 0.2844013810157776
+    },
+    {
+     "query_id": "T8c-commons-2ac113349d9989bb",
+     "score": 0.0775839239358902
+    },
+    {
+     "query_id": "T8c-commons-2b0638ac9a26af4a",
+     "score": 0.171097007393837
+    },
+    {
+     "query_id": "T8c-commons-2fba4560dd03de90",
+     "score": 0.3597866535186768
+    },
+    {
+     "query_id": "T8c-commons-35bc7c580d90f0fa",
+     "score": 0.2874435782432556
+    },
+    {
+     "query_id": "T8c-commons-372afe0341bf7127",
+     "score": 0.1782454341650009
+    },
+    {
+     "query_id": "T8c-commons-3b68fc08d5e83682",
+     "score": 0.1739138662815094
+    },
+    {
+     "query_id": "T8c-commons-46fa0594fb1d6bcd",
+     "score": 0.24658915400505066
+    },
+    {
+     "query_id": "T8c-commons-47e2ab63161b1147",
+     "score": 0.2764308094978333
+    },
+    {
+     "query_id": "T8c-commons-494e3345d54a9618",
+     "score": 0.151877760887146
+    },
+    {
+     "query_id": "T8c-commons-4de82708ec28b5a0",
+     "score": 0.20740904211997988
+    },
+    {
+     "query_id": "T8c-commons-677bfc07fdf9d81e",
+     "score": 0.2754907011985779
+    },
+    {
+     "query_id": "T8c-commons-6bd3d4641cefa4ee",
+     "score": 0.40166113376617435
+    },
+    {
+     "query_id": "T8c-commons-71643e01a5651e36",
+     "score": 0.06828640401363373
+    },
+    {
+     "query_id": "T8c-commons-806db26ed6b416ba",
+     "score": 0.296962583065033
+    },
+    {
+     "query_id": "T8c-commons-850fa5de8534d5c3",
+     "score": 0.1789073020219803
+    },
+    {
+     "query_id": "T8c-commons-89f4ee8472d550bf",
+     "score": 0.26438740491867063
+    },
+    {
+     "query_id": "T8c-commons-8dc5655fe3f915d3",
+     "score": 0.3352291345596314
+    },
+    {
+     "query_id": "T8c-commons-92a62fb13c2977ab",
+     "score": 0.20920982360839846
+    },
+    {
+     "query_id": "T8c-commons-9812ad8bda82c7d4",
+     "score": 0.3200138688087464
+    },
+    {
+     "query_id": "T8c-commons-9a6a5b076f7f0610",
+     "score": 0.32045186758041383
+    },
+    {
+     "query_id": "T8c-commons-9c2c8e2e3cff0783",
+     "score": 0.3350676536560059
+    },
+    {
+     "query_id": "T8c-commons-a3a80d5f24371853",
+     "score": 0.2788875579833985
+    },
+    {
+     "query_id": "T8c-commons-adec6d35f5855b62",
+     "score": 0.1687210500240326
+    },
+    {
+     "query_id": "T8c-commons-afc838d0db52e531",
+     "score": 0.11101219803094864
+    },
+    {
+     "query_id": "T8c-commons-b18152712d1d43e1",
+     "score": 0.4457434296607971
+    },
+    {
+     "query_id": "T8c-commons-c4a46f6aae51f4e9",
+     "score": 0.27782342433929447
+    },
+    {
+     "query_id": "T8c-commons-c8069ec9b9445ef1",
+     "score": 0.07181105762720108
+    },
+    {
+     "query_id": "T8c-commons-c9534a2f0adb58db",
+     "score": 0.30029616355895994
+    },
+    {
+     "query_id": "T8c-commons-d2e3e4c20dbcc705",
+     "score": 0.23613267540931704
+    },
+    {
+     "query_id": "T8c-commons-d547e860b2dc5408",
+     "score": 0.13358469307422638
+    },
+    {
+     "query_id": "T8c-commons-dac299f5bec1fa07",
+     "score": 0.03665852174162865
+    },
+    {
+     "query_id": "T8c-commons-ddc16e4c47d50b80",
+     "score": 0.4232420802116394
+    },
+    {
+     "query_id": "T8c-commons-e4e0b21a37a54312",
+     "score": 0.3004949569702149
+    },
+    {
+     "query_id": "T8c-commons-e761a20803020e82",
+     "score": 0.20341910421848297
+    },
+    {
+     "query_id": "T8c-commons-f021b96f8fd184fe",
+     "score": 0.16422750055789948
+    },
+    {
+     "query_id": "T8c-commons-f40f2f1a96e1deba",
+     "score": 0.15158921480178833
+    },
+    {
+     "query_id": "T8c-commons-f8a653b0e67354b3",
+     "score": 0.11271027475595474
+    },
+    {
+     "query_id": "T8c-commons-ff3cc15394f1a133",
+     "score": 0.32875272035598757
+    }
+   ]
+  }
+ ]
+}

@@ -45,6 +45,10 @@ web_app = typer.Typer(
     no_args_is_help=True, help="The prototype website: build its index, deploy it, run it locally."
 )
 app.add_typer(web_app, name="web")
+geo_app = typer.Typer(
+    no_args_is_help=True, help="Step H2: where buildings, objects and query photos are."
+)
+app.add_typer(geo_app, name="geo")
 
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
@@ -68,6 +72,28 @@ def records_build() -> None:
     mismatches = report.mismatches()
     if mismatches:
         typer.echo(f"{len(mismatches)} count(s) differ from the spec: see warnings.", err=True)
+
+
+@geo_app.command("places")
+def geo_places() -> None:
+    """One position per entity: Mérimée or Muséofile point, else the commune centre."""
+    from miroir.geo.places import build_places  # noqa: PLC0415
+
+    report = build_places(get_settings())
+    for (collection, source), count in sorted(report.counts.items()):
+        typer.echo(f"{collection:<14}{source:<36}{count:>8,}")
+    for collection in sorted({c for c, _ in report.counts}):
+        placed, total = report.coverage(collection)
+        typer.echo(f"{collection}: {placed:,} of {total:,} entities placed")
+
+
+@geo_app.command("positions")
+def geo_positions() -> None:
+    """Where each Commons query photo was taken: EXIF GPS, else the file page's camera."""
+    from miroir.geo.queries import build_positions  # noqa: PLC0415
+
+    for (set_id, source), count in sorted(build_positions(get_settings()).items()):
+        typer.echo(f"{set_id:<6}{source:<8}{count:>6}")
 
 
 @eval_app.command("check-vectors")
@@ -408,6 +434,58 @@ def eval_route3(
             for d in by_set.values()
         )
         typer.echo(f"{name:<14}{row}")
+
+
+@eval_app.command("location")
+def eval_location(
+    *,
+    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")] = "R2",
+    vectors: Annotated[list[str], typer.Option(help="Gallery run: A7 first, then A3.")],
+    query_vectors: Annotated[list[str], typer.Option(help="Each model's query run, same order.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list.")],
+    suffix: Annotated[str, typer.Option(help="Ends every option label, e.g. -full.")] = "",
+) -> None:
+    """H2: the photo's position (filter or prior) and known fields (département, museum...)."""
+    from miroir.eval.location import score_location  # noqa: PLC0415
+
+    report = score_location(
+        get_settings(),
+        runs=vectors,
+        query_runs=query_vectors,
+        gallery=gallery,
+        round_id=round_id,
+        suffix=suffix,
+    )
+    placed, total = report.placed
+    typer.echo(f"gallery entities with a place: {placed:,} of {total:,}")
+    typer.echo(
+        "photos with a position: "
+        + ", ".join(f"{s} {n} of {t}" for s, (n, t) in report.gps_queries.items())
+    )
+    for radius, (median, empty) in report.nearby.items():
+        typer.echo(
+            f"within {radius:g} km: median {median:g} gallery entities around a T2 photo; "
+            f"{100 * empty:.0f}% of T8c photos have none"
+        )
+    bonus, scale = report.soft_choice
+    typer.echo(
+        f"soft prior picked: bonus {bonus:g}, scale {scale:g} km; split-half hit@10 "
+        + ", ".join(f"{s} {100 * v:.1f}" for s, v in report.soft_split.items())
+    )
+    for policy in (*report.known, *report.gps):
+        row = "; ".join(
+            f"{s} {_pct(score.hit_at_10)} ({100 * policy.differences[s].diff.value:+.1f} "
+            f"[{100 * policy.differences[s].diff.low:+.1f}, "
+            f"{100 * policy.differences[s].diff.high:+.1f}])"
+            for s, score in policy.scores.items()
+        )
+        typer.echo(f"{policy.option:<34}{row}")
+        if policy.not_found is not None:
+            nf = policy.not_found
+            typer.echo(
+                f"{'':<34}T8c wrong-but-confident {_pct(nf.wrong_confident)}, "
+                f"matched at 5% wrong {_pct(nf.match_rate_at_target)}"
+            )
 
 
 @eval_app.command("merge-vectors")

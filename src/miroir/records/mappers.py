@@ -274,3 +274,65 @@ def _decades(raw: RawRecord, codes: Iterable[str]) -> tuple[str, ...]:
 
 def _unique(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
+
+
+# --- places (step H2) ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PlaceHint:
+    """What a record says about where its building or object is, short of a position."""
+
+    ref: str
+    insee: str | None
+    """The commune's INSEE code (Mémoire `INSEE`), first value."""
+    museum: str | None
+    """The Muséofile id of the museum holding the object (Joconde `MUSEO`)."""
+
+
+@dataclass(frozen=True, slots=True)
+class PopPoint:
+    """A position POP gives for a record of another base: a Mérimée building or a museum."""
+
+    ref: str
+    latitude: float
+    longitude: float
+
+
+def place_hint(raw: RawRecord) -> PlaceHint:
+    """The commune and museum a July export record names (any base)."""
+    insee = _first(raw, ("INSEE",))
+    return PlaceHint(
+        ref=_ref(raw),
+        insee=insee if insee and _INSEE_RE.match(insee) else None,
+        museum=_first(raw, ("MUSEO",)),
+    )
+
+
+def merimee_point(raw: RawRecord) -> PopPoint | None:
+    """A Mérimée record's position (`coordonnees_au_format_WGS84`, "lat,lon"), else None."""
+    point = _lat_lon(_text(raw, "coordonnees_au_format_WGS84"))
+    return None if point is None else PopPoint(_ref(raw), *point)
+
+
+def museum_point(raw: RawRecord) -> PopPoint | None:
+    """A Muséofile record's position (`Coordonnees`, "lat, lon"), else None."""
+    point = _lat_lon(_text(raw, "Coordonnees"))
+    return None if point is None else PopPoint(_ref(raw), *point)
+
+
+_INSEE_RE = re.compile(r"^(?:\d{5}|2[AB]\d{3})$")
+
+
+def _lat_lon(text: str) -> tuple[float, float] | None:
+    """ "lat,lon" in decimal degrees, inside the valid range and not (0, 0); else None."""
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 2:
+        return None
+    try:
+        lat, lon = float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+        return None
+    return lat, lon

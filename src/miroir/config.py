@@ -39,6 +39,8 @@ POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 #: and the Commons part of T8 (technical spec §7).
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+#: Commune centres (INSEE codes), from the French State's open geography API (step H2).
+GEO_API_URL = "https://geo.api.gouv.fr"
 #: Wikimedia asks every client to name itself and give a contact.
 WIKIMEDIA_USER_AGENT = (
     "MIROIR/0.1 (https://github.com/simonaszilinskas/miroir) test-set builder, python-httpx"
@@ -137,6 +139,16 @@ class Settings(BaseSettings):
         folder = _EXPORT_FOLDER[collection]
         return self.export_dir(collection) / f"{folder}.jsonl"
 
+    @property
+    def full_exports_dir(self) -> Path:
+        """The whole POP download (`exports-full/<base>/<base>.jsonl`), with bases the July
+        exports lack (Mérimée, Palissy, Muséofile). Read only."""
+        return self.data_root / "exports-full"
+
+    def full_export_jsonl(self, base: str) -> Path:
+        _check_name(base)
+        return self.full_exports_dir / base / f"{base}.jsonl"
+
     # --- outputs ------------------------------------------------------------
 
     @property
@@ -177,6 +189,22 @@ class Settings(BaseSettings):
     def commons_gallery_parquets(self) -> list[Path]:
         """Every F2 table written so far, in name order."""
         return sorted(self.data_root.glob("commons-gallery-*.parquet"))
+
+    @property
+    def geo_cache_dir(self) -> Path:
+        """Answers of the geography API (commune centres), kept so a rebuild sends nothing."""
+        return self.data_root / "cache" / "geo"
+
+    @property
+    def places_parquet(self) -> Path:
+        """One position per building or object (step H2): POP coordinates, else the centre of
+        its commune."""
+        return self.data_root / "places.parquet"
+
+    @property
+    def query_positions_parquet(self) -> Path:
+        """Where each Commons query photo was taken, when its file says (step H2)."""
+        return self.data_root / "query-positions.parquet"
 
     @property
     def spend_ledger(self) -> Path:
