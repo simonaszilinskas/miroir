@@ -42,7 +42,7 @@ Index `full` (since 2026-10-13): every image of the July exports the Modal runs 
 | Set | Queries | Hit@1 | Hit@10 | "Sure" answers | Right among sure |
 |---|---|---|---|---|---|
 | T1 archive building | 138 | 34.1 | 45.7 | 24.6% | 73% |
-| T1 with its caption read (next deploy) | 138 | 70.3 | 87.0 | | |
+| T1 with its caption read (next deploy; measured on index `full`) | 138 | 70.3 | 87.0 | | |
 | T3 painting in a room (crop) | 99 | 55.6 | 86.9 | 8.1% | 0% |
 | T5 museum object, other view | 493 | 27.2 | 43.2 | 10.3% | 22% |
 | T2 phone photo of a building (Commons) | 516 | 9.7 | 18.2 | 0% | |
