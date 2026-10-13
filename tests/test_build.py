@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from miroir.config import Settings
 from miroir.records.build import build
-from miroir.records.model import Collection
+from miroir.records.model import JULY_COLLECTIONS, Collection
 from miroir.records.store import read_images, read_records
 
 
@@ -11,7 +11,7 @@ def test_build_writes_parquet_that_reads_back(settings: Settings) -> None:
 
     records = read_records(settings.records_parquet, settings.images_parquet)
     assert len(records) == 20  # 23 fixture records, 3 without a usable image
-    assert {r.collection for r in records} == set(Collection)
+    assert {r.collection for r in records} == set(JULY_COLLECTIONS)
     assert report.counts[Collection.MEMOIRE]["skip_record:no_image"] == 2
     assert report.counts[Collection.JOCONDE]["skip_image:duplicate"] == 1
 

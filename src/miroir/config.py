@@ -163,6 +163,35 @@ class Settings(BaseSettings):
     def images_parquet(self) -> Path:
         return self.data_root / "images.parquet"
 
+    @property
+    def full_pop_dir(self) -> Path:
+        """Tables of the whole POP download (`miroir records build-full`): `records.parquet`,
+        `images.parquet`, `report.json`, image lists. Kept apart from the July tables."""
+        return self.data_root / "full-pop"
+
+    @property
+    def full_records_parquet(self) -> Path:
+        return self.full_pop_dir / "records.parquet"
+
+    @property
+    def full_images_parquet(self) -> Path:
+        return self.full_pop_dir / "images.parquet"
+
+    @property
+    def full_report_json(self) -> Path:
+        """Counts of the full build: per base, unique images, buildings and objects."""
+        return self.full_pop_dir / "report.json"
+
+    @property
+    def full_fetch_probe_dir(self) -> Path:
+        """Download speed test of the POP bucket: every download and a summary."""
+        return self.full_pop_dir / "fetch-probe"
+
+    def full_image_list(self, name: str) -> Path:
+        """One `image_id` per line, one per distinct image URL (`unique`, `covers`, ...)."""
+        _check_name(name)
+        return self.full_pop_dir / "lists" / f"{name}.txt"
+
     # No image store: images are read from their URLs. Only a small, bounded cache of
     # resized copies is kept, for runs that send images to OpenRouter from the Mac.
 

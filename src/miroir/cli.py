@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -78,6 +79,42 @@ def records_build() -> None:
     mismatches = report.mismatches()
     if mismatches:
         typer.echo(f"{len(mismatches)} count(s) differ from the spec: see warnings.", err=True)
+
+
+@records_app.command("build-full")
+def records_build_full(
+    *,
+    count_only: Annotated[
+        bool, typer.Option(help="Only recount the tables a previous build wrote.")
+    ] = False,
+) -> None:
+    """Map the whole POP download (exports-full) into full-pop/ tables and count its images.
+
+    Reads about 6.6 GB of JSON lines: about 10 minutes. Start it detached (CLAUDE.md rule 9).
+    """
+    from miroir.records.full import build_full, count_full, summary_lines  # noqa: PLC0415
+
+    settings = get_settings()
+    build = None if count_only else build_full(settings)
+    report = count_full(settings, build)
+    for line in summary_lines(report):
+        typer.echo(line)
+    typer.echo(f"wrote {settings.full_report_json}")
+
+
+@records_app.command("fetch-probe")
+def records_fetch_probe(
+    max_usd: Annotated[float, typer.Option(help="Stop before Modal time passes this.")] = 0.4,
+) -> None:
+    """Time about 1,000 downloads from the POP bucket on Modal CPUs (spec §12, question 2).
+
+    Needs `records build-full` first. Takes about 5 minutes; costs a few cents.
+    """
+    from miroir.jobs.fetch_probe import run  # noqa: PLC0415
+
+    settings = get_settings()
+    summary = run(settings, max_usd, settings.full_fetch_probe_dir)
+    typer.echo(json.dumps(summary, indent=2))
 
 
 @geo_app.command("places")

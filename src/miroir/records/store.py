@@ -108,7 +108,31 @@ def write_records(records: Sequence[Record], records_path: Path, images_path: Pa
     """Write both files. Rows keep the order given."""
     records_path.parent.mkdir(parents=True, exist_ok=True)
     images_path.parent.mkdir(parents=True, exist_ok=True)
-    record_rows = [
+    _write(_records_table(records), records_path)
+    _write(_images_table(records), images_path)
+
+
+class RecordsWriter:
+    """Write both files batch by batch, for exports too big to hold in memory (spec §3.4)."""
+
+    def __init__(self, records_path: Path, images_path: Path) -> None:
+        records_path.parent.mkdir(parents=True, exist_ok=True)
+        images_path.parent.mkdir(parents=True, exist_ok=True)
+        self._records = pq.ParquetWriter(records_path, RECORDS_SCHEMA)
+        self._images = pq.ParquetWriter(images_path, IMAGES_SCHEMA)
+
+    def write(self, records: Sequence[Record]) -> None:
+        if records:
+            self._records.write_table(_records_table(records))
+            self._images.write_table(_images_table(records))
+
+    def close(self) -> None:
+        self._records.close()
+        self._images.close()
+
+
+def _records_table(records: Sequence[Record]) -> pa.Table:
+    rows = [
         {
             "ref": r.ref,
             "collection": r.collection.value,
@@ -132,7 +156,11 @@ def write_records(records: Sequence[Record], records_path: Path, images_path: Pa
         }
         for r in records
     ]
-    image_rows = [
+    return pa.Table.from_pylist(rows, schema=RECORDS_SCHEMA)
+
+
+def _images_table(records: Sequence[Record]) -> pa.Table:
+    rows = [
         {
             "image_id": i.image_id,
             "ref": i.ref,
@@ -146,8 +174,14 @@ def write_records(records: Sequence[Record], records_path: Path, images_path: Pa
         for r in records
         for i in r.images
     ]
-    _write(pa.Table.from_pylist(record_rows, schema=RECORDS_SCHEMA), records_path)
-    _write(pa.Table.from_pylist(image_rows, schema=IMAGES_SCHEMA), images_path)
+    return pa.Table.from_pylist(rows, schema=IMAGES_SCHEMA)
+
+
+def read_column(path: Path, name: str) -> list[object]:
+    """One column of a records or images file, as Python values (for counts over big tables)."""
+    table = pq.read_table(path, columns=[name])  # pyright: ignore[reportUnknownMemberType]
+    values: list[object] = list(table.column(name).to_pylist())
+    return values
 
 
 def read_images(images_path: Path) -> list[Image]:

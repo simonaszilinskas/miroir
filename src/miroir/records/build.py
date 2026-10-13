@@ -12,7 +12,7 @@ from typing import cast
 
 from miroir.config import Settings
 from miroir.records.mappers import RawRecord, map_record
-from miroir.records.model import Collection, Record
+from miroir.records.model import JULY_COLLECTIONS, Collection, Record
 from miroir.records.store import write_records
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ def map_collection(collection: Collection, path: Path) -> tuple[list[Record], Co
 
 
 def build(
-    settings: Settings, collections: tuple[Collection, ...] = tuple(Collection)
+    settings: Settings, collections: tuple[Collection, ...] = JULY_COLLECTIONS
 ) -> BuildReport:
     report = BuildReport()
     records: list[Record] = []

@@ -1,21 +1,24 @@
 """Turn one raw POP export line into a `Record` (technical spec §3.2).
 
-Each base is a `FieldMap`: which POP field codes feed which record field. A new base
-(Mérimée, Palissy, ...) needs only a new `FieldMap` entry in `FIELD_MAPS`.
+Each base is a `FieldMap`: which POP field codes feed which record field. `FIELD_MAPS` reads
+the July exports; `full_field_maps` reads the full export (spec §3.4), which adds Mérimée,
+Palissy and Muséofile and lacks some fields the July exports carry.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from miroir.config import POP_NOTICE_URL
 from miroir.records.images import (
     ImageSkip,
     asset_url,
+    copy_key,
     image_type_from_path,
+    is_copy_name,
     make_image_id,
     skip_reason,
 )
@@ -68,6 +71,8 @@ class FieldMap:
     photographers: tuple[str, ...] = ()
     photo_date: tuple[str, ...] = ()
     """First non-empty value wins, kept as written."""
+    drop_renamed_copies: bool = False
+    """Skip bucket copies of an image the record holds (`ImageSkip.RENAMED_COPY`)."""
 
 
 def _memoire_entity_id(raw: RawRecord) -> str:
@@ -143,8 +148,100 @@ FIELD_MAPS: dict[Collection, FieldMap] = {
 }
 
 
-def map_record(collection: Collection, raw: RawRecord) -> MapResult:
-    fmap = FIELD_MAPS[collection]
+# --- full export (technical spec §3.4) ------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Rights:
+    """What `publishable` needs from other files, for records of the full export.
+
+    The open-data Joconde file has no `DIFFU`, so a Joconde record is publishable only when
+    the July export holds it with `DIFFU` other than "non". Mérimée and Palissy carry no rights
+    field; their photos are Mémoire photos, so such a record is publishable only when every
+    Mémoire photo it lists belongs to a Mémoire record of the full export that allows
+    reproduction. Unknown means not publishable (CLAUDE.md rule 8).
+    """
+
+    joconde_open: frozenset[str]
+    """Joconde refs of the July export whose `DIFFU` is not "non"."""
+    memoire_open: frozenset[str]
+    """Mémoire refs of the full export whose `DIFF` allows reproduction."""
+
+
+def joconde_open(raw: RawRecord) -> bool:
+    """A July Joconde record that its producer lets POP show (`DIFFU` not "non")."""
+    return _joconde_publishable(raw)
+
+
+def record_ref(raw: RawRecord) -> str:
+    return _ref(raw)
+
+
+def full_field_maps(rights: Rights) -> dict[Collection, FieldMap]:
+    """Field maps for the full export. Joconde, Mémoire and Rose Valland keep their July codes."""
+
+    def joconde(raw: RawRecord) -> bool:
+        return _ref(raw) in rights.joconde_open
+
+    def photos_open(raw: RawRecord) -> bool:
+        for path in _values(raw, "IMG"):
+            parts = path.split("/")
+            if parts[0] == "memoire" and (len(parts) < 3 or parts[1] not in rights.memoire_open):
+                return False
+        return True
+
+    return {
+        Collection.JOCONDE: replace(
+            FIELD_MAPS[Collection.JOCONDE], publishable=joconde, drop_renamed_copies=True
+        ),
+        Collection.MEMOIRE: FIELD_MAPS[Collection.MEMOIRE],
+        Collection.ROSE_VALLAND: FIELD_MAPS[Collection.ROSE_VALLAND],
+        Collection.MERIMEE: FieldMap(
+            title=("TICO",),
+            description=("DESC", "HIST"),
+            denomination=("DENO",),
+            domain=("DOMN",),
+            authors=("AUTR",),
+            period=("SCLE", "DATE"),
+            region=("REG",),
+            departement=("DPT_LETTRE",),
+            commune=("COM",),
+            # Mémoire photos linked to the building, then the building's own files.
+            images="IMG",
+            publishable=photos_open,
+        ),
+        Collection.PALISSY: FieldMap(
+            title=("TITR", "TICO"),
+            description=("DESC", "HIST"),
+            denomination=("DENO",),
+            domain=("CATE",),
+            authors=("AUTR",),
+            period=("SCLE", "DATE"),
+            region=("REG",),
+            departement=("DPT_LETTRE",),
+            commune=("COM",),
+            images="IMG",
+            publishable=photos_open,
+        ),
+        Collection.MUSEO: FieldMap(
+            title=("NOMOFF",),
+            description=("HIST", "ATOUT"),
+            denomination=(),
+            domain=("DOMPAL",),
+            authors=(),
+            period=(),
+            region=("REGION",),
+            departement=("DPT",),
+            commune=("VILLE_M",),
+            images="IMG",
+            publishable=lambda _raw: True,
+        ),
+    }
+
+
+def map_record(collection: Collection, raw: RawRecord, fmap: FieldMap | None = None) -> MapResult:
+    """Map one export line with the base's July field map, or with `fmap` when given."""
+    fmap = fmap or FIELD_MAPS[collection]
     ref = _ref(raw)
     if not ref:
         msg = f"{collection} record without REF"
@@ -155,7 +252,7 @@ def map_record(collection: Collection, raw: RawRecord) -> MapResult:
     if not paths:
         # The export then puts a 1x1 GIF data URL in imageUrl: count it as a placeholder.
         paths = [_text(raw, "imageUrl")]
-    kept, image_skips = _select_images(paths)
+    kept, image_skips = _select_images(paths, drop_renamed_copies=fmap.drop_renamed_copies)
     if not kept:
         return MapResult(record=None, record_skip=RecordSkip.NO_IMAGE, image_skips=image_skips)
 
@@ -184,15 +281,25 @@ def map_record(collection: Collection, raw: RawRecord) -> MapResult:
     return MapResult(record=record, record_skip=None, image_skips=image_skips)
 
 
-def _select_images(paths: Iterable[str]) -> tuple[list[str], tuple[ImageSkip, ...]]:
+def _select_images(
+    paths: Iterable[str], *, drop_renamed_copies: bool = False
+) -> tuple[list[str], tuple[ImageSkip, ...]]:
+    ordered = list(paths)
+    if drop_renamed_copies:
+        # Keep the plain name POP lists; its bucket copies come after it and are dropped.
+        ordered.sort(key=is_copy_name)
     kept: list[str] = []
+    keys: set[str] = set()
     skips: list[ImageSkip] = []
-    for path in paths:
+    for path in ordered:
         reason = skip_reason(path)
         if reason is None and path in kept:
             reason = ImageSkip.DUPLICATE
+        if reason is None and drop_renamed_copies and copy_key(path) in keys:
+            reason = ImageSkip.RENAMED_COPY
         if reason is None:
             kept.append(path)
+            keys.add(copy_key(path))
         else:
             skips.append(reason)
     return kept, tuple(skips)

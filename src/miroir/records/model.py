@@ -12,6 +12,12 @@ class Collection(StrEnum):
     JOCONDE = "joconde"
     MEMOIRE = "memoire"
     ROSE_VALLAND = "rose-valland"
+    MERIMEE = "merimee"
+    """Buildings. Only in the full export (technical spec §3.4)."""
+    PALISSY = "palissy"
+    """Objects in buildings. Only in the full export."""
+    MUSEO = "museo"
+    """Museums (Muséofile): photos of the museum building. Only in the full export."""
 
     @property
     def mongo_collection(self) -> str:
@@ -23,7 +29,13 @@ _MONGO = {
     Collection.JOCONDE: "joconde",
     Collection.MEMOIRE: "memoire",
     Collection.ROSE_VALLAND: "mnr",
+    Collection.MERIMEE: "merimee",
+    Collection.PALISSY: "palissy",
+    Collection.MUSEO: "museo",
 }
+
+#: The bases of the July 2026 exports, which `miroir records build` reads.
+JULY_COLLECTIONS = (Collection.JOCONDE, Collection.MEMOIRE, Collection.ROSE_VALLAND)
 
 
 class ImageType(StrEnum):

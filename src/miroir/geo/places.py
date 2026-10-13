@@ -22,7 +22,7 @@ from miroir.geo.communes import commune_centres
 from miroir.geo.model import Place, PlaceSource
 from miroir.records.build import iter_raw
 from miroir.records.mappers import PlaceHint, PopPoint, merimee_point, museum_point, place_hint
-from miroir.records.model import Collection, Record
+from miroir.records.model import JULY_COLLECTIONS, Record
 from miroir.records.store import read_records, write_places
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def _place(  # noqa: PLR0917 (private; the four sources in order of precision)
 def read_hints(settings: Settings) -> dict[str, PlaceHint]:
     """Commune and museum of every July export record, by ref."""
     hints: dict[str, PlaceHint] = {}
-    for collection in Collection:
+    for collection in JULY_COLLECTIONS:
         for raw in iter_raw(settings.export_jsonl(collection)):
             hint = place_hint(raw)
             hints[hint.ref] = hint
