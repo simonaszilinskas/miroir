@@ -62,6 +62,20 @@ def test_an_artwork_never_located_falls_back_to_any_box() -> None:
     assert score.located == 0
 
 
+def test_the_first_view_shows_the_first_outlines_in_the_order_given() -> None:
+    corner = Box(0.0, 0.0, 0.1, 0.1, 0.9)  # surest, small, in a corner
+    middle = Box(0.35, 0.3, 0.65, 0.7, 0.3)  # less sure, big, in the middle
+    found = detections((corner, middle), (("C",), ("M",)))
+    items = [T3Item("q1", "C", ("room",)), T3Item("q2", "M", ("room",))]
+    located = {("room", "C"): corner, ("room", "M"): middle}
+    site = score_outlines(found, items, located, RULE, first=1)
+    assert [q.rank for q in site.tapped.per_query] == [TOP + 1, 1]
+    assert site.tappable == 0.5
+    surest = score_outlines(found, items, located, RULE, first=1, order=lambda b: b.score)
+    assert [q.rank for q in surest.tapped.per_query] == [1, TOP + 1]
+    assert score_outlines(found, items, located, RULE).tappable == 1.0
+
+
 def hit(kind: PhotoType, right_rank: int) -> SiteHit:
     return SiteHit(
         bucket=kind.value,

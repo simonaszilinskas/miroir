@@ -581,6 +581,25 @@ What we learned:
 - The four detectors tie within the error bar. Grounding DINO tiny scores highest with half the outlines of OWLv2, so the photo stays readable. The website uses it.
 - Photos of one object (20 T5 museum views, 20 T2b Commons photos): when the surest box covers 40% of the photo or more, the page shows no outline. That leaves outlines on 4 of 20 Commons photos and 13 of 20 museum views (often the object plus a detail).
 
+### C: which outlines the first view shows (2026-10-13)
+
+`miroir eval detect-order` (`eval/results/R3/C-C2-gdino-tiny-order.json`, table in `C-detail/order.json`). The site's outlines (Grounding DINO tiny, same rule), put in another order; the page draws the first ones, the rest behind "Afficher les N autres objets repérés". T3 tune, 99 queries: share whose work has an outline to tap among the first ones, then tapped hit@5.
+
+| Order | First 12 | First 16 | First 20 | Every outline |
+|---|---|---|---|---|
+| Surest first (before) | 63.6 / 53.5 | 71.7 / 61.6 | 76.8 / 67.7 | 91.9 / 86.9 |
+| **Biggest and most central first (now)** | 72.7 / 64.6 | 77.8 / 72.7 | **82.8 / 77.8** | 91.9 / 86.9 |
+| Strongest match to a record | 72.7 / 65.7 | 79.8 / 74.7 | 82.8 / 77.8 | 91.9 / 86.9 |
+| Size and centre × match⁴ | 75.8 / 70.7 | 80.8 / 75.8 | 81.8 / 76.8 | 91.9 / 86.9 |
+
+Score: √area × closeness to the photo's centre (1 at the centre, 0 in a corner); boxes around several works stay last. The site now draws the first 20 (was 12): hit@5 of the first view goes from 53.5 to 77.8, +24.2 points [+15.2, +33.3] paired (25 works gained, 1 lost). (Surest first at 12 reads 53.5 here, 52.5 above: the page moved boxes around several works last before cutting at 12, the step C score after.) It adds no time: sorting at most 40 boxes on the GPU.
+
+What we learned:
+
+- Size and centre do as well as how strongly a crop matches a record, at no cost. Matching needs every outline searched before the visitor taps (17 to 40 searches per photo on the GPU), for at most a point or two: not kept.
+- Dropping boxes hurts. With every outline shown, dropping boxes that hold another lowers hit@5 from 86.9 to 79.8, boxes inside another to 62.6, boxes under 0.5% of the photo to 76.8: on these walls a painting often sits inside a larger frame box, or is small. Boxes around several works cost nothing to keep, since they already come last.
+- 20 outlines still read at 375 px on the densest room photo (40 outlines sent); small works get the 44 px tap area as before.
+
 ### Sure answers for objects (2026-10-13)
 
 The site said "sure" for 8% of object searches and was right for 28% of those (T3 0%, T5 21%, T2b 75%). Its cosine cut-off cannot fix this: many records share an image (a pair of candlesticks photographed together, crops shared by neighbouring works), so the top answer scores 1.0 and is still the wrong record; raising the cut-off only removes right answers. What tells a right answer is how far it stands above the next one.
@@ -936,6 +955,7 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R3 | T3 | tune | web-full | E-E1-site-mix | site ranking + ALIKED/LightGlue on objects | 512 | site | 99 | 67.7 [58.6, 76.8] | 90.9 [84.8, 96.0] | 91.9 [85.9, 97.0] | 78.2 [71.7, 84.5] |
 | R3 | T3 | tune | web-full | C-C1-owlv2-base-all | google/owlv2-base-patch16-ensemble | 1024 | boxes | 99 | 71.7 [63.6, 80.8] | 84.8 [77.8, 91.9] | 88.9 [82.8, 94.9] | 78.0 [70.6, 84.7] |
 | R3 | T3 | tune | web-full | C-C1-owlv2-large-all | google/owlv2-large-patch14-ensemble | 1024 | boxes | 99 | 69.7 [60.6, 78.8] | 84.8 [77.8, 91.9] | 87.9 [80.8, 93.9] | 76.6 [68.8, 83.5] |
+| R3 | T3 | tune | web-full | C-C2-gdino-tiny-order | IDEA-Research/grounding-dino-tiny | 1024 | boxes | 99 | 63.6 [54.5, 72.8] | 77.8 [69.7, 84.9] | 80.8 [72.7, 87.9] | 70.4 [62.7, 78.2] |
 | R3 | T3 | tune | web-full | C-C0-located | located crops (ALIKED + LightGlue) | 1024 | boxes | 99 | 62.6 [52.5, 71.7] | 71.7 [62.6, 80.8] | 76.8 [68.7, 84.8] | 68.1 [59.1, 76.1] |
 | R3 | T3 | tune | web-full | E-E1-site-base | site ranking | 512 | site | 99 | 55.6 [45.5, 65.7] | 83.8 [76.8, 90.9] | 86.9 [79.8, 92.9] | 67.0 [59.4, 75.1] |
 | R3 | T3 | tune | web-full | C-C2-gdino-tiny | IDEA-Research/grounding-dino-tiny | 1024 | boxes | 99 | 45.5 [36.4, 54.6] | 52.5 [42.4, 61.6] | 57.6 [47.5, 66.7] | 50.1 [41.3, 59.3] |

@@ -24,8 +24,8 @@ from __future__ import annotations
 import io
 import json
 import logging
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import product
 from pathlib import Path
@@ -48,6 +48,7 @@ from miroir.jobs.modal_run import PaidCall, paid_call
 from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4, L4_DINO
 from miroir.jobs.spend import SpendKind
 from miroir.outlines import (
+    ALL_OUTLINES,
     DETECT_SIDE,
     MAX_OUTLINES,
     SITE_RULE,
@@ -56,11 +57,13 @@ from miroir.outlines import (
     OutlineRule,
     detector,
     iou,
+    order_outlines,
     pick_outlines,
+    salience,
 )
 from miroir.records.model import Record
 from miroir.records.store import read_records
-from miroir.web.bundle import SiteBundle, site_search
+from miroir.web.bundle import SiteBundle, SiteHit, site_search
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +75,8 @@ TAP_IOU = 0.3
 RECALL_IOU = 0.5
 #: Entities kept per searched box; an artwork further down counts as rank TOP + 1.
 TOP = 50
+#: Confidences kept per searched box.
+KEEP_CONFIDENCES = 5
 LOCATED_FILE = "located.json"
 ROOMS_DIR = "rooms"
 
@@ -169,6 +174,9 @@ class RoomBoxes:
     detect_s: float
     ranked: tuple[tuple[str, ...], ...] = ()
     """Per box, the site's top `TOP` entities for its crop."""
+    confidences: tuple[tuple[float, ...], ...] = ()
+    """Per box, the confidences of its first `KEEP_CONFIDENCES` entities (how strongly the
+    crop matches a record)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +207,7 @@ def rank_rooms(
     """Search every box's crop with the site's ranking; keep each box's top entities."""
     rooms: list[RoomBoxes] = []
     for room in chunk.rooms:
+        hits = _search(bundle, room)
         rooms.append(
             RoomBoxes(
                 image_id=room.image_id,
@@ -206,7 +215,8 @@ def rank_rooms(
                 height=room.height,
                 boxes=room.boxes,
                 detect_s=room.detect_s,
-                ranked=_rank(bundle, room),
+                ranked=tuple(h.entities for h in hits),
+                confidences=tuple(h.confidences[:KEEP_CONFIDENCES] for h in hits),
             )
         )
         logger.info("%s: %d boxes searched", room.image_id, len(room.boxes))
@@ -223,10 +233,10 @@ def rank_rooms(
     )
 
 
-def _rank(bundle: SiteBundle, room: DetectedRoom) -> tuple[tuple[str, ...], ...]:
+def _search(bundle: SiteBundle, room: DetectedRoom) -> list[SiteHit]:
     if not room.boxes:
-        return ()
-    hits = site_search(
+        return []
+    return site_search(
         bundle,
         _unit(room.a7),
         _unit(room.a3),
@@ -234,7 +244,6 @@ def _rank(bundle: SiteBundle, room: DetectedRoom) -> tuple[tuple[str, ...], ...]
         right=[()] * len(room.boxes),
         top=TOP,
     )
-    return tuple(h.entities for h in hits)
 
 
 def _unit(rows: Floats) -> Floats:
@@ -267,6 +276,9 @@ class OutlineScore:
     any_box: ScoreResult
     box_recall: float
     """Share of located tune artworks with an outline at IoU >= RECALL_IOU."""
+    tappable: float
+    """Share of queries whose work has an outline to tap (IoU >= TAP_IOU; for a work not
+    located, an outline whose search ranks it)."""
     located: int
     """Tune artworks found in at least one of their room photos."""
     outlines_per_photo: float
@@ -283,11 +295,19 @@ def score_outlines(
     items: Sequence[T3Item],
     located: Mapping[tuple[str, str], Box],
     rule: OutlineRule,
+    *,
+    first: int | None = None,
+    order: Callable[[Box], float] | None = None,
 ) -> OutlineScore:
+    """Score the outlines `rule` sends, or only the `first` of them (what the page draws
+    before "Afficher les N autres objets repérés"), put in `order` instead of the site's."""
     rooms = {r.image_id: r for r in detections.rooms}
     shown: dict[str, list[tuple[Box, tuple[str, ...]]]] = {}
     for room in detections.rooms:
-        picked = set(pick_outlines(room.boxes, rule, width=room.width, height=room.height))
+        sent = pick_outlines(room.boxes, rule, width=room.width, height=room.height)
+        if order is not None:
+            sent = order_outlines(sent, order)
+        picked = set(sent[:first])
         shown[room.image_id] = [
             (b, r) for b, r in zip(room.boxes, room.ranked, strict=True) if b in picked
         ]
@@ -295,9 +315,10 @@ def score_outlines(
     any_box: list[QueryScore] = []
     recalled = 0
     found_any = 0
+    can_tap = 0
     for item in items:
         best_tap = best_any = TOP + 1
-        was_located = covered = False
+        was_located = covered = tap = False
         for scene in item.scenes:
             if scene not in rooms:
                 continue
@@ -311,10 +332,12 @@ def score_outlines(
             overlaps = [(iou(b, place), ranked) for b, ranked in outlines]
             covered = covered or any(o >= RECALL_IOU for o, _ in overlaps)
             best = max(overlaps, default=(0.0, ()), key=lambda x: x[0])
+            tap = tap or best[0] >= TAP_IOU
             if best[0] >= TAP_IOU:
                 best_tap = min(best_tap, _rank_of(item.entity_id, best[1]))
         if not was_located:
             best_tap = best_any
+        can_tap += tap if was_located else best_any <= TOP
         found_any += was_located
         recalled += covered
         tapped.append(QueryScore(item.query_id, best_tap, 1.0 / best_tap))
@@ -325,6 +348,7 @@ def score_outlines(
         tapped=_result(tapped, detections),
         any_box=_result(any_box, detections),
         box_recall=recalled / found_any if found_any else 0.0,
+        tappable=can_tap / len(items) if items else 0.0,
         located=found_any,
         outlines_per_photo=float(np.mean([len(v) for v in shown.values()])),
         detect_ms=(float(np.percentile(times, 50)), float(np.percentile(times, 95))),
@@ -371,15 +395,98 @@ def tune_rule(
     tried: list[RuleScore] = []
     for threshold, overlap, inside, side in product(thresholds, OVERLAPS, INSIDE, MIN_SIDES):
         rule = OutlineRule(min_score=threshold, overlap=overlap, inside=inside, min_side=side)
-        first = replace(rule, max_outlines=MAX_OUTLINES)
         tried.append(
             RuleScore(
                 score_outlines(detections, items, located, rule),
-                score_outlines(detections, items, located, first),
+                score_outlines(detections, items, located, rule, first=MAX_OUTLINES),
             )
         )
     tried.sort(key=lambda s: (-s.every.hit_at(5), -s.first.hit_at(5), s.every.outlines_per_photo))
     return tried
+
+
+#: First views compared when ordering the outlines (outlines drawn before "Afficher les N
+#: autres objets repérés").
+FIRST_VIEWS = (12, 16, 20)
+ORDER_OPTION = "C2-gdino-tiny-order"
+
+
+def order_report(
+    detections: Detections, items: Sequence[T3Item], located: Mapping[tuple[str, str], Box]
+) -> dict[str, dict[int, OutlineScore]]:
+    """The site's outlines (`SITE_RULE`) in each order a visitor's first view could use, scored
+    on its first `FIRST_VIEWS` outlines: surest first (before), biggest and most central first
+    (`salience`, now), and how strongly each crop matches a record (needs the box's search on
+    the GPU before the visitor taps)."""
+    match: dict[Box, float] = {
+        b: c[0] for r in detections.rooms for b, c in zip(r.boxes, r.confidences, strict=True)
+    }
+    orders: dict[str, Callable[[Box], float]] = {
+        "surest": lambda b: b.score,
+        "size and centre": salience,
+        "match": lambda b: match[b],
+        "size and centre x match^4": lambda b: salience(b) * match[b] ** 4,
+    }
+    return {
+        name: {
+            k: score_outlines(detections, items, located, SITE_RULE, first=k, order=key)
+            for k in (*FIRST_VIEWS, ALL_OUTLINES)
+        }
+        for name, key in orders.items()
+    }
+
+
+def write_order_report(settings: Settings, label: str = "C2-gdino-tiny") -> Path:
+    """Score the orders of the outlines on T3 tune; the site's order goes to `ORDER_OPTION`,
+    the comparison to `C-detail/order.json`."""
+    detections = read_detections(settings, label)
+    if not all(r.confidences for r in detections.rooms if r.boxes):
+        msg = f"{label} has no confidences per box: run `miroir detect rooms --option {label}`"
+        raise ValueError(msg)
+    report = order_report(detections, t3_items(settings), read_located(settings))
+    table = {
+        name: {
+            str(k): {
+                "tappable": s.tappable,
+                "tapped_hit@5": s.hit_at(5),
+                "outlines_per_photo": s.outlines_per_photo,
+            }
+            for k, s in scores.items()
+        }
+        for name, scores in report.items()
+    }
+    site = report["size and centre"][MAX_OUTLINES]
+    info = RunInfo(
+        option="C2",
+        model=detections.model,
+        resolution=DETECT_SIDE,
+        pooling="boxes",
+        gallery=f"web-{detections.index}",
+        created=detections.created.date(),
+        cost_usd=detections.cost_usd,
+        wall_time_s=detections.load_s,
+        route=Route.HOSTED,
+        notes=(
+            f"First view of the site: the {MAX_OUTLINES} biggest and most central outlines. "
+            f"Rank is the tapped outline's; {TOP + 1} = not shown at first. Orders compared: "
+            "eval/results/R3/C-detail/order.json."
+        ),
+    )
+    path = eval_result_path("R3", "C", ORDER_OPTION)
+    write_result(
+        path,
+        round_id="R3",
+        step="C",
+        option=ORDER_OPTION,
+        vector_run=f"web-{detections.index}",
+        query_vector_run=f"C-{label}-rooms",
+        vectors=info,
+        scores=[set_score(site.tapped, test_set="T3", half="tune", gallery=info.gallery)],
+        today=datetime.now(UTC).date(),
+    )
+    detail = eval_result_path("R3", "C", label).parent / "C-detail" / "order.json"
+    detail.write_text(json.dumps(table, indent=1) + "\n", encoding="utf-8")
+    return path
 
 
 def draw(photo: bytes, boxes: Sequence[Box], places: Sequence[Box] = ()) -> bytes:

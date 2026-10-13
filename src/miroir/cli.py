@@ -1288,6 +1288,15 @@ def eval_detect(
         typer.echo(f"first view: top 5 {score.first.hit_at(5):.3f}")
 
 
+@eval_app.command("detect-order")
+def eval_detect_order() -> None:
+    """Score orders of the site's outlines on T3 tune: which ones the first view shows."""
+    from miroir.eval.detect import write_order_report  # noqa: PLC0415
+
+    path = write_order_report(get_settings())
+    typer.echo(f"wrote {path} and C-detail/order.json beside it")
+
+
 @rerank_app.command("site")
 def rerank_site(
     max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],

@@ -1,0 +1,90 @@
+{
+ "surest": {
+  "12": {
+   "tappable": 0.6363636363636364,
+   "tapped_hit@5": 0.5353535353535354,
+   "outlines_per_photo": 11.0
+  },
+  "16": {
+   "tappable": 0.7171717171717171,
+   "tapped_hit@5": 0.6161616161616161,
+   "outlines_per_photo": 13.2
+  },
+  "20": {
+   "tappable": 0.7676767676767676,
+   "tapped_hit@5": 0.6767676767676768,
+   "outlines_per_photo": 14.333333333333334
+  },
+  "40": {
+   "tappable": 0.9191919191919192,
+   "tapped_hit@5": 0.8686868686868687,
+   "outlines_per_photo": 17.0
+  }
+ },
+ "size and centre": {
+  "12": {
+   "tappable": 0.7272727272727273,
+   "tapped_hit@5": 0.6464646464646465,
+   "outlines_per_photo": 11.0
+  },
+  "16": {
+   "tappable": 0.7777777777777778,
+   "tapped_hit@5": 0.7272727272727273,
+   "outlines_per_photo": 13.2
+  },
+  "20": {
+   "tappable": 0.8282828282828283,
+   "tapped_hit@5": 0.7777777777777778,
+   "outlines_per_photo": 14.333333333333334
+  },
+  "40": {
+   "tappable": 0.9191919191919192,
+   "tapped_hit@5": 0.8686868686868687,
+   "outlines_per_photo": 17.0
+  }
+ },
+ "match": {
+  "12": {
+   "tappable": 0.7272727272727273,
+   "tapped_hit@5": 0.6565656565656566,
+   "outlines_per_photo": 11.0
+  },
+  "16": {
+   "tappable": 0.797979797979798,
+   "tapped_hit@5": 0.7474747474747475,
+   "outlines_per_photo": 13.2
+  },
+  "20": {
+   "tappable": 0.8282828282828283,
+   "tapped_hit@5": 0.7777777777777778,
+   "outlines_per_photo": 14.333333333333334
+  },
+  "40": {
+   "tappable": 0.9191919191919192,
+   "tapped_hit@5": 0.8686868686868687,
+   "outlines_per_photo": 17.0
+  }
+ },
+ "size and centre x match^4": {
+  "12": {
+   "tappable": 0.7575757575757576,
+   "tapped_hit@5": 0.7070707070707071,
+   "outlines_per_photo": 11.0
+  },
+  "16": {
+   "tappable": 0.8080808080808081,
+   "tapped_hit@5": 0.7575757575757576,
+   "outlines_per_photo": 13.2
+  },
+  "20": {
+   "tappable": 0.8181818181818182,
+   "tapped_hit@5": 0.7676767676767676,
+   "outlines_per_photo": 14.333333333333334
+  },
+  "40": {
+   "tappable": 0.9191919191919192,
+   "tapped_hit@5": 0.8686868686868687,
+   "outlines_per_photo": 17.0
+  }
+ }
+}
