@@ -98,8 +98,11 @@ class Search:
         self.outlines: OutlineFinder | None = None
         self.outlines_ready = threading.Event()
         threading.Thread(target=self._load_outlines, daemon=True).start()
-        captions = BackgroundCaptions(SITE_CAPTION_MODEL, CAPTIONS_WAIT_S)
+        captions = BackgroundCaptions(SITE_CAPTION_MODEL, CAPTIONS_WAIT_S, start=False)
         self.engine: Engine = load_search(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX, captions)
+        # The caption reader loads alone, after the others: see `BackgroundCaptions.load_now`.
+        self.outlines_ready.wait(DETECTOR_WAIT_S)
+        captions.load_now()
 
     def _load_outlines(self) -> None:
         from miroir.remote.search import OutlineFinder  # noqa: PLC0415 (container only)

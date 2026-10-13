@@ -96,12 +96,23 @@ class BackgroundCaptions:
     """The site's caption reader, loaded in a thread beside the search models so it never
     delays a search; a print searched before it is ready waits for it at most `wait_s`."""
 
-    def __init__(self, model: str, wait_s: float) -> None:
+    def __init__(self, model: str, wait_s: float, *, start: bool = True) -> None:
         self._model = model
         self._wait_s = wait_s
         self._reader: CaptionReader | None = None
         self._ready = threading.Event()
-        threading.Thread(target=self._load, daemon=True).start()
+        if start:
+            threading.Thread(target=self._load, daemon=True).start()
+
+    def load_now(self) -> None:
+        """Load in the calling thread, once no other model is loading.
+
+        `from_pretrained(dtype=bfloat16)` switches torch's default dtype for the whole
+        process while it runs. Loaded beside EmbeddingGemma 2, it left that default at
+        bfloat16, and every photo search then failed ("expected mat1 and mat2 to have the
+        same dtype"). The search container therefore loads the reader after the other models.
+        """
+        self._load()
 
     def _load(self) -> None:
         try:
@@ -109,6 +120,7 @@ class BackgroundCaptions:
         except Exception:
             logger.exception("caption reader failed to load: prints are searched without it")
         finally:
+            torch.set_default_dtype(torch.float32)
             self._ready.set()
 
     def read(self, jpeg: bytes) -> str:
