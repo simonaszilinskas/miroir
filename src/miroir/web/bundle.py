@@ -49,7 +49,14 @@ from miroir.web.catalog import (
     read_catalog,
     write_catalog,
 )
-from miroir.web.engine import A3_FILE, A3_PROJECTION_FILE, A7_FILE, Projection, read_projection
+from miroir.web.engine import (
+    A3_FILE,
+    A3_PROJECTION_FILE,
+    A7_FILE,
+    Projection,
+    read_projection,
+    weighted,
+)
 from miroir.web.nearby import PLACES_FILE, write_places
 from miroir.web.routing import (
     GUESS_FILE,
@@ -63,6 +70,7 @@ from miroir.web.routing import (
     write_guess,
     write_routing,
 )
+from miroir.web.store import ExactStore, read_exact, shortlist_cosines, write_exact
 from miroir.web.sure import SURE_FILE
 
 logger = logging.getLogger(__name__)
@@ -108,6 +116,10 @@ class IndexSpec:
     a3_projection: str | None = None
     """A file under the A3 run folder holding `mean` and `components`, when MegaLoc vectors
     are stored reduced (the query vectors are then reduced the same way)."""
+    a3_shortlist_dims: int | None = None
+    """Store MegaLoc for all of POP (`miroir.web.store`): reduced by PCA to this many dims on
+    the GPU, to shortlist images, and whole in int8 in host memory, to score the shortlist.
+    None keeps every 8,448-d vector in float16 on the GPU."""
 
 
 INDEXES: dict[str, IndexSpec] = {
@@ -138,6 +150,17 @@ INDEXES: dict[str, IndexSpec] = {
         a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
         saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
     ),
+    # full-f2 stored as all of POP would be (docs/results.md, "Storage for all of POP"):
+    # MegaLoc at 1,024 dims on the GPU to shortlist, whole in int8 in host memory to score.
+    "full-f2-shortlist": IndexSpec(
+        name="full-f2-shortlist",
+        a7_run="A7-embeddinggemma-2-512-full+F2",
+        a3_run="A3-megaloc-322-full+F2",
+        a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
+        a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+        saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
+        a3_shortlist_dims=1024,
+    ),
 }
 
 
@@ -159,9 +182,15 @@ def build_index(settings: Settings, name: str) -> Path:
     a3 = read_vectors(settings.vectors_path(spec.a3_run))
     ids = _shared_ids(a7, a3)
     _write_matrix(out / A7_FILE, a7, ids, settings.vectors_path(spec.a7_run))
-    _write_matrix(out / A3_FILE, a3, ids, settings.vectors_path(spec.a3_run))
+    if spec.a3_shortlist_dims is None:
+        _write_matrix(out / A3_FILE, a3, ids, settings.vectors_path(spec.a3_run))
+    else:
+        write_shortlist_store(out, a3, ids, spec.a3_shortlist_dims)
     (out / IDS_FILE).write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
     if spec.a3_projection is not None:
+        if spec.a3_shortlist_dims is not None:
+            msg = f"{name}: a3_projection and a3_shortlist_dims cannot go together"
+            raise ValueError(msg)
         shutil.copyfile(
             settings.vectors_path(spec.a3_run) / spec.a3_projection, out / A3_PROJECTION_FILE
         )
@@ -189,7 +218,7 @@ def build_index(settings: Settings, name: str) -> Path:
     write_guess(out / GUESS_FILE, guess)
 
     vectors = _Vectors.load(out)
-    queries = _QuerySets.load(settings, spec, ids, read_projection(out))
+    queries = _QuerySets.load(settings, spec, ids, None)  # `_Vectors` projects them
     routing, cutoff_report = calibrate(catalog, vectors, guess, queries, name)
     write_routing(out / ROUTING_FILE, routing)
     report = {
@@ -206,6 +235,7 @@ def build_index(settings: Settings, name: str) -> Path:
         "a7_run": spec.a7_run,
         "a3_run": spec.a3_run,
         "a3_projection": spec.a3_projection,
+        "a3_shortlist_dims": spec.a3_shortlist_dims,
         "images": len(ids),
         "records": len(data.records),
         "entities": catalog.entity_count,
@@ -322,9 +352,39 @@ def _write_matrix(path: Path, run: VectorSet, ids: Sequence[str], folder: Path) 
     if tuple(ids) == run.ids:
         shutil.copyfile(folder / "vectors.npy", path)
         return
-    row_of = run.index()
-    rows = np.fromiter((row_of[i] for i in ids), dtype=np.int64, count=len(ids))
+    rows = _rows_in_order(run, ids)
     np.save(path, np.asarray(run.vectors[rows], dtype=np.float16), allow_pickle=False)
+
+
+def write_shortlist_store(folder: Path, run: VectorSet, ids: Sequence[str], dims: int) -> None:
+    """MegaLoc as a shortlist bundle keeps it: PCA-reduced float16 rows (`a3.npy`) and their
+    projection, and every row whole in int8 (`miroir.web.store`). The PCA is fitted on the
+    run's own rows (gallery images, never queries)."""
+    from miroir.index.pca import fit_pca  # noqa: PLC0415 (only shortlist bundles need it)
+
+    pca = fit_pca(run, dims, run.info.option)
+    rows = _rows_in_order(run, ids)
+    mean = pca.mean.astype(np.float32)
+    reduced = np.empty((len(rows), dims), dtype=np.float16)
+    for start in range(0, len(rows), GALLERY_CHUNK):
+        block = np.asarray(run.vectors[rows[start : start + GALLERY_CHUNK]], dtype=np.float32)
+        projected = (block - mean) @ pca.components
+        reduced[start : start + len(block)] = projected / np.linalg.norm(
+            projected, axis=1, keepdims=True
+        )
+    np.save(folder / A3_FILE, reduced, allow_pickle=False)
+    np.savez(folder / A3_PROJECTION_FILE, mean=mean, components=pca.components.T.copy())
+    write_exact(folder, run.vectors, rows)
+    logger.info(
+        "MegaLoc shortlist store: %d dims (%.0f%% of variance) on the GPU, int8 in memory",
+        dims,
+        100 * pca.explained.sum(),
+    )
+
+
+def _rows_in_order(run: VectorSet, ids: Sequence[str]) -> NDArray[np.int64]:
+    row_of = run.index()
+    return np.fromiter((row_of[i] for i in ids), dtype=np.int64, count=len(ids))
 
 
 def _train_guess(
@@ -362,6 +422,10 @@ class _Vectors:
     ids: tuple[str, ...]
     a7: NDArray[np.float16]
     a3: NDArray[np.float16]
+    """MegaLoc as the GPU holds it: whole, or reduced when `projection` is set."""
+    projection: Projection | None = None
+    exact: ExactStore | None = None
+    """Shortlist bundles: every MegaLoc vector whole, in int8 (`miroir.web.store`)."""
 
     @classmethod
     def load(cls, folder: Path) -> _Vectors:
@@ -370,7 +434,32 @@ class _Vectors:
             ids=ids,
             a7=np.load(folder / A7_FILE, mmap_mode="r"),
             a3=np.load(folder / A3_FILE, mmap_mode="r"),
+            projection=read_projection(folder),
+            exact=read_exact(folder, mmap=True),
         )
+
+    def a3_entity_cosines(
+        self, catalog: Catalog, a7: Floats, a3: Floats, hidden: Sequence[Sequence[str]]
+    ) -> Floats:
+        """Best MegaLoc cosine per entity, as the site computes it from this bundle: whole,
+        reduced, or exact over the shortlist. `a3` holds whole (8,448-d) unit query vectors."""
+        reduced = a3
+        if self.projection is not None and len(a3):
+            reduced = np.stack([self.projection.apply(v) for v in a3])
+        if self.exact is None:
+            return entity_cosines(reduced, self.a3, catalog, hidden)
+        out = np.empty((len(a3), catalog.entity_count), dtype=np.float32)
+        for start in range(0, len(a3), QUERY_BATCH):
+            stop = min(start + QUERY_BATCH, len(a3))
+            s7 = _image_cosines(a7[start:stop], self.a7)
+            s3 = _image_cosines(reduced[start:stop], self.a3)
+            for j in range(stop - start):
+                rows = [catalog.image_row[i] for i in hidden[start + j] if i in catalog.image_row]
+                s7[j, rows] = -np.inf
+                s3[j, rows] = -np.inf
+                exact = shortlist_cosines(self.exact, a3[start + j], s7[j], s3[j])
+                out[start + j] = ranking.entity_max(exact, catalog)
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,7 +550,7 @@ def _search_set(
     catalog: Catalog, vectors: _Vectors, guess: Guess, routing: Routing, asked: _Asked
 ) -> _Searched:
     e7 = entity_cosines(asked.a7, vectors.a7, catalog, asked.hidden)
-    e3 = entity_cosines(asked.a3, vectors.a3, catalog, asked.hidden)
+    e3 = vectors.a3_entity_cosines(catalog, asked.a7, asked.a3, asked.hidden)
     ranks: list[int] = []
     confidence: list[float] = []
     buckets: list[str] = []
@@ -474,7 +563,7 @@ def _search_set(
         ]
         fused = ranking.fuse(signals)
         top = int(np.argmax(np.where(np.isfinite(fused), fused, -np.inf)))
-        confidence.append(float(w * e7[j, top] + (1 - w) * e3[j, top]))
+        confidence.append(float(weighted(e7[j, top : top + 1], e3[j, top : top + 1], w)[0]))
         buckets.append(bucket.name)
         right = [catalog.entity_row[e] for e in asked.right[j] if e in catalog.entity_row]
         if not right:
@@ -703,6 +792,9 @@ def site_search(
 ) -> list[SiteHit]:
     """`Engine.search` on given query vectors (unit rows), with images hidden per query."""
     catalog, vectors = bundle.catalog, bundle.vectors
+    if vectors.exact is not None:
+        msg = "site_search does not shortlist: measure a shortlist bundle with build-index"
+        raise ValueError(msg)
     n = vectors.a7.shape[0]
     out: list[SiteHit] = []
     for start in range(0, len(a7), SEARCH_BATCH):

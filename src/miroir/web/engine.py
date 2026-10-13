@@ -49,6 +49,7 @@ from miroir.web.routing import (
     read_guess,
     read_routing,
 )
+from miroir.web.store import ExactStore, read_exact, shortlist_cosines
 from miroir.web.sure import SURE_FILE, SureRule, margin_of, read_sure
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,16 @@ class GalleryVectors(Protocol):
     def a3(self, query: Floats) -> Floats:
         """The same for MegaLoc (after the projection, when the index has one)."""
         ...
+
+
+def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
+    """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
+    score of -inf, off the shortlist, cannot turn an EmbeddingGemma 2-only score into NaN)."""
+    if a7_weight >= 1:
+        return np.asarray(a7, dtype=np.float32)
+    if a7_weight <= 0:
+        return np.asarray(a3, dtype=np.float32)
+    return (a7_weight * a7 + (1 - a7_weight) * a3).astype(np.float32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +193,7 @@ class Engine:
         encoders: Encoders,
         gallery: GalleryVectors,
         projection: Projection | None = None,
+        exact: ExactStore | None = None,
         places: EntityPlaces | None = None,
         sure: SureRule | None = None,
         captions: CaptionReader | None = None,
@@ -194,6 +206,9 @@ class Engine:
         self.encoders = encoders
         self.gallery = gallery
         self.projection = projection
+        self.exact = exact
+        """MegaLoc whole in host memory (`miroir.web.store`): the GPU then holds it reduced,
+        only to shortlist images, and the shortlisted ones are scored exactly from here."""
         self.sure = sure
         self.captions = captions
         self.archive = archive
@@ -336,11 +351,14 @@ class Engine:
         jpeg = prepare_photo(data)
         a7_query, a3_query = self.encoders.image(jpeg)
         a7_query = unit(a7_query)
-        a3_query = unit(a3_query) if self.projection is None else self.projection.apply(a3_query)
+        a3_full = unit(a3_query)
+        a3_query = a3_full if self.projection is None else self.projection.apply(a3_query)
         timings["embed_photo"] = _ms(tick)
         tick = time.monotonic()
         a7 = np.where(mask, self.gallery.a7(a7_query), -np.inf).astype(np.float32)
         a3 = np.where(mask, self.gallery.a3(a3_query), -np.inf).astype(np.float32)
+        if self.exact is not None:
+            a3 = shortlist_cosines(self.exact, a3_full, a7, a3)
         timings["vectors_photo"] = _ms(tick)
         photo_type, _ = self.guess.photo_type(a7_query)
         chroma = chroma_spread(jpeg)
@@ -351,7 +369,7 @@ class Engine:
         signals = [s for s in (ranking.Signal(e7, w), ranking.Signal(e3, 1 - w)) if s.weight > 0]
         return _Photo(
             signals=signals,
-            per_image=(w * a7 + (1 - w) * a3).astype(np.float32),
+            per_image=weighted(a7, a3, w),
             e7=e7,
             e3=e3,
             a7_weight=w,
@@ -430,8 +448,9 @@ class _Photo:
 
     def confidence(self, entity: int) -> float:
         """The routed mix of the entity's raw cosines, as T8 measured it (`notfound`)."""
-        w = self.a7_weight
-        return float(w * self.e7[entity] + (1 - w) * self.e3[entity])
+        return float(
+            weighted(self.e7[entity : entity + 1], self.e3[entity : entity + 1], self.a7_weight)[0]
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,6 +579,7 @@ def load_engine(
         encoders=encoders,
         gallery=gallery,
         projection=read_projection(directory),
+        exact=read_exact(directory),
         places=read_places(directory / PLACES_FILE, catalog.entity_ids),
         sure=read_sure(directory / SURE_FILE),
         captions=captions,

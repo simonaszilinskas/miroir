@@ -81,6 +81,7 @@ def fake_engine(directory: Path) -> Engine:
     matrix = np.asarray(np.load(directory / A7_FILE), dtype=np.float32)
     engine = load_engine(directory, FakeEncoders(matrix), NumpyGallery(matrix), FakeCaptions())
     engine.projection = None  # fake MegaLoc vectors live in the EmbeddingGemma 2 space
+    engine.exact = None
     return engine
 
 
