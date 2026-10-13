@@ -1,0 +1,288 @@
+{
+ "index": "full-f2",
+ "date": "2026-10-13",
+ "not_found_very_close": {
+  "T8": 0.08433734939759036,
+  "T8c": 0.02
+ },
+ "routes": [
+  {
+   "route": "archive-building",
+   "very_close_score": 0.9198,
+   "very_close_gap": 0.01,
+   "close_score": 0.8497,
+   "close_gap": 0.01,
+   "searches": 138,
+   "levels": {
+    "tres-proche": {
+     "searches": 0.30434782608695654,
+     "right": 0.8095238095238095
+    },
+    "proche": {
+     "searches": 0.14492753623188406,
+     "right": 0.4
+    },
+    "ressemblance": {
+     "searches": 0.5507246376811594,
+     "right": 0.06578947368421052
+    }
+   },
+   "per_set": {
+    "T1": {
+     "tres-proche": {
+      "searches": 0.3088235294117647,
+      "right": 0.8095238095238095
+     },
+     "proche": {
+      "searches": 0.1323529411764706,
+      "right": 0.3888888888888889
+     },
+     "ressemblance": {
+      "searches": 0.5588235294117647,
+      "right": 0.06578947368421052
+     }
+    },
+    "T2": {
+     "tres-proche": {
+      "searches": 0.0,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 1.0,
+      "right": 0.5
+     },
+     "ressemblance": {
+      "searches": 0.0,
+      "right": 0.0
+     }
+    },
+    "T8": {
+     "tres-proche": {
+      "searches": 0.08130081300813008,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 0.10569105691056911,
+      "right": 0.0
+     },
+     "ressemblance": {
+      "searches": 0.8130081300813008,
+      "right": 0.0
+     }
+    }
+   }
+  },
+  {
+   "route": "object",
+   "very_close_score": 0.2572,
+   "very_close_gap": 0.09,
+   "close_score": 0.2572,
+   "close_gap": 0.045,
+   "searches": 1161,
+   "levels": {
+    "tres-proche": {
+     "searches": 0.3006029285099053,
+     "right": 0.8538681948424068
+    },
+    "proche": {
+     "searches": 0.11369509043927649,
+     "right": 0.5909090909090909
+    },
+    "ressemblance": {
+     "searches": 0.5857019810508183,
+     "right": 0.15441176470588236
+    }
+   },
+   "per_set": {
+    "T1": {
+     "tres-proche": {
+      "searches": 0.0,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 1.0,
+      "right": 0.5
+     },
+     "ressemblance": {
+      "searches": 0.0,
+      "right": 0.0
+     }
+    },
+    "T2": {
+     "tres-proche": {
+      "searches": 0.11272727272727273,
+      "right": 0.8064516129032258
+     },
+     "proche": {
+      "searches": 0.07636363636363637,
+      "right": 0.3333333333333333
+     },
+     "ressemblance": {
+      "searches": 0.8109090909090909,
+      "right": 0.08968609865470852
+     }
+    },
+    "T2b": {
+     "tres-proche": {
+      "searches": 0.5670103092783505,
+      "right": 0.9818181818181818
+     },
+     "proche": {
+      "searches": 0.15120274914089346,
+      "right": 0.9090909090909091
+     },
+     "ressemblance": {
+      "searches": 0.281786941580756,
+      "right": 0.45121951219512196
+     }
+    },
+    "T3": {
+     "tres-proche": {
+      "searches": 0.4444444444444444,
+      "right": 0.7272727272727273
+     },
+     "proche": {
+      "searches": 0.1717171717171717,
+      "right": 0.47058823529411764
+     },
+     "ressemblance": {
+      "searches": 0.3838383838383838,
+      "right": 0.39473684210526316
+     }
+    },
+    "T5": {
+     "tres-proche": {
+      "searches": 0.22064777327935223,
+      "right": 0.7247706422018348
+     },
+     "proche": {
+      "searches": 0.09716599190283401,
+      "right": 0.4583333333333333
+     },
+     "ressemblance": {
+      "searches": 0.6821862348178138,
+      "right": 0.09792284866468842
+     }
+    },
+    "T8": {
+     "tres-proche": {
+      "searches": 0.0873015873015873,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 0.1111111111111111,
+      "right": 0.0
+     },
+     "ressemblance": {
+      "searches": 0.8015873015873016,
+      "right": 0.0
+     }
+    },
+    "T8c": {
+     "tres-proche": {
+      "searches": 0.01020408163265306,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 0.05102040816326531,
+      "right": 0.0
+     },
+     "ressemblance": {
+      "searches": 0.9387755102040817,
+      "right": 0.0
+     }
+    }
+   }
+  },
+  {
+   "route": "colour-building",
+   "very_close_score": 0.281,
+   "very_close_gap": 0.005,
+   "close_score": 0.1412,
+   "close_gap": 0.025,
+   "searches": 239,
+   "levels": {
+    "tres-proche": {
+     "searches": 0.29707112970711297,
+     "right": 0.8028169014084507
+    },
+    "proche": {
+     "searches": 0.18410041841004185,
+     "right": 0.4318181818181818
+    },
+    "ressemblance": {
+     "searches": 0.5188284518828452,
+     "right": 0.03225806451612903
+    }
+   },
+   "per_set": {
+    "T2": {
+     "tres-proche": {
+      "searches": 0.29707112970711297,
+      "right": 0.8028169014084507
+     },
+     "proche": {
+      "searches": 0.18410041841004185,
+      "right": 0.4318181818181818
+     },
+     "ressemblance": {
+      "searches": 0.5188284518828452,
+      "right": 0.03225806451612903
+     }
+    },
+    "T8c": {
+     "tres-proche": {
+      "searches": 0.038461538461538464,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 0.15384615384615385,
+      "right": 0.0
+     },
+     "ressemblance": {
+      "searches": 0.8076923076923077,
+      "right": 0.0
+     }
+    }
+   }
+  },
+  {
+   "route": "words",
+   "very_close_score": null,
+   "very_close_gap": null,
+   "close_score": 0.9,
+   "close_gap": 0.07,
+   "searches": 500,
+   "levels": {
+    "tres-proche": {
+     "searches": 0.0,
+     "right": 0.0
+    },
+    "proche": {
+     "searches": 0.052,
+     "right": 0.46153846153846156
+    },
+    "ressemblance": {
+     "searches": 0.948,
+     "right": 0.056962025316455694
+    }
+   },
+   "per_set": {
+    "T7": {
+     "tres-proche": {
+      "searches": 0.0,
+      "right": 0.0
+     },
+     "proche": {
+      "searches": 0.052,
+      "right": 0.46153846153846156
+     },
+     "ressemblance": {
+      "searches": 0.948,
+      "right": 0.056962025316455694
+     }
+    }
+   }
+  }
+ ]
+}

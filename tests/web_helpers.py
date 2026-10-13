@@ -52,14 +52,15 @@ def image(image_id: str, entity: str, ref: str | None, *, cover: bool = True, ki
     )
 
 
-def catalog() -> Catalog:
+def catalog(*, pop_images: bool = True) -> Catalog:
     """PA1: a building with two Mémoire photos (two records) and a Commons photo.
-    OBJ1: a Joconde object with a cover and a back. OBJ2: a Rose Valland work."""
+    OBJ1: a Joconde object with a cover and a back. OBJ2: a Rose Valland work.
+    `pop_images=False`: PA1's two photos come from Commons too (it has no POP image)."""
     return Catalog(
         CatalogData(
             images=(
-                image("m1", "PA1", "AP1"),
-                image("m2", "PA1", "AP2"),
+                image("m1", "PA1", "AP1" if pop_images else None),
+                image("m2", "PA1", "AP2" if pop_images else None),
                 image("j1", "OBJ1", "J1"),
                 image("j2", "OBJ1", "J1", cover=False, kind="back"),
                 image("r1", "OBJ2", "RV1"),

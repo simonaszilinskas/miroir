@@ -38,7 +38,6 @@ from miroir.web.catalog import (
     Catalog,
     FacetOptions,
     Filters,
-    Source,
     display_url,
 )
 from miroir.web.engine import MAX_TEXT, SearchRequest, SearchResponse
@@ -123,8 +122,6 @@ class PageImage:
     thumb_url: str
     fallback_url: str
     label: str | None
-    credit: str | None
-    credit_url: str | None
     ref: str | None
 
 
@@ -413,22 +410,18 @@ def entity_page(catalog: Catalog, entity_id: str) -> EntityPage | None:
     records = catalog.entity_records(row)
     if not records:
         return None
-    rows = [int(r) for r in catalog.entity_image_rows(row)]
+    # POP images only: Commons photos help the search but are not shown.
+    rows = [int(r) for r in catalog.entity_image_rows(row) if catalog.image_record[r] >= 0]
     rows.sort(key=lambda r: (not catalog.images[r].is_cover, r))
     images: list[PageImage] = []
     for r in rows[:PAGE_IMAGES]:
         image = catalog.images[r]
-        commons = image.source is Source.COMMONS
         images.append(
             PageImage(
                 url=display_url(image, PAGE_SIDE),
                 thumb_url=display_url(image, THUMB_SIDE),
                 fallback_url=image.url,
-                label="Photo Wikimedia Commons"
-                if commons
-                else (None if image.is_cover else MATCHED_LABELS.get(image.image_type)),
-                credit=_credit(image.author, image.licence) if commons else None,
-                credit_url=(image.page_url or None) if commons else None,
+                label=None if image.is_cover else MATCHED_LABELS.get(image.image_type),
                 ref=image.ref,
             )
         )
@@ -460,10 +453,6 @@ def entity_page(catalog: Catalog, entity_id: str) -> EntityPage | None:
     )
 
 
-def _credit(author: str, licence: str) -> str:
-    return ", ".join(p for p in (author, licence) if p)
-
-
 def _decode_photo(data: str | None) -> bytes | None:
     if not data:
         return None
@@ -481,12 +470,12 @@ def _log_search(request: SearchRequest, result: SearchResponse, seconds: float) 
     """Technical spec §9: the query (image hash, text, filters), what came back, the time."""
     digest = hashlib.sha256(request.image).hexdigest()[:12] if request.image else "-"
     logger.info(
-        "search image=%s text=%r filters=%s mode=%s match=%s mount=%s caption=%s top=%s %.0f ms",
+        "search image=%s text=%r filters=%s mode=%s level=%s mount=%s caption=%s top=%s %.0f ms",
         digest,
         request.text[:80],
         request.filters,
         result.mode,
-        result.match,
+        result.cards[0].level.value if result.cards else None,
         result.picture is not None,
         result.caption_place,
         [c.entity_id for c in result.cards[:5]],

@@ -1403,6 +1403,32 @@ def web_sure(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
     )
 
 
+@web_app.command("levels")
+def web_levels(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
+    """Set the level each result card shows ("Très proche", "Proche", "Ressemblance") on the
+    tune halves, from stored query vectors (NumPy on the Mac, about 3 minutes the first time)."""
+    from miroir.eval.levels import (  # noqa: PLC0415
+        not_found_shares,
+        rank_tune_sets,
+        write_level_rules,
+    )
+
+    settings = get_settings()
+    rows = rank_tune_sets(settings)
+    reports = write_level_rules(settings, rows, round_id=round_id)
+    for report in reports:
+        rule = report.rule
+        typer.echo(
+            f"{report.route}: très proche score >= {rule.very_close_score}, gap >= "
+            f"{rule.very_close_gap}; proche score >= {rule.close_score}, gap >= {rule.close_gap}"
+        )
+        for level, c in report.levels.items():
+            typer.echo(f"  {level}: {c.searches:.1%} of searches, {c.right:.1%} right")
+    for set_id, share in not_found_shares(rows, reports).items():
+        typer.echo(f"{set_id} (record not in the index): 'Très proche' on {share:.1%}")
+    typer.echo("levels.json written into the bundle; `miroir web upload` sends it.")
+
+
 archive_app = typer.Typer(
     no_args_is_help=True,
     help="T1 archive prints: search the print without its mount, read its caption.",

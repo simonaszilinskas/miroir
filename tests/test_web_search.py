@@ -14,6 +14,7 @@ from miroir.web import facets, ranking
 from miroir.web.bundle import add_places, cutoff_for
 from miroir.web.catalog import CATALOG_FILE, CatalogData, Filters, write_catalog
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
+from miroir.web.levels import WORDS_ROUTE, Level, Levels, RouteLevels
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, Position, read_places, write_places
 from miroir.web.routing import Bucket, PhotoType, Routing
 from tests import web_helpers as h
@@ -46,19 +47,31 @@ def test_one_card_per_entity_with_its_best_image_marked_when_not_the_cover() -> 
     first = response.cards[0]
     assert first.entity_id == "OBJ1"
     assert first.matched == "Revers"
+    assert first.image_url is not None
     assert first.image_url.endswith("j2.jpg")
     assert first.title == "Vase"  # empty title: the denomination stands in
     assert first.photo_count == 2
 
 
-def test_a_commons_match_shows_its_credit() -> None:
+def test_a_commons_match_shows_the_entity_pop_image() -> None:
     engine, _ = h.engine(building=True)
     response = engine.search(SearchRequest(image=h.photo(210)))  # row 5: the Commons photo
     first = response.cards[0]
     assert first.entity_id == "PA1"
-    assert first.matched == "Photo Wikimedia Commons"
-    assert first.credit == "Une autrice, CC BY-SA 4.0"
+    assert first.image_url is not None
+    assert first.image_url.split("/")[-1] in {"m1.jpg", "m2.jpg"}  # a POP photo, not Commons
+    assert first.matched is None  # both are covers
+    assert first.photo_count == 2  # the Commons photo is not counted
     assert first.title.startswith("Église Saint-Pierre")
+
+
+def test_an_entity_with_only_a_commons_photo_has_a_card_without_image() -> None:
+    engine, _ = h.engine(building=True)
+    engine.catalog = h.catalog(pop_images=False)
+    first = engine.search(SearchRequest(image=h.photo(210))).cards[0]
+    assert first.entity_id == "PA1"
+    assert first.image_url is None
+    assert first.photo_count == 0
 
 
 # --- filters (F3) --------------------------------------------------------------------------
@@ -187,21 +200,35 @@ def test_cutoff_keeps_at_most_the_target_share_confident() -> None:
     assert (wrong >= cutoff_for(wrong, 0.05)).mean() == 0.0
 
 
-def test_below_the_cutoff_the_search_says_not_found() -> None:
+def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness() -> None:
+    engine, _ = h.engine(building=True)
+    engine.levels = Levels(routes=(RouteLevels("building", 0.5, 0.0, 0.0, 0.0),))
+    cards = engine.search(SearchRequest(image=h.photo(10))).cards
+    assert cards[0].level is Level.VERY_CLOSE
+    assert cards[0].level_label == "Très proche"
+    assert {c.level for c in cards[1:]} == {Level.LIKENESS}
+    engine.levels = Levels(routes=(RouteLevels("building", 1.5, 0.0, 0.5, 0.0),))
+    cards = engine.search(SearchRequest(image=h.photo(10))).cards
+    assert [c.level for c in cards][:2] == [Level.CLOSE, Level.LIKENESS]
+
+
+def test_without_levels_below_the_cutoff_every_card_is_a_likeness() -> None:
     sure, _ = h.engine(building=True, cutoff=0.5)
     unsure, _ = h.engine(building=True, cutoff=1.5)
     request = SearchRequest(image=h.photo(10))
-    assert sure.search(request).match is True
+    assert sure.search(request).cards[0].level is Level.VERY_CLOSE
     found = unsure.search(request)
-    assert found.match is False
-    assert found.cards  # "Ressemble à :" still lists the closest cards
+    assert {c.level for c in found.cards} == {Level.LIKENESS}
+    assert found.cards  # the closest cards are still listed
 
 
-def test_words_alone_have_no_match_flag_and_use_bm25() -> None:
+def test_words_alone_read_the_words_route() -> None:
     engine, _ = h.engine()
+    engine.levels = Levels(routes=(RouteLevels(WORDS_ROUTE, None, None, 0.0, 0.0),))
     response = engine.search(SearchRequest(text="lièvre"))
     assert response.mode == "text"
-    assert response.match is None
+    assert response.confidence is None
+    assert response.cards[0].level is Level.CLOSE
     assert response.words_found is True
     assert response.cards[0].entity_id == "OBJ2"
 

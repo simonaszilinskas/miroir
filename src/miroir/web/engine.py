@@ -1,4 +1,4 @@
-"""One search: a photo and/or words, plus filters, in; cards and a "not found" flag out.
+"""One search: a photo and/or words, plus filters, in; cards, each with its level, out.
 
 `Engine` holds the catalog, the routing and the gallery vectors. The models sit behind two
 small interfaces so the same engine runs in the Modal GPU container (`miroir.remote.search`)
@@ -34,9 +34,17 @@ from miroir.web.catalog import (
     Catalog,
     CatalogRecord,
     Filters,
-    Source,
     display_url,
     read_catalog,
+)
+from miroir.web.levels import (
+    LEVEL_LABELS,
+    LEVELS_FILE,
+    WORDS_ROUTE,
+    Level,
+    Levels,
+    gap_of,
+    read_levels,
 )
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, EntityPlaces, Position, read_places
 from miroir.web.routing import (
@@ -50,7 +58,7 @@ from miroir.web.routing import (
     read_routing,
 )
 from miroir.web.store import ExactStore, read_exact, shortlist_cosines
-from miroir.web.sure import SURE_FILE, SureRule, margin_of, read_sure
+from miroir.web.sure import SURE_FILE, SureRule, read_sure
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +68,8 @@ Floats = NDArray[np.float32]
 RESULTS = 24
 #: Longest text query kept, in characters.
 MAX_TEXT = 300
+#: Cards the first card's gap is measured over (`miroir.web.levels`).
+GAP_OVER = 30
 A7_FILE = "a7.npy"
 A3_FILE = "a3.npy"
 #: Optional: MegaLoc vectors stored reduced (PCA). Holds `mean` and `components`.
@@ -139,25 +149,27 @@ class Card:
     collection: str
     collection_label: str
     pop_url: str
-    image_url: str
-    """The image that best matches the query."""
-    image_fallback_url: str
+    image_url: str | None
+    """The entity's POP image that best matches the query. A Commons photo may have matched
+    best: it helps the search but is never shown. None when the entity has no POP image."""
+    image_fallback_url: str | None
     """The same file straight from the bucket, if the first URL fails."""
     matched: str | None
-    """How the matched image differs from the cover ("Détail", "Revers"...), or None."""
-    credit: str | None
-    """Author and licence when the matched image is a Commons photo."""
+    """How the image shown differs from the cover ("Détail", "Revers"...), or None."""
     photo_count: int
+    """Its POP images."""
     score: float
+    level: Level
+    level_label: str
+    """How close it is, in the visitor's words ("Très proche", "Proche", "Ressemblance")."""
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResponse:
     mode: str
     """"photo", "text" or "photo+text"."""
-    match: bool | None
-    """Photo searches: False when the top result is below the cut-off. None for words only."""
     confidence: float | None
+    """Photo searches: the first card's routed mix of raw cosines. None for words only."""
     guessed_type: str | None
     bucket: str | None
     chroma: float | None
@@ -196,6 +208,7 @@ class Engine:
         exact: ExactStore | None = None,
         places: EntityPlaces | None = None,
         sure: SureRule | None = None,
+        levels: Levels | None = None,
         captions: CaptionReader | None = None,
         archive: ArchiveRule = SITE_ARCHIVE,
     ) -> None:
@@ -210,6 +223,8 @@ class Engine:
         """MegaLoc whole in host memory (`miroir.web.store`): the GPU then holds it reduced,
         only to shortlist images, and the shortlisted ones are scored exactly from here."""
         self.sure = sure
+        """The older rule a bundle without `levels.json` falls back on (objects)."""
+        self.levels = levels
         self.captions = captions
         self.archive = archive
         self.gazetteer: Gazetteer | None = None if places is None else gazetteer(catalog, places)
@@ -256,27 +271,23 @@ class Engine:
                 per_image = words.per_image
         assert per_image is not None
         tick = time.monotonic()
-        fused = ranking.fuse(signals)
+        unplaced = ranking.fuse(signals)
         place = archive.place if self.archive.place_bonus > 0 else None
-        fused, nearby = self._near(fused, place, request.position)
+        fused, nearby = self._near(unplaced, place, request.position)
         top = ranking.top_entities(fused, max(1, min(request.limit, 100)))
+        levels = self._levels(photo, unplaced, fused, top)
         cards = tuple(
             card
-            for row in top
-            if (card := self._card(int(row), per_image, mask, float(fused[row]))) is not None
+            for row, level in zip(top, levels, strict=True)
+            if (card := self._card(int(row), per_image, mask, float(fused[row]), level)) is not None
         )
-        confidence = match = None
+        confidence = None
         if photo is not None and len(top):
             confidence = photo.confidence(int(top[0]))
-            match = confidence >= photo.cutoff
-            if self.sure is not None and photo.photo_type is self.sure.photo_type:
-                head = ranking.top_entities(fused, self.sure.over)
-                match = margin_of([photo.confidence(int(r)) for r in head]) >= self.sure.margin
         timings["rank"] = _ms(tick)
         timings["total"] = _ms(start)
         return SearchResponse(
             mode="photo+text" if photo and text else ("photo" if photo else "text"),
-            match=match,
             confidence=confidence,
             guessed_type=None if photo is None else photo.photo_type.value,
             bucket=None if photo is None else photo.bucket,
@@ -292,6 +303,33 @@ class Engine:
             caption_read=archive.read,
             caption_place=None if place is None else place.label,
         )
+
+    def _levels(
+        self, photo: _Photo | None, unplaced: Floats, fused: Floats, top: ranking.Ints
+    ) -> list[Level]:
+        """Each card's level (`miroir.web.levels`). A photo search reads the photo's routed
+        cosines, whatever words refine it; words alone read the fused score, before any
+        position bonus."""
+        if not len(top):
+            return []
+        head = ranking.top_entities(fused, GAP_OVER)
+        if photo is not None:
+            route = photo.bucket
+            over = [photo.confidence(int(r)) for r in head]
+        else:
+            route = WORDS_ROUTE
+            over = [float(unplaced[r]) for r in head]
+        rule = None if self.levels is None else self.levels.for_route(route)
+        if rule is not None:
+            return rule.card_levels(len(top), over)
+        # No levels for this route in the bundle: the older "sure" rule, on the first card.
+        sure = False
+        if photo is not None:
+            sure = over[0] >= photo.cutoff
+            if self.sure is not None and photo.photo_type is self.sure.photo_type:
+                sure = gap_of(over[: self.sure.over]) >= self.sure.margin
+        first = Level.VERY_CLOSE if sure else Level.LIKENESS
+        return [first, *[Level.LIKENESS] * (len(top) - 1)]
 
     def _near(
         self, fused: Floats, place: CaptionPlace | None, position: Position | None
@@ -400,23 +438,29 @@ class Engine:
     # --- cards -----------------------------------------------------------------------------
 
     def _card(
-        self, entity: int, per_image: Floats, mask: NDArray[np.bool_], score: float
+        self,
+        entity: int,
+        per_image: Floats,
+        mask: NDArray[np.bool_],
+        score: float,
+        level: Level,
     ) -> Card | None:
         catalog = self.catalog
         rows = catalog.entity_image_rows(entity)
-        best = ranking.best_image(rows, per_image, mask)
-        if best is None:
+        if ranking.best_image(rows, per_image, mask) is None:
             return None
-        image = catalog.images[best]
-        record = catalog.record_of(best) or _first(catalog.entity_records(entity))
+        pop = rows[catalog.image_record[rows] >= 0]
+        shown = ranking.best_image(pop, per_image, mask)
+        if shown is None and pop.size:  # the filters leave only a Commons photo
+            shown = min((int(r) for r in pop), key=lambda r: (not catalog.images[r].is_cover, r))
+        image = None if shown is None else catalog.images[shown]
+        record = (None if shown is None else catalog.record_of(shown)) or _first(
+            catalog.entity_records(entity)
+        )
         if record is None:
             return None
         matched: str | None = None
-        credit: str | None = None
-        if image.source is Source.COMMONS:
-            matched = "Photo Wikimedia Commons"
-            credit = ", ".join(p for p in (image.author, image.licence) if p) or None
-        elif not image.is_cover:
+        if image is not None and not image.is_cover:
             matched = MATCHED_LABELS.get(image.image_type, "Autre vue")
         return Card(
             entity_id=catalog.entity_ids[entity],
@@ -425,12 +469,13 @@ class Engine:
             collection=record.collection,
             collection_label=COLLECTION_LABELS.get(record.collection, record.collection),
             pop_url=record.pop_url,
-            image_url=display_url(image, CARD_SIDE),
-            image_fallback_url=image.url,
+            image_url=None if image is None else display_url(image, CARD_SIDE),
+            image_fallback_url=None if image is None else image.url,
             matched=matched,
-            credit=credit,
-            photo_count=len(rows),
+            photo_count=int(pop.size),
             score=round(score, 4),
+            level=level,
+            level_label=LEVEL_LABELS[level],
         )
 
 
@@ -582,6 +627,7 @@ def load_engine(
         exact=read_exact(directory),
         places=read_places(directory / PLACES_FILE, catalog.entity_ids),
         sure=read_sure(directory / SURE_FILE),
+        levels=read_levels(directory / LEVELS_FILE),
         captions=captions,
     )
 

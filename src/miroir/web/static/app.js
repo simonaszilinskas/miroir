@@ -788,31 +788,6 @@ function renderResults(response) {
     return;
   }
   const filtered = activeFilterCount() > 0;
-  if (response.match === false) {
-    // Not sure: no single answer, the closest records side by side to compare with the photo.
-    const building = response.guessed_type === 'building';
-    status.replaceChildren();
-    results.replaceChildren(
-      el('div', { class: 'miroir-section-title' },
-        el('h2', { class: 'fr-h4', text: building ? 'Voici les monuments les plus proches' : 'Voici les œuvres les plus proches' }),
-        el('p', { class: 'fr-badge fr-badge--sm fr-badge--no-icon fr-badge--new', text: 'Pas de réponse sûre' })),
-      el('p', { class: 'fr-text--sm miroir-muted fr-mb-2w', text: 'Aucune notice ne se détache assez pour l’affirmer. Comparez-les avec votre photo : la bonne est peut-être parmi elles.' }),
-      buildingTip(response),
-      grid(cards));
-    return;
-  }
-  if (response.match === true) {
-    status.replaceChildren();
-    const [best, ...rest] = cards;
-    fill(results,
-      el('div', { class: 'miroir-section-title' },
-        el('h2', { class: 'fr-h4', text: 'Meilleure correspondance' }),
-        el('p', { class: 'fr-badge fr-badge--success fr-badge--sm', text: 'Correspondance sûre' })),
-      el('div', { class: 'miroir-best' }, card(best, true)),
-      rest.length ? el('h2', { class: 'fr-h5', text: 'Autres résultats' }) : null,
-      rest.length ? grid(rest) : null);
-    return;
-  }
   if (response.words_found === false) {
     status.replaceChildren(el('div', { class: 'fr-alert fr-alert--info fr-mb-3w' },
       el('h2', { class: 'fr-alert__title', text: 'Aucune notice ne contient ces mots' }),
@@ -820,14 +795,40 @@ function renderResults(response) {
   } else {
     status.replaceChildren();
   }
-  results.replaceChildren(
+  const photo = Boolean(response.guessed_type);
+  fill(results,
     el('div', { class: 'miroir-section-title' },
       el('h2', { class: 'fr-h4', text: `Résultats${filtered ? ' filtrés' : ''}` }),
-      el('p', { class: 'fr-text--sm miroir-muted fr-mb-2w', text: 'Les plus proches de votre description, de la plus proche à la moins proche.' })),
+      el('p', { class: 'fr-text--sm miroir-muted fr-mb-1w', text: photo ? 'Du plus proche de votre photo au moins proche.' : 'Du plus proche de votre description au moins proche.' })),
+    levelLegend(),
+    cards[0].level !== 'tres-proche' ? buildingTip(response) : null,
     grid(cards));
 }
 
-/** After a miss on a building photo: what helps most, in the visitor's terms. */
+/** What each level means, in a line the visitor reads once. */
+function levelLegend() {
+  return el('p', { class: 'fr-text--xs miroir-muted fr-mb-2w miroir-legend' },
+    levelBadge('tres-proche', 'Très proche'), ' sans doute la bonne notice · ',
+    levelBadge('proche', 'Proche'), ' peut-être elle · ',
+    levelBadge('ressemblance', 'Ressemblance'), ' à comparer avec votre photo');
+}
+
+const LEVEL_TITLES = {
+  'tres-proche': 'Très proche : sans doute la bonne notice',
+  proche: 'Proche : peut-être la bonne notice, à vérifier',
+  ressemblance: 'Ressemblance : une image qui ressemble, à comparer avec votre photo',
+};
+const LEVEL_CLASSES = {
+  'tres-proche': 'fr-badge--success',
+  proche: 'fr-badge--info',
+  ressemblance: '',
+};
+
+function levelBadge(level, label) {
+  return el('span', { class: `fr-badge fr-badge--sm fr-badge--no-icon miroir-level ${LEVEL_CLASSES[level] ?? ''}`, title: LEVEL_TITLES[level] || '', text: label });
+}
+
+/** After a weak building search: what helps most, in the visitor's terms. */
 function buildingTip(response) {
   if (response.guessed_type !== 'building' || state.text) return null;
   const text = response.nearby == null
@@ -837,20 +838,22 @@ function buildingTip(response) {
 }
 
 function grid(cards) {
-  return el('ul', { class: 'miroir-grid' }, cards.map((c) => el('li', {}, card(c, false))));
+  return el('ul', { class: 'miroir-grid' }, cards.map((c) => el('li', {}, card(c))));
 }
 
-function card(c, big) {
+function card(c) {
   const href = `#/fiche/${encodeURIComponent(c.entity_id)}`;
   return el('article', { class: 'miroir-card' },
     el('div', { class: 'miroir-card__media' },
-      img(c.image_url, c.image_fallback_url, { alt: '' }),
+      c.image_url
+        ? img(c.image_url, c.image_fallback_url, { alt: '' })
+        : el('p', { class: 'miroir-card__noimage fr-text--sm', text: 'Pas d’image dans POP' }),
       c.matched ? el('p', { class: 'fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon miroir-card__matched', title: 'L’image qui ressemble le plus n’est pas l’image principale de la notice', text: `Correspond : ${c.matched.toLowerCase()}` }) : null,
       c.photo_count > 1 ? el('span', { class: 'miroir-card__count', text: `${c.photo_count} photos` }) : null),
     el('div', { class: 'miroir-card__body' },
-      el(big ? 'h3' : 'h3', { class: 'miroir-card__title' }, el('a', { href, text: c.title })),
+      levelBadge(c.level, c.level_label),
+      el('h3', { class: 'miroir-card__title' }, el('a', { href, text: c.title })),
       c.place ? el('p', { class: 'miroir-card__place', text: c.place }) : null,
-      c.credit ? el('p', { class: 'miroir-card__credit', text: `Photo : ${c.credit}` }) : null,
       el('div', { class: 'miroir-card__foot' },
         el('p', { class: 'fr-badge fr-badge--sm fr-badge--no-icon fr-mb-0', text: COLLECTION_NAMES[c.collection]?.split(' (')[0] || c.collection_label }),
         el('a', { class: 'fr-link fr-link--sm', href: c.pop_url, target: '_blank', rel: 'noopener', title: `${c.title} sur POP, nouvelle fenêtre`, text: 'Voir sur POP' }))));
@@ -943,8 +946,7 @@ async function renderRecord(entityId) {
   const select = (index) => {
     const image = page.images[index];
     viewer.replaceChildren(img(image.url, image.fallback_url, { alt: `${page.title}, image ${index + 1} sur ${page.images.length}`, loading: 'eager' }));
-    const parts = [image.label, image.credit ? `Photo : ${image.credit}` : null].filter(Boolean);
-    caption.textContent = parts.join(' · ');
+    caption.textContent = image.label || '';
     $$('.miroir-thumb', thumbs).forEach((t, i) => t.setAttribute('aria-current', String(i === index)));
   };
   thumbs.replaceChildren(...page.images.map((image, i) => el('li', {},
@@ -980,6 +982,7 @@ async function renderRecord(entityId) {
         facts, description, more, records)),
   );
   if (page.images.length) select(0);
+  else viewer.append(el('p', { class: 'miroir-card__noimage fr-text--sm', text: 'Pas d’image dans POP pour cette notice' }));
   document.title = `${page.title} · Miroir`;
 }
 

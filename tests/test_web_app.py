@@ -122,6 +122,9 @@ def test_photo_search_returns_cards_and_a_type_guess(client: TestClient) -> None
     assert body["guessed_type"] == "object"
     assert body["cards"][0]["entity_id"] == "OBJ1"
     assert body["cards"][0]["matched"] == "Revers"
+    assert body["cards"][0]["level"] in {"tres-proche", "proche", "ressemblance"}
+    assert "match" not in body
+    assert "credit" not in body["cards"][0]
 
 
 def test_filters_reach_the_search(client: TestClient) -> None:
@@ -172,9 +175,9 @@ def test_record_page_groups_an_entity(client: TestClient) -> None:
     page = client.get("/api/entity/PA1").json()
     assert page["title"] == "Église Saint-Pierre"
     assert [r["ref"] for r in page["records"]] == ["AP1", "AP2"]
-    assert page["photo_count"] == 3
-    commons = [i for i in page["images"] if i["credit"]]
-    assert commons[0]["credit"] == "Une autrice, CC BY-SA 4.0"
+    assert page["photo_count"] == 2  # POP images only: the Commons photo is not shown
+    assert [i["ref"] for i in page["images"]] == ["AP1", "AP2"]
+    assert all("credit" not in i for i in page["images"])
     assert client.get("/api/entity/NOPE").status_code == 404
 
 

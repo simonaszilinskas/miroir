@@ -405,7 +405,7 @@ uv run miroir index pca --fit <gallery run> --dims 1024 --apply <run>   # the PC
 
 - **Stack.** SvelteKit with Tailwind, built phone-first. The camera opens through `<input type="file" accept="image/*" capture="environment">`.
 - **Photo view.** After upload, the site calls `/detect` and draws the boxes. Tapping a box, or drawing a new one, calls `/search` with that box.
-- **Results.** One card per group: best-matching image, title, place, collection and a link to POP. A "matched on: back of canvas" tag appears when the hit image isn't `main`. A banner shows when `match` is false.
+- **Results.** One card per group, listed by closeness: its best-matching POP image (a Commons photo of the entity helps the search but is never shown; the card then shows its best POP image), title, place, collection, a link to POP, and a confidence level: "Très proche", "Proche" or "Ressemblance" (`miroir.web.levels`, thresholds per route in the bundle's `levels.json`, set by `miroir web levels` on the tune halves: "Très proche" right at least 80% of the time, on at most 10% of T8 and T8c searches; prototype.md). A "matched on: back of canvas" tag appears when the shown image isn't `main`. Record pages list POP images only.
 - **Login.** Accounts created by an admin and stored hashed in the API's database. No sign-up page.
 
 ## 9. Logging and privacy

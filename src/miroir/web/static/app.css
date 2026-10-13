@@ -203,22 +203,15 @@ main { min-height: 60vh; }
 .miroir-card { position: relative; }
 .miroir-card__place { font-size: 0.8125rem; color: var(--text-mention-grey); margin: 0; }
 .miroir-card__foot { margin-top: auto; padding-top: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; }
-.miroir-card__credit { font-size: 0.6875rem; color: var(--text-mention-grey); margin: 0; }
+.miroir-card__noimage { margin: 0; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-mention-grey); }
+.miroir-level { align-self: flex-start; }
+.miroir-legend .fr-badge { vertical-align: baseline; }
 @media (max-width: 36em) {
   .miroir-card__body { padding: 0.625rem; }
   .miroir-card__title { font-size: 0.875rem; }
   .miroir-card__foot .fr-badge { display: none; }
 }
 
-.miroir-best { margin-bottom: 2rem; }
-.miroir-best .miroir-card { flex-direction: column; }
-@media (min-width: 48em) {
-  .miroir-best .miroir-card { flex-direction: row; }
-  .miroir-best .miroir-card__media { flex: 0 0 55%; aspect-ratio: auto; min-height: 20rem; }
-  .miroir-best .miroir-card__body { padding: 1.5rem; }
-}
-.miroir-best .miroir-card__title { font-size: 1.5rem; -webkit-line-clamp: 4; }
-.miroir-best .miroir-card__place { font-size: 1rem; }
 
 .miroir-skeleton { border-radius: var(--miroir-radius); overflow: hidden; background: var(--background-raised-grey); box-shadow: var(--miroir-shadow); }
 .miroir-skeleton__img { aspect-ratio: 4 / 3; }

@@ -9,7 +9,8 @@ import pytest
 from miroir.eval.site_rerank import Searched
 from miroir.eval.sure import choose, sure_rows
 from miroir.web.bundle import SiteHit
-from miroir.web.engine import SearchRequest
+from miroir.web.engine import Engine, SearchRequest
+from miroir.web.levels import Level
 from miroir.web.routing import PhotoType
 from miroir.web.sure import SureRule, margin_of, read_sure, write_sure
 from tests import web_helpers as h
@@ -28,19 +29,23 @@ def test_the_rule_reads_back(tmp_path: Path) -> None:
     assert read_sure(tmp_path / "missing.json") is None
 
 
-def test_an_object_answer_is_sure_only_when_it_stands_out() -> None:
+def first_level(engine: Engine) -> Level:
+    return engine.search(SearchRequest(image=h.photo(90))).cards[0].level
+
+
+def test_without_levels_an_object_is_very_close_only_when_it_stands_out() -> None:
     engine, _ = h.engine(building=False, cutoff=-1.0)  # the cosine cut-off alone: always sure
-    assert engine.search(SearchRequest(image=h.photo(90))).match is True
+    assert first_level(engine) is Level.VERY_CLOSE
     engine.sure = SureRule(margin=0.3)
-    assert engine.search(SearchRequest(image=h.photo(90))).match is True
+    assert first_level(engine) is Level.VERY_CLOSE
     engine.sure = SureRule(margin=5.0)
-    assert engine.search(SearchRequest(image=h.photo(90))).match is False
+    assert first_level(engine) is Level.LIKENESS
 
 
-def test_buildings_keep_their_cut_off() -> None:
+def test_without_levels_buildings_keep_their_cut_off() -> None:
     engine, _ = h.engine(building=True, cutoff=-1.0)
     engine.sure = SureRule(margin=5.0)
-    assert engine.search(SearchRequest(image=h.photo(90))).match is True
+    assert first_level(engine) is Level.VERY_CLOSE
 
 
 def hit(confidences: tuple[float, ...], right_rank: int) -> SiteHit:

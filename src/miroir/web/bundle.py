@@ -57,6 +57,7 @@ from miroir.web.engine import (
     read_projection,
     weighted,
 )
+from miroir.web.levels import LEVELS_FILE
 from miroir.web.nearby import PLACES_FILE, write_places
 from miroir.web.routing import (
     GUESS_FILE,
@@ -227,9 +228,11 @@ def build_index(settings: Settings, name: str) -> Path:
         "ranking": score_sets(catalog, vectors, guess, routing, queries),
     }
     (out / REPORT_FILE).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    saved_sure = settings.index_dir / f"sure-{name}.json"
-    if saved_sure.exists():  # the object margin rule (`miroir web sure`) survives a rebuild
-        shutil.copyfile(saved_sure, out / SURE_FILE)
+    # The object margin rule (`miroir web sure`) and the card levels (`miroir web levels`)
+    # survive a rebuild.
+    for saved, target in ((f"sure-{name}.json", SURE_FILE), (f"levels-{name}.json", LEVELS_FILE)):
+        if (settings.index_dir / saved).exists():
+            shutil.copyfile(settings.index_dir / saved, out / target)
     manifest = {
         "index": name,
         "a7_run": spec.a7_run,
@@ -869,6 +872,8 @@ class AskedSet:
     a3: Floats
     hidden: tuple[tuple[str, ...], ...]
     right: tuple[tuple[str, ...], ...]
+    chroma: tuple[float, ...] = ()
+    """Each query photo's chroma spread, as the server measures it (routes buildings)."""
 
 
 def asked_sets(settings: Settings, name: str) -> dict[str, AskedSet]:
@@ -887,5 +892,6 @@ def asked_sets(settings: Settings, name: str) -> dict[str, AskedSet]:
             a3=asked.a3,
             hidden=asked.hidden,
             right=asked.right,
+            chroma=asked.chroma,
         )
     return out
