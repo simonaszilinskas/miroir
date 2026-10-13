@@ -410,7 +410,7 @@ uv run miroir index pca --fit <gallery run> --dims 1024 --apply <run>   # the PC
 
 - **What we log:** each search's query (image hash, box, text, filters), returned refs and timing. Query images are stored only for logged-in testers who agreed in writing.
 - **Deletion:** test photos and logs are deleted at the end of the PoC.
-- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own Modal account embed every image for the full-sample index (§7.3, `--all-images`), publishable or not. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies.
+- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own Modal account embed every image for the full-sample index (§7.3, `--all-images`), publishable or not; approved by the project owner on 2026-10-13. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies.
 
 ## 10. Repository layout
 
