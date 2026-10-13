@@ -1,4 +1,4 @@
-# T6: writing the 50 hand-made word searches
+# MIROIR: T6, writing the 50 hand-made word searches
 
 T6 (technical spec §7) is 50 French searches written by people, the way a visitor would type them. T7 is the same idea written by a model; T6 checks that T7 tells the truth.
 

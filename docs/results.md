@@ -1,5 +1,7 @@
 # MIROIR: results
 
+The lab notebook of the proof of concept: every evaluation run, in the order it happened, with what we expected beforehand and what we learned. For the website as it stands, read [prototype.md](prototype.md).
+
 One section per round of [experiments.md](experiments.md). Before each round, write what we expect and why. After it, add the table and what we learned.
 
 ## R0: harness check

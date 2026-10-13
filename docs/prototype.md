@@ -5,7 +5,7 @@ A working version of the product in [functional-spec.md](functional-spec.md) §5
 ## Use it
 
 - **Address:** https://simonaszilinskas--miroir.us-east.modal.run
-- **Password:** one shared password. It is in the main checkout's `.env` (`/Users/simonaszilinskas/miroir/.env`, line `MIROIR_APP_PASSWORD`, never committed) and in the `miroir-app` Modal secret (`APP_PASSWORD`). A login lasts a week.
+- **Access:** one shared password, created with `miroir web secret` and kept out of the repository (in `.env` as `MIROIR_APP_PASSWORD` and in the `miroir-app` Modal secret as `APP_PASSWORD`). Ask the project owner for it. A login lasts a week.
 - **First search of the day:** the GPU sleeps when nobody searches. The first search wakes it, which takes one to two minutes; the page says so and waits. Opening a photo or the text box wakes it in advance. Once awake, a search takes about a second; the GPU goes back to sleep after 10 minutes without a search.
 
 What a person can do:
@@ -86,13 +86,13 @@ Timings: outlines take 0.27 s on the GPU once warm and about 0.7 s from the Mac 
 
 ## Run and deploy
 
-**Card levels and POP-only images (2026-10-13).** Code and bundle change together: the bundle on the Mac holds a new `levels.json`. Deploy first, then upload (the order the caption weights already need): until the upload, the new code finds no `levels.json` and shows the older sure rule as "Très proche" or "Ressemblance" on the first card; older code ignores the file. Commons photos leave the cards and record pages with the deploy alone. To set the levels again after a rebuild or on another index: `miroir web levels` (writes `levels.json` into the bundle and a copy `~/miroir-data/index/levels-<index>.json` that `build-index` puts back), then `miroir web upload`.
+**Order when code and bundle change together.** Deploy first, then upload: `miroir web deploy`, then `miroir web upload`. New code reads older bundles (a bundle without `levels.json` falls back on the older sure rule; a `routing.json` without `caption_a7` and `caption_bm25` takes the caption weights from `miroir.web.routing`, 0.3 / 0.7), but older code refuses a `routing.json` that holds the caption weights. After a deploy, check one photo search on the site. The first wake-up after a deploy that adds a model downloads its weights into the weights volume once (Qwen3-VL 4B: about 9 GB).
 
-**Deploy state (2026-10-13, 14:00).** `full-f2` (with `places.npz`) is uploaded to the `miroir-web-index` volume. A deploy of main at 10:34 with the archive captions broke every photo search: the caption reader, loading in a thread beside EmbeddingGemma 2, left torch's default dtype at bfloat16 ("expected mat1 and mat2 to have the same dtype"). `71158de` fixes it (the reader loads after the other models, then the default is reset) but has not been deployed, and at 14:00 the `miroir-web` app was gone from Modal (the address answers 404). The next `miroir web deploy` from main should bring the site back with G5, F2, H2, words, outlines and captions; check one photo search before telling testers. The first wake-up after it downloads Qwen3-VL 4B (about 9 GB) into the weights volume once.
+**Card levels.** To set them again after a rebuild or on another index: `miroir web levels` (writes `levels.json` into the bundle and a copy `~/miroir-data/index/levels-<index>.json` that `build-index` puts back), then `miroir web upload`.
 
-**Caption weights (2026-10-13).** `routing.json` now holds `caption_a7` and `caption_bm25`. Code older than this change refuses a `routing.json` with those fields, so deploy before uploading the rebuilt bundle: `miroir web deploy`, then `miroir web upload`. The new code reads an older `routing.json` and takes the caption weights from `miroir.web.routing` (0.3 / 0.7), so the deploy alone already searches captions with them.
+**Position (H2).** The `full-f2` bundle holds `places.npz` (one position per entity), so the site uses the photo's GPS position or the visitor's. To add positions to another built bundle without rebuilding: `miroir web places --index <name> --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
 
-**Position (H2).** The `full-f2` bundle holds `places.npz` (one position per entity), so the next deploy uses the photo's GPS position or the visitor's. To add positions to another built bundle without rebuilding: `miroir web places --index <name> --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
+**Caption reader.** It loads in a thread after the search models and resets torch's default dtype afterwards; loading it beside EmbeddingGemma 2 without that reset left the default at bfloat16 and broke every photo search ("expected mat1 and mat2 to have the same dtype").
 
 ```sh
 uv sync --extra api
@@ -122,4 +122,4 @@ An L4 with 4 CPUs and 24 GB costs about $1.18 an hour while awake. Each wake-up 
 - **Outlines on a crowded wall.** On the Jeu de Paume room photos the right record is in the top 5 for 87% of works when every outline is shown, 78% with the 20 shown first (it was 52% with the 12 surest; results.md, step C): on the densest walls the visitor still needs "Afficher les N autres". Outlines' names come from the detector's prompts and are often wrong (it calls a statue a stained glass window); the page only uses them in labels for screen readers.
 - **Keypoint re-ranking (E1) is not on the site:** it lifts T3 hit@1 by 12 points but adds 3 s per search (6 s at the 95th percentile), mostly reading candidate images.
 - **Cold start** of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
-- **Type guess** read from the index agent's full-sample file. It calls more than half of phone photos of buildings objects (it partly learned colour); they then get 0.2 A7 + 0.8 A3, close to what a colour building gets.
+- **Type guess** trained on the full-sample index (`miroir.index.guess`). It calls more than half of phone photos of buildings objects (it partly learned colour); they then get 0.2 A7 + 0.8 A3, close to what a colour building gets.

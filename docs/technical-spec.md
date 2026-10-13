@@ -420,8 +420,9 @@ uv run miroir index pca --fit <gallery run> --dims 1024 --apply <run>   # the PC
 miroir/
   pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only) and `api` (FastAPI)
   Makefile         `make check` (ruff, pyright strict, pytest), `make fmt`
-  CLAUDE.md, CODING_STANDARDS.md
-  docs/            functional-spec.md, technical-spec.md, experiments.md, results.md
+  LICENSE          Licence Ouverte 2.0 (Etalab)
+  CLAUDE.md        contributor rules; CODING_STANDARDS.md
+  docs/            functional-spec.md, technical-spec.md, experiments.md, results.md, prototype.md, developpement.md
   src/miroir/
     config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR)
     cli.py         the `miroir` command; every entry point is a subcommand
@@ -526,9 +527,9 @@ The $7.54 of §7.3 covered 137,775 images, but 21,785 of them reused earlier vec
 | (c) step 1: buildings | 729,402 | 689,227 | $42 | $53 | 4.9 h | 1.1 GB | 12.3 / 24.6 GB |
 | (c) step 2: objects and unlinked photos | 1,409,162 | 1,330,149 | $82 | $102 | 9.4 h | 2.2 GB | 23.8 / 47.6 GB |
 
-(b) as asked saves little: a Mémoire record is one photo, and Mémoire is 59% of the files. (b′) keeps one image per building or object: the cover of its own Mérimée, Palissy or Joconde record, else its first Mémoire photo. It halves the cost, but a building then has one view, where today's results on phone photos of buildings come from having many (T2: buildings with Commons views in the index are found 58.6% of the time in the top 10, against 24.9% without; §7.3, prototype.md). (c) costs the same as (a) in two steps and lets us stop after step 1. Every option is far above what is left on Modal this month (about €7).
+(b) as asked saves little: a Mémoire record is one photo, and Mémoire is 59% of the files. (b′) keeps one image per building or object: the cover of its own Mérimée, Palissy or Joconde record, else its first Mémoire photo. It halves the cost, but a building then has one view, where today's results on phone photos of buildings come from having many (T2: buildings with Commons views in the index are found 58.6% of the time in the top 10, against 24.9% without; §7.3, prototype.md). (c) costs the same as (a) in two steps and lets us stop after step 1.
 
-**What the serving side must hold.** Raw, no compression (another agent tests compression). A7 is 768 numbers a vector, A3 8,448; fp16 takes 2 bytes a number, fp32 4. Today's site keeps 147,000 vectors of each model, about 2.5 GB, on one L4 (24 GB) beside four models, the caption reader alone about 9 GB.
+**What the serving side must hold.** Raw, no compression (compressed vectors: last paragraph of this section). A7 is 768 numbers a vector, A3 8,448; fp16 takes 2 bytes a number, fp32 4. Today's site keeps 147,000 vectors of each model, about 2.5 GB, on one L4 (24 GB) beside four models, the caption reader alone about 9 GB.
 
 - (a): 39 GB in fp16 (79 GB in fp32). No longer fits an L4: it needs an 80 GB GPU (an A100 costs about 2.7 times the site's L4 per hour while awake), the vectors in CPU memory (a container with 48 GB or more; one search reads all 36 GB of A3 vectors, an estimated 2 s on CPU against 20 ms on an A100), or compression. A cold start must also load 39 GB from the volume, where today's 2.5 GB take part of the 50–110 s.
 - (c) step 1: 13.4 GB in fp16. Fits an L4 only if the caption reader leaves the GPU; else an L40S (48 GB, about twice the L4's price).
