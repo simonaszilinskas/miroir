@@ -46,6 +46,7 @@ from miroir.web.routing import (
     read_guess,
     read_routing,
 )
+from miroir.web.sure import SURE_FILE, SureRule, margin_of, read_sure
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ class Engine:
         gallery: GalleryVectors,
         projection: Projection | None = None,
         places: EntityPlaces | None = None,
+        sure: SureRule | None = None,
     ) -> None:
         self.catalog = catalog
         self.places = places
@@ -168,6 +170,7 @@ class Engine:
         self.encoders = encoders
         self.gallery = gallery
         self.projection = projection
+        self.sure = sure
         start = time.monotonic()
         self.bm25 = Bm25([record_text(r) for r in catalog.records])
         logger.info(
@@ -214,6 +217,9 @@ class Engine:
         if photo is not None and len(top):
             confidence = photo.confidence(int(top[0]))
             match = confidence >= photo.cutoff
+            if self.sure is not None and photo.photo_type is self.sure.photo_type:
+                head = ranking.top_entities(fused, self.sure.over)
+                match = margin_of([photo.confidence(int(r)) for r in head]) >= self.sure.margin
         timings["rank"] = _ms(tick)
         timings["total"] = _ms(start)
         return SearchResponse(
@@ -429,6 +435,7 @@ def load_engine(directory: Path, encoders: Encoders, gallery: GalleryVectors) ->
         gallery=gallery,
         projection=read_projection(directory),
         places=read_places(directory / PLACES_FILE, catalog.entity_ids),
+        sure=read_sure(directory / SURE_FILE),
     )
 
 

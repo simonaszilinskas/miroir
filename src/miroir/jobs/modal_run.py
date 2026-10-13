@@ -168,10 +168,58 @@ def output_runs(opt: ModalOption, gallery: str) -> dict[str, Pooling]:
 
 
 @dataclass(frozen=True, slots=True)
-class _Paid[T]:
+class Paid[T]:
     result: T
     cost_usd: float
     wall_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class PaidCall:
+    """What a paid Modal call needs to check the budget and log its cost."""
+
+    ledger: SpendLedger
+    budget: Budget
+    key_usage_usd: float | None = None
+    clock: Callable[[], float] = time.monotonic
+
+
+def paid_call[T](
+    paid: PaidCall,
+    call: Callable[[], T],
+    *,
+    machine: Machine,
+    timeout_s: int,
+    kind: SpendKind,
+    option: str,
+    run: str,
+    model: str,
+    items: int,
+) -> Paid[T]:
+    """Make one remote call if its worst case fits the budget; log its cost, even on failure."""
+    worst = machine.usd_per_s * timeout_s
+    spent = spent_usd(paid.ledger, paid.key_usage_usd)
+    if spent + worst > paid.budget.usable_usd:
+        msg = (
+            f"{run}: a call may cost up to ${worst:.2f} and ${spent:.2f} is spent; together "
+            f"that passes the ${paid.budget.usable_usd:.2f} usable budget"
+        )
+        raise BudgetError(msg)
+    start = paid.clock()
+    try:
+        result = call()
+    finally:
+        wall = paid.clock() - start
+        paid.ledger.record(
+            kind,
+            option=option,
+            run=run,
+            model=model,
+            cost_usd=wall * machine.usd_per_s,
+            items=items,
+            service=Service.MODAL,
+        )
+    return Paid(result, wall * machine.usd_per_s, wall)
 
 
 class ModalRunner:
@@ -591,10 +639,10 @@ class ModalRunner:
 
     def _embed_chunks(
         self, opt: ModalOption, run: str, todo: Sequence[str], workers: int
-    ) -> Iterator[_Paid[ChunkResult]]:
+    ) -> Iterator[Paid[ChunkResult]]:
         """Send `todo` in chunks, `workers` at a time; yield each answer as it arrives."""
 
-        def send(chunk: list[str]) -> _Paid[ChunkResult]:
+        def send(chunk: list[str]) -> Paid[ChunkResult]:
             return self._paid(
                 lambda: self._calls.embed(opt, self._images(chunk)),
                 machine=opt.machine,
@@ -612,7 +660,7 @@ class ModalRunner:
             return
         self._calls.scale(opt, workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures: list[Future[_Paid[ChunkResult]]] = [
+            futures: list[Future[Paid[ChunkResult]]] = [
                 pool.submit(send, chunk) for chunk in _chunks(todo)
             ]
             try:
@@ -787,31 +835,18 @@ class ModalRunner:
         run: str,
         model: str,
         items: int,
-    ) -> _Paid[T]:
-        """Make one remote call if its worst case fits the budget; log its cost, even on failure."""
-        worst = machine.usd_per_s * timeout_s
-        spent = spent_usd(self.ledger, self._key_usage)
-        if spent + worst > self.budget.usable_usd:
-            msg = (
-                f"{run}: a call may cost up to ${worst:.2f} and ${spent:.2f} is spent; together "
-                f"that passes the ${self.budget.usable_usd:.2f} usable budget"
-            )
-            raise BudgetError(msg)
-        start = self._clock()
-        try:
-            result = call()
-        finally:
-            wall = self._clock() - start
-            self.ledger.record(
-                kind,
-                option=option,
-                run=run,
-                model=model,
-                cost_usd=wall * machine.usd_per_s,
-                items=items,
-                service=Service.MODAL,
-            )
-        return _Paid(result, wall * machine.usd_per_s, wall)
+    ) -> Paid[T]:
+        return paid_call(
+            PaidCall(self.ledger, self.budget, self._key_usage, self._clock),
+            call,
+            machine=machine,
+            timeout_s=timeout_s,
+            kind=kind,
+            option=option,
+            run=run,
+            model=model,
+            items=items,
+        )
 
     def _gallery(self, name: str) -> list[str]:
         path = self.settings.gallery_path(name)

@@ -54,6 +54,7 @@ def test_the_page_loads_without_login(client: TestClient) -> None:
         ("GET", "/api/me"),
         ("GET", "/api/facets"),
         ("POST", "/api/search"),
+        ("POST", "/api/detect"),
         ("GET", "/api/entity/PA1"),
     ],
 )
@@ -130,6 +131,32 @@ def test_filters_reach_the_search(client: TestClient) -> None:
         "/api/search", json={"image": image, "filters": {"collections": ["rose-valland"]}}
     ).json()
     assert [c["entity_id"] for c in body["cards"]] == ["OBJ2"]
+
+
+def test_detect_returns_outlines_in_shares_of_the_photo(client: TestClient) -> None:
+    login(client)
+    image = base64.b64encode(h.photo(130)).decode()
+    response = client.post("/api/detect", json={"image": f"data:image/jpeg;base64,{image}"})
+    assert response.status_code == 200
+    boxes = response.json()["boxes"]
+    assert len(boxes) == 3
+    for b in boxes:
+        assert 0 <= b["x0"] < b["x1"] <= 1
+        assert 0 <= b["y0"] < b["y1"] <= 1
+        assert b["label"] == "painting"
+
+
+def test_detect_needs_a_readable_photo_and_is_rate_limited(client: TestClient) -> None:
+    login(client)
+    assert client.post("/api/detect", json={"image": ""}).status_code == 422
+    assert client.post("/api/detect", json={"image": "pas du base64!"}).status_code == 422
+    image = base64.b64encode(h.photo(90)).decode()
+    codes = [
+        client.post("/api/detect", json={"image": image}).status_code
+        for _ in range(auth.SEARCHES_PER_MINUTE)
+    ]
+    assert codes[-1] == 429
+    assert client.post("/api/search", json={"text": "église"}).status_code == 200
 
 
 def test_a_broken_photo_is_refused(client: TestClient) -> None:

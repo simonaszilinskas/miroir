@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from miroir.outlines import Outlines, fake_outlines
 from miroir.web.engine import (
     A7_FILE,
     Engine,
@@ -73,7 +74,7 @@ def fake_engine(directory: Path) -> Engine:
 
 @dataclass(frozen=True, slots=True)
 class LocalBackend:
-    """Runs an engine in a worker thread; `warm` has nothing to start."""
+    """Runs an engine in a worker thread; `warm` has nothing to start; outlines are fake."""
 
     engine: Engine
 
@@ -82,3 +83,6 @@ class LocalBackend:
 
     async def warm(self) -> None:
         return None
+
+    async def detect(self, jpeg: bytes) -> Outlines:
+        return fake_outlines(jpeg)

@@ -18,8 +18,18 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
+from PIL import ImageOps
 
 from miroir.jobs.modal_spec import OPTIONS
+from miroir.outlines import (
+    DETECT_SIDE,
+    SITE_DETECTOR,
+    SITE_RULE,
+    Outlines,
+    detector,
+    pick_outlines,
+)
+from miroir.remote.detect import detect_size, load_detector
 from miroir.remote.models import DEVICE, MegaLocEncoder, SentenceEncoder
 from miroir.web.engine import A3_FILE, A7_FILE, Engine, load_engine
 
@@ -83,3 +93,24 @@ def load_search(directory: Path) -> Engine:
     """Everything a search container needs, loaded once at start."""
     gallery = GpuGallery(directory)
     return load_engine(directory, QueryModels(), gallery)
+
+
+class OutlineFinder:
+    """F4 on the GPU: the site's detector, then the outline rule tuned in step C."""
+
+    def __init__(self) -> None:
+        self.detector = load_detector(detector(SITE_DETECTOR))
+        blank = PILImage.new("RGB", (DETECT_SIDE, DETECT_SIDE * 3 // 4), "white")
+        self.detector.detect(blank)  # warm the kernels before the first photo
+
+    def find(self, jpeg: bytes) -> Outlines:
+        start = time.monotonic()
+        try:
+            with PILImage.open(io.BytesIO(jpeg)) as opened:
+                image = detect_size(ImageOps.exif_transpose(opened))
+        except (OSError, PILImage.DecompressionBombError) as err:
+            msg = f"cannot read the photo: {err}"
+            raise ValueError(msg) from err
+        boxes = self.detector.detect(image)
+        shown = pick_outlines(boxes, SITE_RULE, width=image.width, height=image.height)
+        return Outlines(shown, detect_ms=round(1000 * (time.monotonic() - start), 1))

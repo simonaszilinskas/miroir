@@ -11,6 +11,14 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const SEND_SIDE = 1024;
 /** Longest side kept in the browser for display and drawing a box. */
 const KEEP_SIDE = 2048;
+/** Longest side, in pixels, of the photo sent to find its objects (`DETECT_SIDE`). */
+const DETECT_SIDE = 1024;
+/** Outlines drawn at first; the server sends up to 40, shown on request (walls of pictures). */
+const MAX_OUTLINES = 12;
+/** Smallest tap area, in CSS pixels, around an outline. */
+const TAP_SIDE = 44;
+/** A press that moves less than this many pixels is a tap, not a drawn box. */
+const TAP_SLOP = 10;
 /** Smallest box, as a share of the shorter side, that counts as drawn. */
 const MIN_BOX = 0.06;
 const WARM_EVERY_MS = 4 * 60 * 1000;
@@ -20,6 +28,9 @@ const MAX_RETRIES = 4;
 const state = {
   photo: null,       // { canvas, url } of the current photo
   box: null,         // { x, y, w, h } in canvas pixels, or null for the whole photo
+  outlines: [],      // objects found in the photo: { x0, y0, x1, y1, label } in shares of it
+  outline: null,     // index of the outline searched, or null
+  allOutlines: false, // true once the person asked to see every outline
   queryUrl: null,    // what the results page shows as "your photo"
   text: '',          // words of the current search
   filters: emptyFilters(),
@@ -118,7 +129,7 @@ async function route() {
   if (!(await loggedIn())) { go('#/connexion'); return; }
   if (hash === '#/photo') {
     if (!state.photo) { go('#/'); return; }
-    show('photo'); drawBox(); warm(); return;
+    show('photo'); drawBox(); drawOutlines(); warm(); return;
   }
   if (hash === '#/resultats') {
     if (!state.response && !state.searching) { go('#/'); return; }
@@ -258,7 +269,6 @@ async function useExample(example) {
   }
   if (example.frame) {
     go('#/photo');
-    $('#box-hint').innerHTML = 'Les œuvres de cette salle ont chacune leur notice. <strong>Tracez un cadre</strong> autour d’un tableau ou d’une tapisserie pour le retrouver.';
     return;
   }
   state.text = '';
@@ -282,8 +292,9 @@ async function usePhoto(blob, position = null) {
   const url = URL.createObjectURL(await toBlob(canvas, 0.92));
   state.photo = { canvas, url };
   state.box = null;
+  state.outline = null;
   $('#stage-image').src = url;
-  $('#box-hint').innerHTML = 'Pour chercher une partie de la photo, un tableau sur un mur ou un détail, <strong>tracez un cadre</strong> dessus avec le doigt ou la souris.';
+  $('#box-hint').innerHTML = DRAW_HINT;
   drawBox();
   detectObjects();
   warm();
@@ -295,23 +306,35 @@ function toBlob(canvas, quality) {
   });
 }
 
-/** The photo, or the boxed part of it, as a JPEG data URL at most SEND_SIDE on its long side. */
-async function queryImage() {
+/** Part of the photo (canvas pixels) as a JPEG blob at most `side` on its long side. */
+function cropBlob(box, side) {
   const source = state.photo.canvas;
-  const box = state.box || { x: 0, y: 0, w: source.width, h: source.height };
-  const scale = Math.min(1, SEND_SIDE / Math.max(box.w, box.h));
+  const scale = Math.min(1, side / Math.max(box.w, box.h));
   const out = document.createElement('canvas');
   out.width = Math.max(1, Math.round(box.w * scale));
   out.height = Math.max(1, Math.round(box.h * scale));
   out.getContext('2d').drawImage(source, box.x, box.y, box.w, box.h, 0, 0, out.width, out.height);
-  const blob = await toBlob(out, 0.9);
-  if (state.queryUrl) URL.revokeObjectURL(state.queryUrl);
-  state.queryUrl = URL.createObjectURL(blob);
+  return toBlob(out, 0.9);
+}
+
+function dataUrl(blob) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.readAsDataURL(blob);
   });
+}
+
+function wholePhoto() {
+  return { x: 0, y: 0, w: state.photo.canvas.width, h: state.photo.canvas.height };
+}
+
+/** The photo, or the boxed part of it, as a JPEG data URL at most SEND_SIDE on its long side. */
+async function queryImage() {
+  const blob = await cropBlob(state.box || wholePhoto(), SEND_SIDE);
+  if (state.queryUrl) URL.revokeObjectURL(state.queryUrl);
+  state.queryUrl = URL.createObjectURL(blob);
+  return dataUrl(blob);
 }
 
 const stage = $('#stage');
@@ -325,22 +348,32 @@ function stagePoint(event) {
   return { x, y, rect };
 }
 
+// A press on an outline that barely moves is a tap: search that object. Any press that moves
+// draws a box, even one that starts on an outline (pointer capture sends every move here).
 stage.addEventListener('pointerdown', (event) => {
   if (!state.photo) return;
   stage.setPointerCapture(event.pointerId);
   dragStart = stagePoint(event);
+  const outline = event.target.closest?.('.miroir-outline');
+  dragStart.outline = outline ? Number(outline.dataset.index) : null;
+  dragStart.moved = false;
   event.preventDefault();
 });
 stage.addEventListener('pointermove', (event) => {
   if (!dragStart) return;
   const now = stagePoint(event);
+  if (!dragStart.moved && Math.hypot(now.x - dragStart.x, now.y - dragStart.y) < TAP_SLOP) return;
+  dragStart.moved = true;
+  state.outline = null;
   setBoxFromScreen(dragStart, now, false);
 });
 stage.addEventListener('pointerup', (event) => {
   if (!dragStart) return;
-  const now = stagePoint(event);
-  setBoxFromScreen(dragStart, now, true);
+  const start = dragStart;
   dragStart = null;
+  if (!start.moved && start.outline !== null) { searchOutline(start.outline); return; }
+  if (!start.moved) return;
+  setBoxFromScreen(start, stagePoint(event), true);
 });
 stage.addEventListener('pointercancel', () => { dragStart = null; drawBox(); });
 
@@ -364,6 +397,7 @@ function drawBox(faint = false) {
   const node = $('#box');
   const image = $('#stage-image');
   const has = Boolean(state.box);
+  stage.classList.toggle('has-box', has);
   $('#search-box').hidden = !has;
   $('#clear-box').hidden = !has;
   $('#search-whole').classList.toggle('fr-btn--secondary', has);
@@ -380,27 +414,123 @@ function drawBox(faint = false) {
   node.hidden = false;
 }
 
-$('#stage-image').addEventListener('load', () => drawBox());
-window.addEventListener('resize', () => drawBox());
-$('#clear-box').addEventListener('click', () => { state.box = null; drawBox(); });
-$('#search-whole').addEventListener('click', () => { state.box = null; searchPhoto(); });
+$('#stage-image').addEventListener('load', () => { drawBox(); drawOutlines(); });
+window.addEventListener('resize', () => { drawBox(); drawOutlines(); });
+$('#clear-box').addEventListener('click', () => { state.box = null; state.outline = null; drawBox(); drawOutlines(); });
+$('#search-whole').addEventListener('click', () => { state.box = null; state.outline = null; searchPhoto(); });
 $('#search-box').addEventListener('click', () => searchPhoto());
 
-/**
- * F4 hook: outline each object found in the photo. A detector endpoint (technical spec §6.1,
- * POST /detect) will return boxes in photo pixels; tapping one sets it as the box and searches.
- */
+// --- F4: outline each object found in the photo ---------------------------------------------
+
+const OUTLINE_LABELS = {
+  painting: 'tableau', sculpture: 'sculpture', statue: 'statue', vase: 'vase',
+  furniture: 'meuble', building: 'bâtiment', 'stained glass window': 'vitrail',
+};
+let detectId = 0;
+
+/** Ask the server for the objects in the photo; draw them when they come. A sleeping GPU
+ * answers 503 while it starts: try again quietly, the person can draw a box meanwhile. */
 async function detectObjects() {
-  const boxes = [];  // to come: await api('detect', ...)
-  drawOutlines(boxes);
+  const id = ++detectId;
+  state.outlines = [];
+  state.allOutlines = false;
+  drawOutlines();
+  setOutlineStatus('Repérage des œuvres dans la photo…', { busy: true });
+  const image = await dataUrl(await cropBlob(wholePhoto(), DETECT_SIDE));
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const found = await api('detect', { method: 'POST', body: { image } });
+      if (id !== detectId) return;
+      state.outlines = found.boxes;
+      drawOutlines();
+      if (!state.outlines.length) setOutlineStatus('');
+      return;
+    } catch (err) {
+      if (id !== detectId) return;
+      if (err.status === 503 && attempt < MAX_RETRIES) {
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
+        continue;
+      }
+      setOutlineStatus('');
+      return;
+    }
+  }
 }
 
-function drawOutlines(boxes) {
+const DRAW_HINT = 'Pour chercher une partie de la photo, un tableau sur un mur ou un détail, <strong>tracez un cadre</strong> dessus avec le doigt ou la souris.';
+
+function setOutlineStatus(text, { busy = false } = {}) {
+  const node = $('#outline-status');
+  node.classList.toggle('is-busy', busy);
+  node.textContent = text;
+}
+
+function shownOutlines() {
+  return state.allOutlines ? state.outlines : state.outlines.slice(0, MAX_OUTLINES);
+}
+
+function describeOutlines() {
+  const n = shownOutlines().length;
+  const more = state.outlines.length - n;
+  setOutlineStatus(n ? `${n} œuvre${n > 1 ? 's' : ''} repérée${n > 1 ? 's' : ''}. Touchez un cadre bleu pour la chercher.` : '');
+  $('#box-hint').innerHTML = n
+    ? 'Une œuvre n’a pas de cadre ? <strong>Tracez le vôtre</strong> avec le doigt.'
+    : DRAW_HINT;
+  const button = $('#more-outlines');
+  button.hidden = more <= 0;
+  button.textContent = `Afficher ${more > 1 ? `les ${more} autres objets repérés` : 'l’autre objet repéré'}`;
+}
+
+$('#more-outlines').addEventListener('click', () => {
+  state.allOutlines = true;
+  drawOutlines();
+  $('#outlines .miroir-outline:nth-child(13)')?.focus();
+});
+
+/** An outline (shares of the photo) in canvas pixels. */
+function outlineBox(o) {
+  const { width, height } = state.photo.canvas;
+  return {
+    x: Math.round(o.x0 * width), y: Math.round(o.y0 * height),
+    w: Math.max(1, Math.round((o.x1 - o.x0) * width)), h: Math.max(1, Math.round((o.y1 - o.y0) * height)),
+  };
+}
+
+function searchOutline(index) {
+  const outline = state.outlines[index];
+  if (!outline) return;
+  state.outline = index;
+  state.box = outlineBox(outline);
+  drawBox();
+  drawOutlines();
+  searchPhoto();
+}
+
+function drawOutlines() {
   const layer = $('#outlines');
-  layer.replaceChildren(...boxes.map((box) => el('button', {
-    class: 'miroir-outline', type: 'button', 'aria-label': box.label || 'Objet détecté',
-    onclick: () => { state.box = box; searchPhoto(); },
-  })));
+  const image = $('#stage-image');
+  if (state.photo && state.outlines.length) describeOutlines();
+  else $('#more-outlines').hidden = true;
+  if (!state.photo || !image.clientWidth || !state.outlines.length) { layer.replaceChildren(); return; }
+  const left = image.offsetLeft;
+  const top = image.offsetTop;
+  const w = image.clientWidth;
+  const h = image.clientHeight;
+  layer.replaceChildren(...shownOutlines().map((o, i) => {
+    const width = (o.x1 - o.x0) * w;
+    const height = (o.y1 - o.y0) * h;
+    const pad = Math.max(0, (TAP_SIDE - Math.min(width, height)) / 2);
+    const name = OUTLINE_LABELS[o.label] || 'objet';
+    return el('button', {
+      class: `miroir-outline${state.outline === i ? ' is-selected' : ''}`,
+      type: 'button',
+      'data-index': String(i),
+      'aria-label': `Chercher l’œuvre ${i + 1} (${name})`,
+      style: `left:${left + o.x0 * w}px;top:${top + o.y0 * h}px;width:${width}px;height:${height}px;--pad:${pad}px`,
+      // A tap arrives through the stage's pointer handlers; this click is the keyboard's.
+      onclick: (event) => { if (event.detail === 0) searchOutline(i); },
+    }, el('span', { class: 'miroir-outline__n', 'aria-hidden': 'true', text: String(i + 1) }));
+  }));
 }
 
 // --- search ----------------------------------------------------------------------------------
@@ -594,11 +724,14 @@ function renderResults(response) {
   }
   const filtered = activeFilterCount() > 0;
   if (response.match === false) {
-    status.replaceChildren(el('div', { class: 'fr-alert fr-alert--info fr-mb-3w' },
-      el('h2', { class: 'fr-alert__title', text: 'Pas de correspondance sûre dans les collections' }),
-      el('p', { text: 'Rien ne ressemble assez à votre photo pour l’affirmer. Voici les notices les plus proches : la bonne y est peut-être.' })));
+    // Not sure: no single answer, the closest records side by side to compare with the photo.
+    const building = response.guessed_type === 'building';
+    status.replaceChildren();
     results.replaceChildren(
-      el('h2', { class: 'fr-h4', text: 'Ressemble à :' }),
+      el('div', { class: 'miroir-section-title' },
+        el('h2', { class: 'fr-h4', text: building ? 'Voici les monuments les plus proches' : 'Voici les œuvres les plus proches' }),
+        el('p', { class: 'fr-badge fr-badge--sm fr-badge--no-icon fr-badge--new', text: 'Pas de réponse sûre' })),
+      el('p', { class: 'fr-text--sm miroir-muted fr-mb-2w', text: 'Aucune notice ne se détache assez pour l’affirmer. Comparez-les avec votre photo : la bonne est peut-être parmi elles.' }),
       grid(cards));
     return;
   }

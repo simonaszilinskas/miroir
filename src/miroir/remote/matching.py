@@ -64,6 +64,17 @@ class Matcher:
         p1 = b[1][pairs[:, 1]].astype(np.float64)
         return found, _homography_inliers(p0, p1), _fundamental_inliers(p0, p1)
 
+    @torch.inference_mode()
+    def inliers(self, a: _Features, b: _Features) -> int:
+        """Homography inliers only: what the `mix` re-ranking reads (the website's path)."""
+        out = self.matcher({"image0": a[0], "image1": b[0]})
+        pairs = out["matches"][0].cpu().numpy()
+        if len(pairs) < 4:
+            return 0
+        p0 = a[1][pairs[:, 0]].astype(np.float64)
+        p1 = b[1][pairs[:, 1]].astype(np.float64)
+        return _homography_inliers(p0, p1)
+
 
 def _homography_inliers(p0: NDArray[np.float64], p1: NDArray[np.float64]) -> int:
     """Inliers of one homography; 0 when OpenCV finds no model (degenerate points)."""

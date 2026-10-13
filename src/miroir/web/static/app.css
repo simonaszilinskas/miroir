@@ -119,8 +119,34 @@ main { min-height: 60vh; }
   content: ""; position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px;
   background: #fff; border-radius: 50%;
 }
-.miroir-stage__outlines { position: absolute; inset: 0; pointer-events: none; }
-.miroir-outline { position: absolute; border: 2px dashed #fff; border-radius: 4px; pointer-events: auto; cursor: pointer; }
+.miroir-stage__outlines { position: absolute; inset: 0; pointer-events: none; line-height: normal; }
+/* F4 outlines: one button per object found. Blue France with a white edge, readable on dark
+   and light photos; the tap area grows to 44 px around small boxes (--pad, set by app.js). */
+.miroir-outline {
+  all: unset; box-sizing: border-box; position: absolute; pointer-events: auto; cursor: pointer;
+  border: 3px solid var(--background-action-high-blue-france); border-radius: 4px;
+  box-shadow: 0 0 0 2px #fff, inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.miroir-outline::before { content: ""; position: absolute; inset: calc(-1 * var(--pad, 0px)); }
+.miroir-outline:hover { background-color: rgba(0, 0, 145, 0.2); }
+.miroir-outline:focus-visible { outline: 3px solid #0a76f6; outline-offset: 3px; background-color: rgba(0, 0, 145, 0.2); }
+.miroir-outline.is-selected { border-color: #fff; background-color: rgba(255, 255, 255, 0.15); }
+.miroir-outline__n {
+  position: absolute; top: -3px; left: -3px; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem;
+  background: var(--background-action-high-blue-france); color: var(--text-inverted-blue-france);
+  font-size: 0.8125rem; font-weight: 700; line-height: 1.5rem; text-align: center;
+  border-radius: 4px 0 4px 0;
+}
+.miroir-stage.has-box .miroir-outline:not(.is-selected) { opacity: 0.35; }
+.miroir-outline-status { font-weight: 700; display: flex; gap: 0.5rem; align-items: center; }
+.miroir-outline-status:empty { display: none; }
+.miroir-outline-status.is-busy { font-weight: 400; color: var(--text-mention-grey); }
+.miroir-outline-status.is-busy::before {
+  content: ""; width: 1rem; height: 1rem; flex: none; border-radius: 50%;
+  border: 2px solid var(--border-default-grey); border-top-color: var(--border-plain-blue-france);
+  animation: miroir-spin 0.8s linear infinite;
+}
 
 /* --- results ------------------------------------------------------------------------- */
 

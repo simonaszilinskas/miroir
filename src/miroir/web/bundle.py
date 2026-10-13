@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import ConfigDict
 
 from miroir.config import Settings
 from miroir.eval import router
@@ -58,9 +59,11 @@ from miroir.web.routing import (
     PhotoType,
     Routing,
     read_guess,
+    read_routing,
     write_guess,
     write_routing,
 )
+from miroir.web.sure import SURE_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +182,9 @@ def build_index(settings: Settings, name: str) -> Path:
         "ranking": score_sets(catalog, vectors, guess, routing, queries),
     }
     (out / REPORT_FILE).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    saved_sure = settings.index_dir / f"sure-{name}.json"
+    if saved_sure.exists():  # the object margin rule (`miroir web sure`) survives a rebuild
+        shutil.copyfile(saved_sure, out / SURE_FILE)
     manifest = {
         "index": name,
         "a7_run": spec.a7_run,
@@ -579,3 +585,143 @@ def bundle_files(folder: Path) -> list[Path]:
         msg = f"{folder} is not a finished bundle (no {MANIFEST_FILE}): run build-index"
         raise FileNotFoundError(msg)
     return sorted(p for p in folder.iterdir() if p.is_file())
+
+
+# --- the site's search on stored or new vectors, for step C and E1 measurements -------------
+
+
+@dataclass(frozen=True, slots=True)
+class SiteBundle:
+    """A built bundle, read for measuring: the site's ranking without the models."""
+
+    catalog: Catalog
+    vectors: _Vectors
+    guess: Guess
+    routing: Routing
+
+    @classmethod
+    def load(cls, folder: Path) -> SiteBundle:
+        return cls(
+            catalog=read_catalog(folder / CATALOG_FILE),
+            vectors=_Vectors.load(folder),
+            guess=read_guess(folder / GUESS_FILE),
+            routing=read_routing(folder / ROUTING_FILE),
+        )
+
+
+#: Queries searched at once by `site_search` (two float32 rows of every image each).
+SEARCH_BATCH = 256
+
+
+@dataclass(frozen=True, slots=True)
+class SiteHit:
+    """One photo searched as the site searches it (no filters, chroma not asked)."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    bucket: str
+    photo_type: PhotoType
+    entities: tuple[str, ...]
+    """The top entities, best first."""
+    confidences: tuple[float, ...]
+    """Per top entity: the routed mix of its raw cosines (what "not found" reads)."""
+    best_images: tuple[str, ...]
+    """Per top entity: its image the query matches best (what a card shows)."""
+    right_rank: int
+    """Rank of the first right entity over every entity; 0 when none is in the index."""
+
+
+def site_search(
+    bundle: SiteBundle,
+    a7: Floats,
+    a3: Floats,
+    *,
+    hidden: Sequence[Sequence[str]],
+    right: Sequence[Sequence[str]],
+    top: int,
+) -> list[SiteHit]:
+    """`Engine.search` on given query vectors (unit rows), with images hidden per query."""
+    catalog, vectors = bundle.catalog, bundle.vectors
+    n = vectors.a7.shape[0]
+    out: list[SiteHit] = []
+    for start in range(0, len(a7), SEARCH_BATCH):
+        stop = min(start + SEARCH_BATCH, len(a7))
+        s7 = _image_cosines(a7[start:stop], vectors.a7)
+        s3 = _image_cosines(a3[start:stop], vectors.a3)
+        for j in range(stop - start):
+            q = start + j
+            rows = [catalog.image_row[i] for i in hidden[q] if i in catalog.image_row]
+            s7[j, rows] = -np.inf
+            s3[j, rows] = -np.inf
+            photo_type, _ = bundle.guess.photo_type(a7[q])
+            bucket = bundle.routing.choose(photo_type, None)
+            w = bucket.a7_weight
+            e7 = ranking.entity_max(s7[j], catalog)
+            e3 = ranking.entity_max(s3[j], catalog)
+            signals = [
+                s for s in (ranking.Signal(e7, w), ranking.Signal(e3, 1 - w)) if s.weight > 0
+            ]
+            fused = ranking.fuse(signals)
+            order = ranking.top_entities(fused, catalog.entity_count)
+            best = order[:top]
+            shown = np.ones(n, dtype=np.bool_)
+            shown[rows] = False
+            per_image = np.where(shown, w * s7[j] + (1 - w) * s3[j], -np.inf).astype(np.float32)
+            images: list[str] = []
+            for e in best:
+                found = ranking.best_image(catalog.entity_image_rows(int(e)), per_image, shown)
+                images.append("" if found is None else catalog.images[found].image_id)
+            wanted = [catalog.entity_row[e] for e in right[q] if e in catalog.entity_row]
+            position = np.flatnonzero(np.isin(order, wanted)) if wanted else np.empty(0)
+            out.append(
+                SiteHit(
+                    bucket=bucket.name,
+                    photo_type=photo_type,
+                    entities=tuple(catalog.entity_ids[int(e)] for e in best),
+                    confidences=tuple(float(w * e7[e] + (1 - w) * e3[e]) for e in best),
+                    best_images=tuple(images),
+                    right_rank=int(position[0]) + 1 if position.size else 0,
+                )
+            )
+    return out
+
+
+def _image_cosines(queries: Floats, gallery: NDArray[np.float16]) -> Floats:
+    sims = np.empty((len(queries), gallery.shape[0]), dtype=np.float32)
+    for g in range(0, gallery.shape[0], GALLERY_CHUNK):
+        block = np.asarray(gallery[g : g + GALLERY_CHUNK], dtype=np.float32)
+        sims[:, g : g + len(block)] = queries @ block.T
+    return sims
+
+
+@dataclass(frozen=True, slots=True)
+class AskedSet:
+    """One test set's tune queries as `build-index` scores them: vectors, hidden, answers."""
+
+    set_id: str
+    query_ids: tuple[str, ...]
+    query_image_ids: tuple[str, ...]
+    a7: Floats
+    a3: Floats
+    hidden: tuple[tuple[str, ...], ...]
+    right: tuple[tuple[str, ...], ...]
+
+
+def asked_sets(settings: Settings, name: str) -> dict[str, AskedSet]:
+    """The tune queries the bundle `name`'s report scores (T1, T3, T5, T8, T2, T2b, T8c)."""
+    spec = INDEXES[name]
+    folder = settings.web_index_dir(name)
+    ids = (folder / IDS_FILE).read_text(encoding="utf-8").splitlines()
+    loaded = _QuerySets.load(settings, spec, ids, read_projection(folder))
+    out: dict[str, AskedSet] = {}
+    for set_id, asked in loaded.sets.items():
+        out[set_id] = AskedSet(
+            set_id=set_id,
+            query_ids=asked.query_ids,
+            query_image_ids=tuple(h[0] for h in asked.hidden),
+            a7=asked.a7,
+            a3=asked.a3,
+            hidden=asked.hidden,
+            right=asked.right,
+        )
+    return out

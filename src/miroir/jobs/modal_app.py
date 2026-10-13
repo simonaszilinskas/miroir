@@ -11,7 +11,7 @@ Gated weights (DINOv3) use the `huggingface` Modal secret, which holds `HF_TOKEN
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -24,6 +24,7 @@ from miroir.config import (
     Settings,
 )
 from miroir.eval.rerank import MatchChunk, MatchTask
+from miroir.eval.wire import DetectChunk, Located, LocateTask, RoomPhoto, SiteMatches, SiteMatchTask
 from miroir.jobs.modal_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
@@ -42,6 +43,7 @@ from miroir.jobs.modal_spec import (
     ModalOption,
     SuppliedImage,
 )
+from miroir.outlines import Box, DetectorOption
 from miroir.records.model import Image
 
 logger = logging.getLogger(__name__)
@@ -73,7 +75,7 @@ image = _libraries.env(_CACHES).add_local_python_source("miroir")
 model_libraries, model_caches = _libraries, _CACHES
 #: Keypoint matching (step E1): LightGlue from its repository, pinned, without its own
 #: dependencies (it asks for the GUI build of OpenCV; the headless one is enough here).
-match_image = (
+match_libraries = (
     _libraries.apt_install("git")
     .uv_pip_install("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
     .pip_install(
@@ -81,8 +83,8 @@ match_image = (
         extra_options="--no-deps",
     )
     .env(_CACHES)
-    .add_local_python_source("miroir")
 )
+match_image = match_libraries.add_local_python_source("miroir")
 
 weights = modal.Volume.from_name("miroir-weights", create_if_missing=True)
 benchmarks = modal.Volume.from_name("miroir-benchmarks", create_if_missing=True)
@@ -253,6 +255,65 @@ def match_shortlists(tasks: list[MatchTask]) -> MatchChunk:
     return result
 
 
+# --- step C: detectors on the room photos; E1 on the website's own shortlists ------------------
+
+
+@app.function(
+    image=match_image,
+    gpu=L4_DINO.gpu,
+    cpu=L4_DINO.cpu,
+    memory=L4_DINO.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
+    secrets=[hf_secret],
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def detect_rooms(
+    option: DetectorOption | None,
+    photos: list[RoomPhoto],
+    given: dict[str, tuple[Box, ...]] | None = None,
+) -> DetectChunk:
+    from miroir.remote.rooms import detect_rooms as run  # noqa: PLC0415 (container only)
+
+    result = run(option, photos, given or {})
+    if result.load_s > 0:
+        weights.commit()
+    return result
+
+
+@app.function(
+    image=match_image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def locate_artworks(scenes: list[RoomPhoto], tasks: list[LocateTask]) -> list[Located]:
+    from miroir.remote.rooms import locate_artworks as run  # noqa: PLC0415 (container only)
+
+    return run(scenes, tasks)
+
+
+@app.function(
+    image=match_image,
+    gpu=L4.gpu,
+    cpu=L4.cpu,
+    memory=L4.memory_gib * _MIB,
+    timeout=CHUNK_TIMEOUT_S,
+    volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_IMAGES_MOUNT: images_volume},
+    max_containers=1,
+    scaledown_window=SCALEDOWN_S,
+)
+def match_site(tasks: list[SiteMatchTask]) -> list[SiteMatches]:
+    from miroir.remote.rerank import match_site_tasks  # noqa: PLC0415 (container only)
+
+    return match_site_tasks(tasks)
+
+
 FAMILY_FUNCTIONS = {
     Family.DINO: embed_dino,
     Family.SIGLIP2: embed_siglip2,
@@ -368,6 +429,22 @@ class ModalCalls:
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
         return match_shortlists.remote(list(tasks))
+
+    def detect_rooms(
+        self,
+        option: DetectorOption | None,
+        photos: Sequence[RoomPhoto],
+        given: Mapping[str, tuple[Box, ...]] | None = None,
+    ) -> DetectChunk:
+        return detect_rooms.remote(option, list(photos), dict(given or {}))
+
+    def locate_artworks(
+        self, scenes: Sequence[RoomPhoto], tasks: Sequence[LocateTask]
+    ) -> list[Located]:
+        return locate_artworks.remote(list(scenes), list(tasks))
+
+    def match_site(self, tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]:
+        return match_site.remote(list(tasks))
 
 
 @contextmanager

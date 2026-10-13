@@ -1232,3 +1232,126 @@ def web_dev(
 
 def main() -> None:
     app()
+
+
+detect_app = typer.Typer(
+    no_args_is_help=True, help="Step C: object outlines on the Jeu de Paume room photos."
+)
+app.add_typer(detect_app, name="detect")
+
+
+@detect_app.command("locate")
+def detect_locate() -> None:
+    """Find where each T3 tune artwork hangs in its room photos, on a Modal GPU. Paid."""
+    from miroir.eval.detect import run_locate  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
+
+    settings = get_settings()
+    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
+    with open_modal(settings) as calls:
+        located = run_locate(settings, calls, paid)
+    found = sum(x.box is not None for x in located)
+    typer.echo(f"{found} of {len(located)} (room photo, artwork) pairs located")
+
+
+@detect_app.command("rooms")
+def detect_rooms(
+    option: Annotated[str, typer.Option(help="Detector id (C1-owlv2-base...) or C0-located.")],
+) -> None:
+    """Run one detector on the room photos and search every box like the site. Paid."""
+    from miroir.eval.detect import run_detector  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
+
+    settings = get_settings()
+    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
+    with open_modal(settings) as calls:
+        found = run_detector(settings, calls, paid, option)
+    boxes = sum(len(r.boxes) for r in found.rooms)
+    typer.echo(f"{option}: {boxes} raw boxes on {len(found.rooms)} photos, ${found.cost_usd:.4f}")
+
+
+@eval_app.command("detect")
+def eval_detect(
+    option: Annotated[str, typer.Option(help="Detector id whose boxes `detect rooms` saved.")],
+    round_id: Annotated[str, typer.Option("--round")] = "R3",
+) -> None:
+    """Score one detector end to end on T3 tune (tapped outline in the top 5), rule tuned."""
+    from miroir.eval.detect import summary, write_scores  # noqa: PLC0415
+
+    tried = write_scores(get_settings(), option, round_id=round_id)
+    for score in tried[:3]:
+        typer.echo(f"every outline: {summary(score.every)}")
+        typer.echo(f"first view: top 5 {score.first.hit_at(5):.3f}")
+
+
+@rerank_app.command("site")
+def rerank_site(
+    max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],
+) -> None:
+    """E1 in the website: match object searches' top 30 on Modal with the site's code. Paid."""
+    from miroir.commons.images import open_commons_images  # noqa: PLC0415
+    from miroir.eval.site_rerank import match_sets, search_sets  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
+    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+
+    settings = get_settings()
+    bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
+    searched = search_sets(settings, bundle)
+    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
+    with open_commons_images(settings) as photos, open_modal(settings) as calls:
+        cost = match_sets(settings, searched, calls, paid, photos, max_usd=max_usd)
+    typer.echo(f"site re-rank matched, ${cost:.4f}; next: uv run miroir eval rerank-site")
+
+
+@eval_app.command("rerank-site")
+def eval_rerank_site(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
+    """Score E1 in the website on T3, T5, T2b; set the object cut-off again on T8."""
+    from miroir.eval.site_rerank import search_sets, write_report  # noqa: PLC0415
+    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+
+    settings = get_settings()
+    bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
+    summary = write_report(settings, bundle, search_sets(settings, bundle), round_id=round_id)
+    typer.echo(summary)
+
+
+@detect_app.command("single")
+def detect_single(
+    option: Annotated[str, typer.Option(help="Detector id, e.g. C2-gdino-tiny.")],
+) -> None:
+    """Count the outlines the site would draw on photos of one object (T5, T2b). Paid."""
+    from miroir.commons.images import open_commons_images  # noqa: PLC0415
+    from miroir.eval.detect import run_single_objects  # noqa: PLC0415
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
+    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
+
+    settings = get_settings()
+    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
+    with open_commons_images(settings) as commons, open_modal(settings) as calls:
+        counts = run_single_objects(settings, calls, paid, option, commons)
+    for set_id, found in counts.items():
+        none = sum(n == 0 for n in found)
+        typer.echo(f"{set_id}: {none} of {len(found)} photos with no outline; counts {found}")
+
+
+@web_app.command("sure")
+def web_sure(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
+    """Set when an object search counts as sure (margin rule) on the tune halves."""
+    from miroir.eval.site_rerank import search_sets  # noqa: PLC0415
+    from miroir.eval.sure import write_sure_rule  # noqa: PLC0415
+    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+
+    settings = get_settings()
+    bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
+    chosen = write_sure_rule(settings, search_sets(settings, bundle), round_id=round_id)
+    typer.echo(
+        f"margin {chosen.margin}: {chosen.all_sure:.0%} sure, {chosen.all_right:.0%} right "
+        f"({', '.join(f'{k} {v:.0%}' for k, v in chosen.right.items())}); T8 {chosen.t8_sure:.0%}"
+    )

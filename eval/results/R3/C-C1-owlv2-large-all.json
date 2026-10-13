@@ -1,0 +1,553 @@
+{
+ "schema_version": 1,
+ "round": "R3",
+ "step": "C",
+ "option": "C1-owlv2-large-all",
+ "updated": "2026-10-13",
+ "vector_run": "web-full",
+ "query_vector_run": "C-C1-owlv2-large-rooms",
+ "vectors": {
+  "option": "C1",
+  "model": "google/owlv2-large-patch14-ensemble",
+  "resolution": 1024,
+  "pooling": "boxes",
+  "gallery": "web-full",
+  "created": "2026-10-13",
+  "cost_usd": 0.09515118969723764,
+  "wall_time_s": 39.399962638000005,
+  "route": "hosted",
+  "notes": "Modal L4. Outlines: {\"rule\": {\"min_score\": 0.0302, \"overlap\": 0.5, \"inside\": 1.01, \"min_side\": 0.03, \"whole\": 0.8, \"lone\": 0.4, \"max_outlines\": 40}, \"tapped_hit@1\": 0.696969696969697, \"tapped_hit@5\": 0.8484848484848485, \"tapped_hit@10\": 0.8787878787878788, \"any_box_hit@5\": 0.9595959595959596, \"box_recall@0.5\": 0.7777777777777778, \"located\": 81, \"outlines_per_photo\": 33.333333333333336, \"detect_ms_median\": 887.0693920000008, \"detect_ms_p95\": 933.6962162999981}. Rank is the tapped outline's (IoU >= 0.3 with the located artwork); 51 = not in its top 50 or no outline there."
+ },
+ "bootstrap_resamples": 1000,
+ "bootstrap_seed": 20261012,
+ "scores": [
+  {
+   "test_set": "T3",
+   "half": "tune",
+   "gallery": "web-full",
+   "gallery_images": 136731,
+   "gallery_entities": 63085,
+   "queries": 99,
+   "skipped_no_answer": 0,
+   "ap_max_rank": 50,
+   "hit_at_1": {
+    "value": 0.696969696969697,
+    "low": 0.6060606060606061,
+    "high": 0.7878787878787878
+   },
+   "hit_at_5": {
+    "value": 0.8484848484848485,
+    "low": 0.7777777777777778,
+    "high": 0.9191919191919192
+   },
+   "hit_at_10": {
+    "value": 0.8787878787878788,
+    "low": 0.8080808080808081,
+    "high": 0.9393939393939394
+   },
+   "map": {
+    "value": 0.7657044299201162,
+    "low": 0.6879431570608042,
+    "high": 0.8353895160757905
+   },
+   "per_query": [
+    {
+     "query_id": "T3-00449679111832f2",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-0b15fdda2c1e7529",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-0ed7a0d82a0ff006",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T3-0f7c1d3e59d81431",
+     "rank": 5,
+     "ap": 0.2
+    },
+    {
+     "query_id": "T3-107ee1fa1e4ba9f2",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-133e83089edafbc4",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-16f4d3b6772ba1fb",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-17bee3fbd1303376",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-183a3fac60b3cd0d",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-1cf63918c6ce4058",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-2048bfb4bd691393",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-21fec7981540c760",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-24bf00d1c3932065",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-24c5dbe4813fe02f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-278ffc9203d510dc",
+     "rank": 5,
+     "ap": 0.2
+    },
+    {
+     "query_id": "T3-28b5f00cedb4fe18",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-2a5a5ac30f3b87b3",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T3-2b870e34b443470c",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-2ef258a6e87690b0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-30cad91320ee409d",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-33e82c03ea943351",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-398f4d10cc3bff49",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-3afb510a8efb01ac",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-3b3fc93b66e58890",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-40cdf5b5cacb7484",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-4286658815673348",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-444ff94396f9a9ab",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-46975153b54669e7",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-478fc7622167f7e9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-4828c2f0eb6416e9",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-48ffa9df7e7f532b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-494f6533b7e14cfd",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-4addcab2ad3726e1",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-4caca2f190df8f9f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-4d21fbf995d08775",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-4ef6d250443513d9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-53c24b65a105262c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-541aa26ceaa7aeea",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-5508db6c5e794796",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-583fdad0d61b5726",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-5a8dd4509d2a405c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-5a8f3a1ad26940ff",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-5e62afa76d36d498",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-5f2856c5f728e462",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-6643c7578267d423",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-687c2112a585691e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-68ddfc79d88f319c",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-6a083c5dd9e5892c",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T3-6a83cdf4a18ae2b2",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-6dfcc47a784097c7",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-7466c31f3365a896",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-75709910936a3453",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-78b30a3b7cd17bc7",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-7b8a313d1fc94f93",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-7bfd4e0aaad2b614",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-7e804754ec7a36d2",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-8237cf79456e20a7",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-82b1ddbb93c46553",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-854397570e4faa21",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-86f17befe05c94df",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-892679c47a152b3a",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-89d78f8ed6f62c46",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-8e0cce16646d93d0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-92a569b1e61d78f5",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-92e384aadde19fc9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-94e40548e160bb84",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-96d6627462de90aa",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-990d0cb11ce7cb35",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-998e2d02966d0c2f",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-99f3decea73d7628",
+     "rank": 3,
+     "ap": 0.3333333333333333
+    },
+    {
+     "query_id": "T3-9e2d824ac7341d87",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-9fafd8afb18ee570",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-a406c43670566b99",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-a4b48d44b858c6b6",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-aed7d460fac4292b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-b294febd0e0f723a",
+     "rank": 9,
+     "ap": 0.1111111111111111
+    },
+    {
+     "query_id": "T3-b5529e5144485eda",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-b6415092b17b1b6c",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-b6fa6476f3752135",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-be6bb7e8246c0c8b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-c2e60510862ab715",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-c76ccdeff4f9c1c2",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-c791ef289990aa49",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-c79473a4ec36c439",
+     "rank": 8,
+     "ap": 0.125
+    },
+    {
+     "query_id": "T3-c83110c6972c5be5",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-cbdc4cadcdb94708",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-cc0c017b767857b9",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-d8a1c43801b52c9e",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-db7eaeaa687994d0",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-dc21bfba7b1bb369",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-dd075ec1dfc86147",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-e8589457da0a8125",
+     "rank": 2,
+     "ap": 0.5
+    },
+    {
+     "query_id": "T3-f0427cc04693ef38",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-f6cdb94353f8b659",
+     "rank": 51,
+     "ap": 0.0196078431372549
+    },
+    {
+     "query_id": "T3-f72c5fb85b5ecfdc",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-f7f4b395c98e27a6",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-f9f9c9986902f028",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-fc41940cc33d924b",
+     "rank": 1,
+     "ap": 1.0
+    },
+    {
+     "query_id": "T3-fc5cf784d779ec5a",
+     "rank": 10,
+     "ap": 0.1
+    }
+   ]
+  }
+ ],
+ "not_found": []
+}

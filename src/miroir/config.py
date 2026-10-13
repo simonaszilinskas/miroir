@@ -235,6 +235,12 @@ class Settings(BaseSettings):
         return self.data_root / "matches" / f"{name}.jsonl"
 
     @property
+    def detect_dir(self) -> Path:
+        """Step C: room photos at the page's size, where each T3 artwork hangs in them, and
+        each detector's boxes with their crops' vectors."""
+        return self.data_root / "detect"
+
+    @property
     def index_dir(self) -> Path:
         """What the website needs beside the vectors: PCA matrices and the building-or-object
         guess, as small .npz files (technical spec §7.3)."""

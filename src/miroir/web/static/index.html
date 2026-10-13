@@ -161,12 +161,14 @@
           <div class="fr-col-12 fr-col-md-8">
             <div class="miroir-stage" id="stage">
               <img id="stage-image" alt="Votre photo" draggable="false">
-              <div class="miroir-stage__outlines" id="outlines" aria-hidden="true"></div>
+              <div class="miroir-stage__outlines" id="outlines" role="group" aria-label="Objets repérés dans la photo"></div>
               <div class="miroir-stage__box" id="box" hidden></div>
             </div>
           </div>
           <div class="fr-col-12 fr-col-md-4">
             <h1 class="fr-h3">Votre photo</h1>
+            <p id="outline-status" class="fr-text--sm miroir-outline-status" role="status" aria-live="polite"></p>
+            <button class="fr-btn fr-btn--sm fr-btn--tertiary fr-btn--icon-left fr-icon-eye-line fr-mb-2w" id="more-outlines" type="button" hidden></button>
             <p id="box-hint">Pour chercher une partie de la photo, un tableau sur un mur ou un détail, <strong>tracez un cadre</strong> dessus avec le doigt ou la souris.</p>
             <ul class="fr-btns-group fr-btns-group--icon-left">
               <li><button class="fr-btn fr-btn--icon-left fr-icon-search-line" id="search-box" hidden>Rechercher dans le cadre</button></li>

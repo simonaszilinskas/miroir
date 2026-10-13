@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from miroir.config import WIKIMEDIA_USER_AGENT
 from miroir.images.fetch import to_jpeg
+from miroir.outlines import Outlines
 from miroir.web import auth
 from miroir.web.catalog import (
     COLLECTION_HINTS,
@@ -63,6 +64,10 @@ class SearchBackend(Protocol):
         """Start the search container if it sleeps, without waiting for it."""
         ...
 
+    async def detect(self, jpeg: bytes) -> Outlines:
+        """Outlines of the objects in a photo (F4)."""
+        ...
+
 
 class LoginBody(BaseModel):
     password: str = Field(max_length=200)
@@ -90,6 +95,10 @@ class PositionBody(BaseModel):
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+
+
+class DetectBody(BaseModel):
+    image: str = Field(description="The whole photo as base64 (JPEG), at most DETECT_SIDE px.")
 
 
 class SearchBody(BaseModel):
@@ -166,6 +175,7 @@ class Site:
     sessions: auth.Sessions
     secure_cookies: bool
     search_limit: auth.RateLimit
+    detect_limit: auth.RateLimit
     login_limit: auth.RateLimit
     facet_options: FacetOptions
     fetch: Callable[[str], Awaitable[bytes]]
@@ -210,6 +220,7 @@ def create_app(
         sessions=auth.Sessions(session_key),
         secure_cookies=secure_cookies,
         search_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
+        detect_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
         login_limit=auth.RateLimit(auth.LOGINS_PER_MINUTE),
         facet_options=catalog.facet_options(),
         fetch=fetch or _fetch,
@@ -327,12 +338,40 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
         image=image, text=body.text, filters=body.filters.filters(), position=position
     )
     start = time.monotonic()
-    # Modal answers a request still open after 150 s with a redirect that loses the body, so a
-    # search waiting on a starting GPU container gives up first with 503 and the page retries.
-    # The call itself goes on (shielded), so the container keeps starting.
-    call = asyncio.ensure_future(site.backend.search(request))
+    result = await _wait_for(site.backend.search(request), "search")
+    _log_search(request, result, time.monotonic() - start)
+    return result
+
+
+@api.post("/detect")
+async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outlines:
+    """F4: outlines of the objects in the photo, in shares of its width and height."""
+    if not site.detect_limit.allow(session_id):
+        raise HTTPException(status_code=429, detail="Trop de photos en une minute.")
+    image = _decode_photo(body.image)
+    if image is None:
+        raise HTTPException(status_code=422, detail="Ajoutez une photo.")
+    start = time.monotonic()
+    found = await _wait_for(site.backend.detect(image), "detect")
+    logger.info(
+        "detect image=%s outlines=%d %.0f ms",
+        hashlib.sha256(image).hexdigest()[:12],
+        len(found.boxes),
+        1000 * (time.monotonic() - start),
+    )
+    return found
+
+
+async def _wait_for[T](work: Awaitable[T], what: str) -> T:
+    """The backend's answer, or 503 when the GPU container is still starting.
+
+    Modal answers a request still open after 150 s with a redirect that loses the body, so a
+    call waiting on a starting container gives up first with 503 and the page retries. The
+    call itself goes on (shielded), so the container keeps starting.
+    """
+    call = asyncio.ensure_future(work)
     try:
-        result = await asyncio.wait_for(asyncio.shield(call), SEARCH_WAIT_S)
+        return await asyncio.wait_for(asyncio.shield(call), SEARCH_WAIT_S)
     except TimeoutError as err:
         raise HTTPException(
             status_code=503,
@@ -340,10 +379,8 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
             headers={"Retry-After": "2"},
         ) from err
     except ValueError as err:
-        logger.warning("search refused: %s", err)
+        logger.warning("%s refused: %s", what, err)
         raise HTTPException(status_code=422, detail="Cette image n’a pas pu être lue.") from err
-    _log_search(request, result, time.monotonic() - start)
-    return result
 
 
 @api.get("/entity/{entity_id}")

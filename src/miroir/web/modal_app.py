@@ -1,8 +1,10 @@
 """The deployed website: one Modal app, `miroir-web`, with two parts.
 
 - `Search`, a GPU class (L4): loads EmbeddingGemma 2, MegaLoc and the index once per
-  container, then answers searches. It sleeps after `SEARCH_IDLE_S` without a search; at
-  most one container runs, so a burst queues instead of starting GPUs.
+  container, then answers searches. It also finds the objects in a photo (F4 outlines,
+  `detect`): the detector loads in a thread beside the search models, so it never delays a
+  search. It sleeps after `SEARCH_IDLE_S` without a search; at most one container runs, so a
+  burst queues instead of starting GPUs.
 - `web`, a small CPU container: the page, login, record pages and example photos. Only a
   search (or the page's warm-up call) wakes the GPU.
 
@@ -13,6 +15,7 @@ Model code is imported inside the container (`miroir.remote.search`). Secrets co
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -24,6 +27,8 @@ from miroir.jobs.modal_app import HF_SECRET_NAME, model_caches, model_libraries
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+    from miroir.outlines import Outlines
+    from miroir.remote.search import OutlineFinder
     from miroir.web.engine import Engine, SearchRequest, SearchResponse
 
 APP_NAME = "miroir-web"
@@ -33,6 +38,8 @@ APP_SECRET_NAME = "miroir-app"  # noqa: S105 (the name of a Modal secret, not it
 INDEX_VOLUME = "miroir-web-index"
 #: A GPU container waits this long for the next search before it stops.
 SEARCH_IDLE_S = 10 * 60
+#: A photo's outlines wait at most this long for the detector to finish loading (cold start).
+DETECTOR_WAIT_S = 60.0
 #: The web container waits this long for the next request.
 WEB_IDLE_S = 5 * 60
 _MIB = 1024
@@ -83,11 +90,31 @@ class Search:
         from miroir.remote.search import load_search  # noqa: PLC0415 (container only)
 
         setup()
+        self.outlines: OutlineFinder | None = None
+        self.outlines_ready = threading.Event()
+        threading.Thread(target=self._load_outlines, daemon=True).start()
         self.engine: Engine = load_search(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX)
+
+    def _load_outlines(self) -> None:
+        from miroir.remote.search import OutlineFinder  # noqa: PLC0415 (container only)
+
+        try:
+            self.outlines = OutlineFinder()
+        finally:
+            self.outlines_ready.set()
 
     @modal.method()
     def search(self, request: SearchRequest) -> SearchResponse:
         return self.engine.search(request)
+
+    @modal.method()
+    def detect(self, jpeg: bytes) -> Outlines:
+        from miroir.outlines import Outlines  # noqa: PLC0415
+
+        self.outlines_ready.wait(DETECTOR_WAIT_S)
+        if self.outlines is None:
+            return Outlines(())  # the detector failed to load: no outlines, search still works
+        return self.outlines.find(jpeg)
 
     @modal.method()
     def ping(self) -> bool:
@@ -107,6 +134,9 @@ class ModalBackend:
 
     async def warm(self) -> None:
         await self._search.ping.spawn.aio()
+
+    async def detect(self, jpeg: bytes) -> Outlines:
+        return await self._search.detect.remote.aio(jpeg)
 
 
 @app.function(
