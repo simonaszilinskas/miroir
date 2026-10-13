@@ -60,7 +60,7 @@ MODAL_WEB_INDEX_MOUNT = "/web-index"
 
 #: The index the prototype serves (`miroir web`): a bundle name from `miroir.web.bundle.INDEXES`.
 #: Switching index is this one line, then `miroir web build-index`, `upload` and `deploy`.
-WEB_INDEX = "full"
+WEB_INDEX = "full-f2"
 
 #: The `.env` file settings are read from. `miroir web secret` adds the app password to it.
 ENV_FILE = REPO_ROOT / ".env"

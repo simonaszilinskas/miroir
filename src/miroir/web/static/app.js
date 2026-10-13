@@ -733,6 +733,7 @@ function renderResults(response) {
         el('h2', { class: 'fr-h4', text: building ? 'Voici les monuments les plus proches' : 'Voici les œuvres les plus proches' }),
         el('p', { class: 'fr-badge fr-badge--sm fr-badge--no-icon fr-badge--new', text: 'Pas de réponse sûre' })),
       el('p', { class: 'fr-text--sm miroir-muted fr-mb-2w', text: 'Aucune notice ne se détache assez pour l’affirmer. Comparez-les avec votre photo : la bonne est peut-être parmi elles.' }),
+      buildingTip(response),
       grid(cards));
     return;
   }
@@ -760,6 +761,15 @@ function renderResults(response) {
       el('h2', { class: 'fr-h4', text: `Résultats${filtered ? ' filtrés' : ''}` }),
       el('p', { class: 'fr-text--sm miroir-muted fr-mb-2w', text: 'Les plus proches de votre description, de la plus proche à la moins proche.' })),
     grid(cards));
+}
+
+/** After a miss on a building photo: what helps most, in the visitor's terms. */
+function buildingTip(response) {
+  if (response.guessed_type !== 'building' || state.text) return null;
+  const text = response.nearby == null
+    ? 'Devant un monument, activez « Utiliser ma position » ou ajoutez le nom de la commune avec « Préciser avec des mots » : Miroir cherchera d’abord ce qui est à côté. Une photo de toute la façade aide aussi.'
+    : 'Ajoutez le nom du monument ou de la commune avec « Préciser avec des mots ». Une photo de toute la façade aide aussi.';
+  return el('p', { class: 'fr-text--sm fr-mb-2w', text });
 }
 
 function grid(cards) {

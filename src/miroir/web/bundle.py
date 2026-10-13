@@ -627,7 +627,7 @@ def score_sets(
             scored = searched.ranks > 0
             ranks = searched.ranks[scored]
             row["scored"] = float(scored.sum())
-            for k in (1, 5, 10):
+            for k in (1, 3, 5, 10):
                 row[f"hit@{k}"] = float(((ranks >= 1) & (ranks <= k)).mean())
             row["matched"] = float(confident[scored].mean())
             row["matched_right_at_1"] = (
