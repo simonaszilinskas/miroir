@@ -3,6 +3,8 @@ name = "miroir"
 version = "0.1.0"
 description = "Visual search over French heritage records (POP)"
 readme = "README.md"
+license = "etalab-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=2.3",
@@ -10,6 +12,9 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "typer>=0.27.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/simonaszilinskas/miroir"
 
 [project.scripts]
 miroir = "miroir.cli:main"
