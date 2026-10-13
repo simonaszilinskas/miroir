@@ -690,7 +690,7 @@ All of POP is about 3 million images, 20 times `full-f2` (146,952). Kept as toda
 - **Two stages keep every set within 1 point** (T2 hit@10 −0.9, T3 −1.0, the rest within 0.3); sure answers and not-found rates do not move. The right building is in the shortlist for only 55% of T2 photos with A7 alone, 60% with the PCA shortlist added (T1 83%, T5 89%, T3 and T2b 100%), yet hit@10 barely moves: a building outside the shortlist was rarely in the top 10 before. A7's top 5,000 alone gives T2 35.7.
 - **Time on an L4 at 3 million images** (random vectors, 1.3 million entities, one-minute run): A7 float16 product 18 ms; A3 PCA 1,024 in int8 60 ms; the whole two-stage step (both shortlists, 4,000 int8 rows read from host memory, exact cosines) 87 ms; today's NumPy ranking over 3 million images (best image per entity, min-max, sort) 236 ms on the container's CPU. With the models (about 200 ms today) a warm search stays near half a second on the GPU side.
 
-The switch is `IndexSpec.a3_shortlist_dims` (`miroir.web.store`); bundle `full-f2-shortlist` is `full-f2` stored this way. The site keeps `full-f2` until a bundle is too big for the GPU.
+The switch is `IndexSpec.a3_shortlist_dims` (`miroir.web.store`); bundle `full-f2-shortlist` is `full-f2` stored this way. Its `report.json`, built by the shipped code with MegaLoc whole in int8, gives the same figures as the row in bold: T1 45.7, T2 35.9, T2b 94.2, T3 85.9, T5 43.2 hit@10; T8 9.6%, T8c 3.3% sure; sure answers on T2 17.4% (72% right), as today. The site keeps `full-f2` until a bundle is too big for the GPU.
 
 ## Summary of all runs
 
