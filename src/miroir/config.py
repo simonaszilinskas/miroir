@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MIROIR_", env_file=ENV_FILE, extra="ignore")
 
     data_dir: Path = Path("~/miroir-data")
-    exports_dir: Path = Path("/Users/simonaszilinskas/Downloads/exports")
+    exports_dir: Path = Path("~/miroir-exports")
 
     # Model work runs remotely: OpenRouter where the model is there, else Hugging Face Jobs.
     # These two keep their usual names, without the MIROIR_ prefix.

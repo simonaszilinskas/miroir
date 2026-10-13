@@ -47,7 +47,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-UA = "miroir-export/0.1 (research; contact zilinskassimonas@gmail.com)"
+UA = "miroir-export/0.1 (research; https://github.com/simonaszilinskas/miroir)"
 CSV_HOST = "https://ministere-culture.s3.sbg.io.cloud.ovh.net/POP/"
 ASSET_HOST = "https://popcorn-prd-perf-assets.s3.gra.io.cloud.ovh.net/"
 NOTICE_HOST = "https://pop.culture.gouv.fr/notice/"
