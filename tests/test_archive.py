@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ from miroir.images.mount import crop_picture, find_picture
 from miroir.web.archive import ArchiveRule, gazetteer
 from miroir.web.engine import Engine, SearchRequest
 from miroir.web.nearby import PLACES_FILE, read_places, write_places
+from miroir.web.routing import TextWeights
 from tests import web_helpers as h
 
 PAPER = 210
@@ -215,3 +217,19 @@ def test_without_cropping_the_whole_card_is_searched_and_its_caption_still_read(
     assert engine.encoders.last_photo is not None
     with PILImage.open(io.BytesIO(engine.encoders.last_photo)) as embedded:
         assert embedded.width > embedded.height  # the whole card (landscape)
+
+
+def test_caption_words_use_their_own_weights_and_typed_words_keep_theirs() -> None:
+    engine, _ = h.engine(building=False)
+    # The text vector points at the Rose Valland work; BM25 finds "Toulouse" in PA1's records.
+    text = TextWeights(a7=1.0, bm25=0.0, caption_a7=0.0, caption_bm25=1.0)
+    engine.routing = replace(engine.routing, text=text)
+    typed = engine.search(SearchRequest(text="Toulouse"))
+    read = engine.search(SearchRequest(image=h.photo(100), caption="TOULOUSE"))
+    assert typed.cards[0].entity_id == "OBJ2"
+    assert read.cards[0].entity_id == "PA1"
+    engine.routing = replace(engine.routing, text=replace(text, caption_a7=1.0, caption_bm25=0.0))
+    assert (
+        engine.search(SearchRequest(image=h.photo(100), caption="TOULOUSE")).cards[0].entity_id
+        != "PA1"
+    )

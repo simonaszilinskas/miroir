@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from miroir.eval.sets import Query
@@ -10,7 +13,14 @@ from miroir.eval.wordsearch import Signals, hit_at, rank_of, ranks, weighted
 from miroir.records.model import Collection
 from miroir.web import ranking
 from miroir.web.engine import word_signals
-from miroir.web.routing import TextWeights
+from miroir.web.routing import (
+    ROUTING_FILE,
+    Bucket,
+    Routing,
+    TextWeights,
+    read_routing,
+    write_routing,
+)
 from tests import web_helpers
 
 
@@ -74,3 +84,16 @@ def test_word_signals_hide_masked_images_from_both_signals() -> None:
 def test_the_site_searches_words_with_the_tuned_weights() -> None:
     weights = TextWeights()
     assert (weights.a7, weights.bm25, weights.refine) == (0.9, 0.1, 0.5)
+    caption = weights.for_caption()
+    assert (caption.a7, caption.bm25) == (0.3, 0.7)  # captions name places: BM25 leads
+
+
+def test_a_routing_file_from_before_caption_weights_reads_with_the_defaults(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / ROUTING_FILE
+    write_routing(path, Routing(buckets=(Bucket("all", 1.0, 0.9),)))
+    old = json.loads(path.read_text(encoding="utf-8"))
+    del old["text"]["caption_a7"], old["text"]["caption_bm25"]
+    path.write_text(json.dumps(old), encoding="utf-8")
+    assert read_routing(path).text == TextWeights()

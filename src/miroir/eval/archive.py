@@ -18,7 +18,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -45,6 +45,7 @@ from miroir.web.archive import ArchiveRule
 from miroir.web.bundle import SiteBundle
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
 from miroir.web.nearby import EntityPlaces
+from miroir.web.routing import TextWeights
 
 logger = logging.getLogger(__name__)
 
@@ -327,8 +328,13 @@ class RuleScore:
 
 
 def score(
-    settings: Settings, model: str, rules: Mapping[str, ArchiveRule] = RULES
+    settings: Settings,
+    model: str,
+    rules: Mapping[str, ArchiveRule] = RULES,
+    caption_a7: Sequence[float] = (),
 ) -> list[RuleScore]:
+    """Each rule with the bundle's caption weights, or with each text-vector weight in
+    `caption_a7` (BM25 taking the rest): labels then end in `-caption<weight>`."""
     photos = archive_photos(settings)
     folder = settings.web_index_dir(WEB_INDEX)
     bundle = SiteBundle.load(folder)
@@ -367,8 +373,19 @@ def score(
     assert engine.gazetteer is not None
     with_place, right_place = _place_counts(engine.gazetteer, photos, captions, bundle)
     out: list[RuleScore] = []
-    for label, rule in rules.items():
+    texts_of = {"": bundle.routing.text} | {
+        f"-caption{w:g}": replace(bundle.routing.text, caption_a7=w, caption_bm25=round(1 - w, 2))
+        for w in caption_a7
+    }
+    variants = [
+        (f"{label}{suffix}", rule, text)
+        for label, rule in rules.items()
+        for suffix, text in texts_of.items()
+        if suffix or not caption_a7
+    ]
+    for label, rule, text in variants:
         engine.archive = rule
+        engine.routing = replace(bundle.routing, text=text)
         ranks: list[int] = []
         per_query: list[QueryScore] = []
         for photo in photos:
@@ -387,7 +404,7 @@ def score(
         r = np.asarray(ranks)
         hits = {k: float(((r >= 1) & (r <= k)).mean()) for k in (1, 5, 10)}
         out.append(RuleScore(label, rule, hits, len(photos), with_place, right_place))
-        _write(bundle, per_query, model=model, label=label, rule=rule)
+        _write(bundle, per_query, model=model, label=label, rule=rule, text=text)
         logger.info("%s: %s", label, ", ".join(f"hit@{k} {100 * v:.1f}" for k, v in hits.items()))
     return out
 
@@ -429,6 +446,7 @@ def _write(
     model: str,
     label: str,
     rule: ArchiveRule,
+    text: TextWeights,
 ) -> None:
     result = ScoreResult(
         per_query=tuple(per_query),
@@ -439,7 +457,8 @@ def _write(
     )
     notes = (
         f"T1 archive prints, the site's Engine.search on index {WEB_INDEX}, query shoot hidden. "
-        f"Rule {rule}; captions read by {CAPTION_MODELS[model]}"
+        f"Rule {rule}; caption words text vector {text.caption_a7}, BM25 {text.caption_bm25}; "
+        f"captions read by {CAPTION_MODELS[model]}"
     )
     info = RunInfo(
         option=f"{STEP}-{label}",

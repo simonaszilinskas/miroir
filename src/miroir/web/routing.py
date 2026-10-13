@@ -16,7 +16,7 @@ top result's confidence below which the page says "Pas de correspondance sûre".
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -29,6 +29,11 @@ from miroir.images.colour import GREY_BELOW
 ROUTING_FILE = "routing.json"
 GUESS_FILE = "guess.npz"
 SWITCH_AT = 0.5
+#: Caption words' text vector and BM25 weights, from T1 tune on full-f2 (results.md, T1
+#: archive): hit@10 89.1 against 79.7 with the typed words' 0.9 / 0.1. 0.5 and 0.1 score
+#: within a print of it (89.1, 88.4); 0.3 sits in the middle of that flat stretch.
+CAPTION_A7 = 0.3
+CAPTION_BM25 = 0.7
 
 Floats = NDArray[np.float32]
 
@@ -80,6 +85,14 @@ class TextWeights:
     refine: float = 0.5
     """Weight of the words when they refine a photo search (the photo counts 1). Left at 0.5:
     a commune as words lifts T1 and T2 most at 1.0 but lowers T5 (step B, results.md)."""
+    caption_a7: float = CAPTION_A7
+    """The same two weights for the caption read on an archive print (`miroir.web.archive`).
+    Captions are mostly place names, which BM25 finds and the text vector does not."""
+    caption_bm25: float = CAPTION_BM25
+
+    def for_caption(self) -> TextWeights:
+        """The weights a caption's words are searched with."""
+        return replace(self, a7=self.caption_a7, bm25=self.caption_bm25)
 
 
 @dataclass(frozen=True, slots=True)

@@ -227,12 +227,13 @@ class Engine:
             signals += photo.signals
             per_image = photo.per_image
         if archive.caption and self.archive.words > 0:
-            words = self._words(archive.caption, mask, timings, key="caption")
+            weights = self.routing.text.for_caption()
+            words = self._words(archive.caption, mask, timings, weights, key="caption")
             signals += [
                 ranking.Signal(s.per_entity, s.weight * self.archive.words) for s in words.signals
             ]
         if text:
-            words = self._words(text, mask, timings)
+            words = self._words(text, mask, timings, self.routing.text)
             words_found = words.found
             scale = 1.0 if photo is None else self.routing.text.refine
             signals += [ranking.Signal(s.per_entity, s.weight * scale) for s in words.signals]
@@ -361,7 +362,12 @@ class Engine:
         )
 
     def _words(
-        self, text: str, mask: NDArray[np.bool_], timings: dict[str, float], key: str = "text"
+        self,
+        text: str,
+        mask: NDArray[np.bool_],
+        timings: dict[str, float],
+        weights: TextWeights,
+        key: str = "text",
     ) -> _Words:
         tick = time.monotonic()
         query = unit(self.encoders.text(text))
@@ -369,7 +375,7 @@ class Engine:
         tick = time.monotonic()
         a7 = np.where(mask, self.gallery.a7(query), -np.inf).astype(np.float32)
         per_record = self.bm25.scores(text)
-        signals = word_signals(self.catalog, a7, per_record, mask, self.routing.text)
+        signals = word_signals(self.catalog, a7, per_record, mask, weights)
         timings[f"vectors_{key}"] = _ms(tick)
         return _Words(signals=signals, per_image=a7, found=bool((per_record > 0).any()))
 

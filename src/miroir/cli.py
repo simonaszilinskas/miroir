@@ -1399,12 +1399,16 @@ def archive_score(
     only: Annotated[
         list[str] | None, typer.Option(help="Rules to score (miroir.eval.archive.RULES).")
     ] = None,
+    caption_a7: Annotated[
+        list[float] | None,
+        typer.Option(help="Caption words' text-vector weight to try (BM25 gets the rest)."),
+    ] = None,
 ) -> None:
     """Score each way of using the mount and caption on T1 tune, with the site's search."""
     from miroir.eval.archive import RULES, score  # noqa: PLC0415
 
     rules = {k: v for k, v in RULES.items() if not only or k in only}
-    rows = score(get_settings(), model, rules)
+    rows = score(get_settings(), model, rules, caption_a7 or ())
     for row in rows:
         hits = ", ".join(f"hit@{k} {100 * v:.1f}" for k, v in row.hits.items())
         typer.echo(f"{row.label}: {hits} ({row.queries} queries)")
