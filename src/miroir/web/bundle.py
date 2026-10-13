@@ -565,14 +565,25 @@ def _search_set(
         top = int(np.argmax(np.where(np.isfinite(fused), fused, -np.inf)))
         confidence.append(float(weighted(e7[j, top : top + 1], e3[j, top : top + 1], w)[0]))
         buckets.append(bucket.name)
-        right = [catalog.entity_row[e] for e in asked.right[j] if e in catalog.entity_row]
-        if not right:
-            ranks.append(0)
-            continue
-        order = ranking.top_entities(fused, catalog.entity_count)
-        position = np.flatnonzero(np.isin(order, right))
-        ranks.append(int(position[0]) + 1 if position.size else 0)
+        # Right entities with an image left to find (EmbeddingGemma 2 scores every image).
+        right = [
+            r
+            for e in asked.right[j]
+            if (r := catalog.entity_row.get(e)) is not None and np.isfinite(e7[j, r])
+        ]
+        ranks.append(right_rank(fused, right))
     return _Searched(np.asarray(ranks), np.asarray(confidence), tuple(buckets))
+
+
+def right_rank(fused: Floats, right: Sequence[int]) -> int:
+    """Rank of the first right entity (rows `right`, each with an image left to find); 0 when
+    there is none. One the ranking leaves out (-inf: off a MegaLoc shortlist) is a miss, ranked
+    past every entity, not a query skipped."""
+    if not right:
+        return 0
+    order = ranking.top_entities(fused, len(fused))
+    position = np.flatnonzero(np.isin(order, right))
+    return int(position[0]) + 1 if position.size else len(fused) + 1
 
 
 def entity_cosines(

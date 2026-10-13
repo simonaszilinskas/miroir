@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from miroir.eval.vectors import Route, RunInfo, write_vectors
-from miroir.web.bundle import write_shortlist_store
+from miroir.web.bundle import right_rank, write_shortlist_store
 from miroir.web.engine import A3_FILE, SearchRequest, read_projection
 from miroir.web.store import (
     ExactStore,
@@ -104,3 +104,10 @@ def test_a_bundle_without_int8_rows_has_no_store(tmp_path: Path) -> None:
     assert read_exact(tmp_path) is None
     write_exact(tmp_path, h.unit_rows(3, 4))
     assert read_exact(tmp_path) is not None
+
+
+def test_a_right_answer_off_the_shortlist_is_a_miss_not_a_skipped_query() -> None:
+    fused = np.asarray([0.9, -np.inf, 0.2], dtype=np.float32)
+    assert right_rank(fused, [2]) == 2
+    assert right_rank(fused, [1]) == 4  # past every entity: counts against hit@k
+    assert right_rank(fused, []) == 0
