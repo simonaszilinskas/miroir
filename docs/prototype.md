@@ -10,7 +10,7 @@ A working version of the product in [functional-spec.md](functional-spec.md) §5
 
 What a person can do:
 
-1. **Home.** Take a photo (the phone's camera opens), upload an image, or describe what they see in words. Six example photos run a search in one tap: two monuments and two museum objects photographed by Wikimedia Commons users, a drawing, and a 1940s photo of a Jeu de Paume room where they draw a box around one tapestry.
+1. **Home.** Take a photo (the phone's camera opens), upload an image, or describe what they see in words (four example searches under the box run in one tap). Six example photos run a search in one tap: two monuments and two museum objects photographed by Wikimedia Commons users, a drawing, and a 1940s photo of a Jeu de Paume room where they draw a box around one tapestry.
 2. **Photo.** Search the whole photo, or draw a box with a finger or the mouse to search one part (a painting on a wall, a detail). The box is cut out in the browser.
 3. **Position (step H2).** A photo that carries GPS in its EXIF uses it on its own: the photo screen says "Position de la photo utilisée" with a "Ne pas l'utiliser" link. Otherwise a toggle, "Utiliser ma position", asks the browser (and so the visitor) for the position on the tap, not before. Buildings and objects near that position rank higher (a soft prior: bonus `exp(−d / 1 km)` on the fused score); far ones stay, so nothing breaks away from anything known. The results show "Près de vous" or "Près du lieu de la photo". The position goes with that one search; it is not logged or stored. On T2 phone photos of buildings, the right building moves from 32% to 97% in the top 10 (results.md, H2). Phones often strip GPS from a photo a web page reads, so the toggle is the main way in.
 4. **Results.** One card per building or object, best first: the image that matches best (marked "Correspond : revers", "détail"… when it is not the record's main image), title, place, collection, a link to POP. Mémoire photos of one building form one card ("12 photos"). Filters (collection, region, département, domain, period) narrow the search before ranking. Words refine a photo search ("à Toulouse"). The page shows, quietly, whether it took the photo for a building or an object. When the best result is not close enough, it says **"Pas de correspondance sûre dans les collections"** and lists what the photo "ressemble à".
@@ -24,7 +24,7 @@ Light and dark themes: "Affichage" in the header or footer.
 |---|---|
 | `Search` (Modal GPU class, L4) | EmbeddingGemma 2 (A7) and MegaLoc (A3) embed the photo with the same code and preprocessing as the R1 gallery runs (`miroir.remote.search` reuses `miroir.remote.models`); words go through EmbeddingGemma 2's "SearchQuery" prompt. Gallery vectors sit on the GPU. At most one container; it sleeps after 10 minutes |
 | `web` (Modal CPU container) | FastAPI: the page, login, record pages, example photos. At most one container |
-| Ranking (`miroir.web.engine`, NumPy) | The evaluation's steps: cosine per image, best image per entity, min-max per model, G4 weights. A logistic regression on the photo's A7 vector guesses building or object; buildings use A7 alone, objects 0.2 A7 + 0.8 A3 (R2 G4). Words: A7 text vector against the image vectors, mixed half and half with French BM25 over record text (the H1 index); words refining a photo count half |
+| Ranking (`miroir.web.engine`, NumPy) | The evaluation's steps: cosine per image, best image per entity, min-max per model, G4 weights. A logistic regression on the photo's A7 vector guesses building or object; buildings use A7 alone, objects 0.2 A7 + 0.8 A3 (R2 G4). Words: A7 text vector against the image vectors (0.9), mixed with French BM25 over record text (0.1), weights from T7 (results.md, step B); words refining a photo count half. When no record holds any of the words, the page says so and shows the closest images |
 | "Not found" | Confidence is the routed mix of the top result's cosines, as T8 measures it. One cut-off per guessed type, set so that at most 10% of T8 tune searches (whole entity removed from the index) still look sure. The values and their source are in the bundle's `routing.json` |
 | Index | A bundle built on the Mac (`miroir web build-index`), stored in the `miroir-web-index` Modal volume. Which bundle is served is one line: `WEB_INDEX` in `src/miroir/config.py` |
 
@@ -43,6 +43,8 @@ Index `full` (since 2026-10-13): every image of the July exports the Modal runs 
 | T5 museum object, other view | 493 | 27.2 | 43.2 | 10.3% | 22% |
 | T2 phone photo of a building (Commons) | 516 | 9.7 | 18.2 | 0% | |
 | T2b museum work (Commons) | 291 | 82.1 | 94.5 | 4.1% | 75% |
+| T7 words for a hidden image (French) | 500 | 7.6 | 17.6 | | |
+| T7en the same words in English | 105 | 7.6 | 23.8 | | |
 
 | Not-found set | Searches still answered "sure" |
 |---|---|
@@ -84,7 +86,7 @@ An L4 with 4 CPUs and 16 GB costs about $1.12 an hour while awake. Each wake-up 
 - **Index.** The 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing.
 - **Phone photos of buildings.** T2: the right building is in the top 10 for a fifth of photos, and none reaches the "sure" bar. A3 does better than A7 on these photos (31.0 against 21.9 hit@10), but the router sends buildings to A7, which wins on archive photos; a third bucket for colour photos of buildings is being tuned.
 - **"Not found" is cautious, and weak for objects.** At 10% wrong-but-confident, a quarter of in-index archive photos and a tenth of objects get a "sure" answer, and only a fifth of those objects are the right record.
-- **Word search** weights (half A7, half BM25) are not tuned: T6 and T7 do not exist yet.
+- **Word search** finds the right record in the top 10 for about one description in six (T7: 17.6%; half and half scored 8.0%). Names work ("Pont du Gard" comes first); descriptions of common things (a church, a coin) match too many records, and Mémoire buildings are found only 7% of the time. A region in the words ("bourgogne") does not narrow the search; the region filter does. T6, written by hand, does not exist yet ([t6-guide.md](t6-guide.md)).
 - **Period filter** for Mémoire reads the date of the photo, not of the building.
 - **No object outlines (F4) yet:** the photo screen has the hook (`detectObjects` in `static/app.js`); people draw boxes by hand.
 - **Cold start** of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
