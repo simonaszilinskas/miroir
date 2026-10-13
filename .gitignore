@@ -11,10 +11,28 @@ data/
 # ...and hand-made label checks
 !eval/labels/*.jsonl
 
+# Secrets: only the example is committed
 .env
+.env.*
+!.env.example
+
+# Tool caches and build output
 __pycache__/
+*.py[cod]
 .venv/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+dist/
+build/
+*.egg-info/
 node_modules/
+
+# Local logs, editor and browser-test folders
+*.log
+nohup.out
+.playwright-mcp/
+.idea/
+.vscode/
 .DS_Store

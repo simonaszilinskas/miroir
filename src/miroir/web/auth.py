@@ -24,7 +24,7 @@ SEARCHES_PER_MINUTE = 30
 #: Login attempts per client address per minute.
 LOGINS_PER_MINUTE = 5
 #: Letters used for generated passwords: no 0/o, 1/l/i, easy to type on a phone.
-_PASSWORD_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789"  # noqa: S105 (an alphabet)
+_PASSWORD_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789"  # noqa: S105 (an alphabet)  # gitleaks:allow
 
 
 def new_password(groups: int = 3, size: int = 4) -> str:

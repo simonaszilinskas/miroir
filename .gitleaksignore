@@ -1,0 +1,2 @@
+# A password alphabet, not a secret (src/miroir/web/auth.py, _PASSWORD_LETTERS), as first committed.
+7055c11cb778fdfa58ae1662df8b5e20f965d76a:src/miroir/web/auth.py:generic-api-key:27
