@@ -401,6 +401,39 @@ uv run miroir index pca --fit <gallery run> --dims 1024 --apply <run>   # the PC
 
 `--workers` sends that many 500-image chunks at once, each to its own GPU container. `--reuse` takes vectors of an earlier run only when model, size, pooling and number type match. A stopped run resumes from its checkpoint.
 
+### 7.4 Step H4: a vision model leads the search
+
+H1 asks a vision model what a photo shows and searches its words. H4 lets the model run the search: it sees the photo, calls tools, looks at what comes back and decides the top 10. The model is Mistral Large 4 (`mistralai/mistral-large-4-0` on OpenRouter; open, takes images and tools; $0.68 per million input tokens, $2.09 per million output). Its reasoning mode is off, temperature 0.
+
+**Tools** (`miroir.eval.h4_tools`). All of them read what we already have; no model runs on the Mac and no new vector is made, so there is no crop search.
+
+| Tool | Does |
+|---|---|
+| `image_search(model, a7_weight, top_k, filters)` | Cosine search with the query photo's saved vectors over the gallery's: `A7` (EmbeddingGemma 2), `A3` (MegaLoc), or `mix`, a weighted sum of their min-max scores as in G1 and G5. Lists up to 30 entities with score, base, title and place |
+| `text_search(query, top_k, filters)` | BM25 over record text, as H1 (`miroir.eval.vlm`), min-max scaled. French only |
+| `view_results(entity_ids)` | For up to 10 entities, the gallery image closest to the photo, as a 256 px thumbnail, with its title, base and place |
+| `final_answer(entity_ids)` | Up to 10 entities, best first. Ends the search. Ids the model never saw in a result are dropped |
+
+Filters, on both searches: POP base (`merimee` for buildings, `palissy` for objects in buildings, `joconde`, `rose-valland`, `memoire` for photos tied to neither), département, commune, domain words, period words. Every field given must match; names are compared without accents, case or hyphens. The model picks the mode: `boost` adds 0.25 to the 0–1 score of matching entities, `hard` keeps only them. The query's hidden images (its own; for T1 its whole shoot) never score and are never shown.
+
+**Scenarios** (`miroir.jobs.h4_agent`). Every call carries the same short brief: what the index holds, and what R1 and R2 taught (A7 for grey building prints, A3 for colour building photos and objects, text search when the photo carries a caption).
+
+- **S1, one plan.** One call: the photo, and a request for a JSON plan (image model and weight, a French text query and its weight, filters). Code carries it out: image scores, mixed with text scores at the plan's weight, then the filter. The model sees no result. A hard filter puts matching entities first and the rest after, so the ranking stays complete.
+- **S2, plan and review.** S1, then one more call: the photo and S1's top 20, each with its title and a 256 px thumbnail. The model returns up to 10 of them in order; the rest keep S1's order.
+- **S3, free loop.** The model calls tools as it likes, up to 8 calls, then must call `final_answer`; after 8 a message tells it so and the call requires a tool. If it never answers, its last result list is the answer. Thumbnails asked for with `view_results` follow the tool's reply as a user message.
+- **Baselines.** G5 with F2 photos (A7 weight 1.0 for grey building photos, 0.0 for colour ones, 0.2 for objects; results.md F2), checked to rank every query as `eval route3` does. H1 redone with Mistral Large 4: the H1 question unchanged, its words searched with BM25 alone, and mixed with A7 as H3 does (one A7 weight for all sets, from 0.3–0.9 by mean hit@10). G5 against H1 tells "reading the photo" apart from "leading the search".
+
+A scenario's ranking is the model's list first, then a fallback order (S1 its plan, S2 S1's order, S3 its last result list then G5). Hit@10 is the model's own when it names 10. A failed call falls back to G5 and counts as a failure.
+
+**Evaluation.** Gallery `screening-v2-publishable-fetched+F2` (26,373 images, 5,811 entities); the tune halves a closed model may see: T1 138, T2 516, T3 99, T5 443 queries. Hit@1 and hit@10 with 95% bootstrap intervals and a paired bootstrap against G5 on the same queries. Result files `eval/results/R3/H-H4-S1-mistral-large-4.json` (S2, S3 alike), `H-H1-mistral-large-4.json`, `H-H3-A7+H1-mistral-large-4.json`.
+
+**Privacy, cost, replay.** Only the query photo (publishable POP image or Commons photo) and thumbnails of publishable gallery images or F2 Commons photos go out; `ImageSource` checks every image id with `PublishableImages` before reading its bytes. Every reply is saved in `MIROIR_DATA_DIR/vlm/h4/<model>-calls.jsonl`, keyed by a hash of the request with images named by id and size, so a rerun replays it and pays nothing. Each paid call goes to the spend ledger; a run stops at `--max-usd`, and refuses to start if that would pass the usable budget. Per query and scenario, `MIROIR_DATA_DIR/vlm/h4/<label>/traces.jsonl` keeps tokens, cost, the plan or review, and for S3 every tool call with its arguments and filter mode; `report.json` sums them per scenario with the projection to every tune query.
+
+```sh
+uv run miroir vlm h4 --per-set 5 --max-usd 2      # smoke test: 20 queries, every scenario
+uv run miroir vlm h4 --all --max-usd <usd>        # the full run; writes the result files
+```
+
 ## 8. Website
 
 - **Stack.** SvelteKit with Tailwind, built phone-first. The camera opens through `<input type="file" accept="image/*" capture="environment">`.

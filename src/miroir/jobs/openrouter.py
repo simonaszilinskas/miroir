@@ -6,6 +6,7 @@ This module only speaks HTTP. Privacy and money rules live in `miroir.jobs.embed
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -66,15 +67,31 @@ class _Wire(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
 
+class _PromptDetails(_Wire):
+    cached_tokens: int | None = None
+
+
 class _Usage(_Wire):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     cost: float | None = None
+    prompt_tokens_details: _PromptDetails | None = None
+
+
+class _Function(_Wire):
+    name: str = ""
+    arguments: str | dict[str, object] | None = None
+
+
+class _ToolCall(_Wire):
+    id: str = ""
+    function: _Function
 
 
 class _ChatMessage(_Wire):
     content: str | None = None
+    tool_calls: list[_ToolCall] | None = None
 
 
 class _ChatChoice(_Wire):
@@ -152,6 +169,15 @@ class Embeddings:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolCall:
+    """A function the model asked to call, with its arguments as the JSON text it wrote."""
+
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True, slots=True)
 class ChatAnswer:
     text: str
     cost_usd: float
@@ -159,6 +185,9 @@ class ChatAnswer:
     prompt_tokens: int
     completion_tokens: int
     finish_reason: str
+    tool_calls: tuple[ToolCall, ...] = ()
+    cached_tokens: int = 0
+    """Prompt tokens the provider read from its cache, at a lower price."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,13 +455,27 @@ def _chat_answer(response: _ChatResponse, *, need_cost: bool) -> ChatAnswer:
         msg = "OpenRouter answered without a cost: cannot track spend"
         raise OpenRouterError(msg)
     choice = response.choices[0]
+    details = usage.prompt_tokens_details
     return ChatAnswer(
         text=choice.message.content or "",
         cost_usd=usage.cost or 0.0,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         finish_reason=choice.finish_reason or "",
+        tool_calls=tuple(_tool_call(c) for c in choice.message.tool_calls or ()),
+        cached_tokens=(details.cached_tokens or 0) if details is not None else 0,
     )
+
+
+def _tool_call(call: _ToolCall) -> ToolCall:
+    arguments = call.function.arguments
+    if arguments is None:
+        text = "{}"
+    elif isinstance(arguments, str):
+        text = arguments
+    else:
+        text = json.dumps(arguments, ensure_ascii=False)
+    return ToolCall(id=call.id, name=call.function.name, arguments=text)
 
 
 def _outcome(batch: _Batch) -> BatchOutcome:

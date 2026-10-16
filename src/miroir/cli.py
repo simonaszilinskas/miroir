@@ -948,6 +948,101 @@ def vlm_score(
         _echo_scores(h3.scores)
 
 
+@vlm_app.command("h4")
+def vlm_h4(
+    *,
+    model: Annotated[str, typer.Option(help="Vision model leading the search.")] = (
+        "mistral-large-4"
+    ),
+    scenario: Annotated[
+        list[str] | None,
+        typer.Option("--scenario", help="H1, S1, S2, S3; repeat it. Default: all four."),
+    ] = None,
+    per_set: Annotated[
+        int, typer.Option(help="Queries drawn from each of T1, T2, T3, T5 (seeded).")
+    ] = 5,
+    every_query: Annotated[
+        bool,
+        typer.Option("--all", help="Every tune query a closed model may see; writes results."),
+    ] = False,
+    label: Annotated[str | None, typer.Option(help="Report folder name.")] = None,
+    max_usd: Annotated[float, typer.Option(help="Stop once this run has paid this much.")] = 2.0,
+    workers: Annotated[int, typer.Option(help="Queries asked in parallel.")] = 4,
+) -> None:
+    """Step H4: a vision model leads the search (S1 plan, S2 plan + review, S3 free loop).
+
+    Paid. Replies are saved and replayed, so a rerun costs nothing. Without --all, a smoke
+    test: --per-set queries from each set, no result file.
+    """
+    from miroir.eval import h4  # noqa: PLC0415
+    from miroir.jobs.factory import open_agent_caller  # noqa: PLC0415
+    from miroir.jobs.h4_agent import Scenario  # noqa: PLC0415
+    from miroir.jobs.spend import Budget, BudgetError, SpendLedger, spent_usd  # noqa: PLC0415
+
+    settings = get_settings()
+    scenarios = [Scenario(s) for s in (scenario or [s.value for s in Scenario])]
+    budget = Budget.from_settings(settings)
+    spent = spent_usd(SpendLedger(settings.spend_ledger), _openrouter_key_usage())
+    if spent + max_usd > budget.usable_usd:
+        msg = (
+            f"spent ${spent:.2f}; ${max_usd:.2f} more would pass the ${budget.usable_usd:.2f} "
+            "usable budget. Ask the project lead."
+        )
+        raise BudgetError(msg)
+    loaded = h4.load_world(settings)
+    queries = h4.pick(loaded, None if every_query else per_set)
+    name = label or ("full" if every_query else f"smoke-{per_set}")
+    typer.echo(f"H4 {model}: {len(queries)} queries, {', '.join(s.value for s in scenarios)}")
+    with open_agent_caller(settings, model, limit_usd=max_usd) as caller:
+        caller.check_images([q.query.image_id for q in queries])
+        outcomes = h4.run(caller, loaded.world, queries, scenarios, workers=workers)
+        new_spend = caller.spent_usd
+    rows, extra = h4.score(loaded, outcomes)
+    counts = {s: len(qs) for s, qs in loaded.sets.items()}
+    costs = h4.cost_report(outcomes, counts)
+    folder = settings.h4_report_dir(name)
+    h4.write_traces(folder / "traces.jsonl", outcomes)
+    report = {
+        "model": model,
+        "queries": len(queries),
+        "full_counts": counts,
+        "new_spend_usd": new_spend,
+        "costs": costs,
+        "scores": [
+            {
+                "run": r.name,
+                "set": r.set_id,
+                "queries": r.score.queries,
+                "hit@1": r.score.hit_at_1.value,
+                "hit@10": r.score.hit_at_10.value,
+                "hit@1 - G5": r.vs_g5["hit@1"].diff.value,
+                "hit@10 - G5": r.vs_g5["hit@10"].diff.value,
+            }
+            for r in rows
+        ],
+        **extra,
+    }
+    (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    for line in h4.table(rows):
+        typer.echo(line)
+    for s, c in costs.items():
+        typer.echo(f"{s}: {json.dumps(c, ensure_ascii=False)}")
+    typer.echo(f"paid this run: ${new_spend:.4f}; traces and report in {folder}")
+    if every_query:
+        from miroir.jobs.h4_agent import OPTIONS as AGENT_OPTIONS  # noqa: PLC0415
+
+        option = AGENT_OPTIONS[model]
+        for path in h4.write_results(
+            loaded,
+            rows,
+            outcomes,
+            model=option.model,
+            slug=option.slug,
+            h3_weight=extra.get("h3_a7_weight"),
+        ):
+            typer.echo(f"wrote {path}")
+
+
 @words_app.command("ask")
 def words_ask(
     *,

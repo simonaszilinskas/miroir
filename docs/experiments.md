@@ -115,6 +115,7 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 | H1 | Ask a vision model "what is this monument or artwork, and where is it?" and look its answer up in POP with BM25. Qwen3-VL 30B-A3B (on OpenRouter) against one closed model |
 | H2 | Use the photo's GPS position to keep only records within 2 km. Tested on T2 photos that carry GPS. Needs coordinates for records (POP coordinates where present, else the commune centre) |
 | H3 | H1 or H2 as one more signal into G3 |
+| H4 | A vision model leads the search: it sees the photo, calls image search, text search and filters as tools, looks at the results and picks the top 10. Mistral Large 4 (open, on OpenRouter), three ways: one plan (S1), plan then review (S2), free loop (S3). Technical spec §7.4 |
 
 ## 3. Test sets
 

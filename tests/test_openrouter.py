@@ -91,3 +91,51 @@ def test_gemini_embedding_batch_is_known_without_listing() -> None:
     assert (
         client(fake).batch_model("google/gemini-embedding-2") == "google/gemini-embedding-2:batch"
     )
+
+
+def test_chat_reads_tool_calls_and_cached_tokens() -> None:
+    def answer(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "abcDEF123",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "image_search",
+                                        "arguments": '{"model": "A3"}',
+                                    },
+                                },
+                                {
+                                    "id": "xyz",
+                                    "type": "function",
+                                    "function": {"name": "final_answer", "arguments": {"a": 1}},
+                                },
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 900,
+                    "completion_tokens": 20,
+                    "cost": 0.0007,
+                    "prompt_tokens_details": {"cached_tokens": 512},
+                },
+            },
+        )
+
+    c = OpenRouterClient(SecretStr("k"), transport=httpx.MockTransport(answer), retry=NO_WAIT)
+    got = c.chat("m", {"messages": []})
+    assert got.text == ""
+    assert [(t.id, t.name, t.arguments) for t in got.tool_calls] == [
+        ("abcDEF123", "image_search", '{"model": "A3"}'),
+        ("xyz", "final_answer", '{"a": 1}'),
+    ]
+    assert got.cached_tokens == 512
+    assert got.cost_usd == pytest.approx(0.0007)

@@ -258,6 +258,17 @@ class Settings(BaseSettings):
         _check_name(model_slug)
         return self.data_root / "vlm" / f"{model_slug}.jsonl"
 
+    def h4_calls_path(self, model_slug: str) -> Path:
+        """Every reply of a vision model leading the search (step H4), one JSON line per call,
+        keyed by its request, so a rerun replays them instead of paying again."""
+        _check_name(model_slug)
+        return self.data_root / "vlm" / "h4" / f"{model_slug}-calls.jsonl"
+
+    def h4_report_dir(self, label: str) -> Path:
+        """One H4 run's traces (one JSON line per query and scenario) and its cost report."""
+        _check_name(label)
+        return self.data_root / "vlm" / "h4" / label
+
     def matches_path(self, name: str) -> Path:
         """Keypoint matches of each query against its shortlist (step E1), one query per line."""
         _check_name(name)
