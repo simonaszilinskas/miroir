@@ -6,17 +6,22 @@
   mounted print): both load in threads beside the search models, so they never delay a
   search. It sleeps after `SEARCH_IDLE_S` without a search; at most one container runs, so a
   burst queues instead of starting GPUs.
-- `web`, a small CPU container: the page, login, record pages and example photos. Only a
-  search (or the page's warm-up call) wakes the GPU.
+- `web`, a small CPU container: the page, login, record pages and example photos, and the
+  conversation page's model loop (step H5, `miroir.web.chat`), which calls OpenRouter. Only
+  a search (or the page's warm-up call) wakes the GPU.
 
 Importing this module on the Mac only describes the app; `miroir web deploy` deploys it.
 Model code is imported inside the container (`miroir.remote.search`). Secrets come from the
-`miroir-app` Modal secret (APP_PASSWORD, SESSION_SECRET), written by `miroir web secret`.
+`miroir-app` Modal secret (APP_PASSWORD, SESSION_SECRET), written by `miroir web secret`;
+the conversation page's OpenRouter key from the `miroir-openrouter` secret
+(OPENROUTER_API_KEY), written by `miroir web chat-secret`. Its spending per day is kept in
+the `miroir-chat-spend` Modal Dict, so a restarted container still knows the day's total.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -31,11 +36,16 @@ if TYPE_CHECKING:
     from miroir.outlines import Outlines
     from miroir.remote.search import OutlineFinder
     from miroir.web.engine import Engine, SearchRequest, SearchResponse
+    from miroir.web.toolsearch import ToolHits, ToolQuery, ToolSearch
 
 APP_NAME = "miroir-web"
 #: The site's address is https://<workspace>--<label>.modal.run.
 WEB_LABEL = "miroir"
 APP_SECRET_NAME = "miroir-app"  # noqa: S105 (the name of a Modal secret, not its value)
+#: Holds OPENROUTER_API_KEY for the conversation page (`miroir web chat-secret`).
+CHAT_SECRET_NAME = "miroir-openrouter"  # noqa: S105 (a secret's name)
+#: Dollars the conversation page spent per UTC day.
+CHAT_SPEND_DICT = "miroir-chat-spend"
 INDEX_VOLUME = "miroir-web-index"
 #: A GPU container waits this long for the next search before it stops.
 SEARCH_IDLE_S = 10 * 60
@@ -58,6 +68,7 @@ weights = modal.Volume.from_name("miroir-weights", create_if_missing=True)
 index_volume = modal.Volume.from_name(INDEX_VOLUME, create_if_missing=True)
 hf_secret = modal.Secret.from_name(HF_SECRET_NAME)
 app_secret = modal.Secret.from_name(APP_SECRET_NAME)
+chat_secret = modal.Secret.from_name(CHAT_SECRET_NAME)
 
 gpu_image = model_libraries.env(model_caches).add_local_python_source("miroir", ignore=_source)
 web_image = (
@@ -100,6 +111,7 @@ class Search:
         threading.Thread(target=self._load_outlines, daemon=True).start()
         captions = BackgroundCaptions(SITE_CAPTION_MODEL, CAPTIONS_WAIT_S, start=False)
         self.engine: Engine = load_search(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX, captions)
+        self.tools: ToolSearch | None = None
         # The caption reader loads alone, after the others: see `BackgroundCaptions.load_now`.
         self.outlines_ready.wait(DETECTOR_WAIT_S)
         captions.load_now()
@@ -126,6 +138,14 @@ class Search:
         return self.outlines.find(jpeg)
 
     @modal.method()
+    def tool_search(self, query: ToolQuery) -> ToolHits:
+        from miroir.web.toolsearch import ToolSearch  # noqa: PLC0415
+
+        if self.tools is None:
+            self.tools = ToolSearch(self.engine)
+        return self.tools.run(query)
+
+    @modal.method()
     def ping(self) -> bool:
         return True
 
@@ -147,13 +167,31 @@ class ModalBackend:
     async def detect(self, jpeg: bytes) -> Outlines:
         return await self._search.detect.remote.aio(jpeg)
 
+    async def tool_search(self, query: ToolQuery) -> ToolHits:
+        return await self._search.tool_search.remote.aio(query)
+
+
+class DictSpend:
+    """The conversation page's spending per day, in a Modal Dict (one web container writes)."""
+
+    def __init__(self) -> None:
+        self._dict = modal.Dict.from_name(CHAT_SPEND_DICT, create_if_missing=True)
+
+    async def spent(self, day: str) -> float:
+        return float(await self._dict.get.aio(day, 0.0))
+
+    async def add(self, day: str, usd: float) -> float:
+        total = await self.spent(day) + usd
+        await self._dict.put.aio(day, total)
+        return total
+
 
 @app.function(
     image=web_image,
     cpu=1.0,
     memory=4 * _MIB,  # the full catalog: 137,000 images, 101,000 records
     volumes={MODAL_WEB_INDEX_MOUNT: index_volume},
-    secrets=[app_secret],
+    secrets=[app_secret, chat_secret],
     scaledown_window=WEB_IDLE_S,
     min_containers=0,
     max_containers=1,
@@ -166,15 +204,36 @@ def web() -> FastAPI:
     from miroir.logs import setup  # noqa: PLC0415
     from miroir.web.app import create_app  # noqa: PLC0415
     from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
+    from miroir.web.chat import ChatService, Limits, OpenRouterModel, ThumbSource  # noqa: PLC0415
+    from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
     setup()
     settings = Settings()
     if settings.app_password is None or settings.session_secret is None:
         msg = f"the {APP_SECRET_NAME} Modal secret needs APP_PASSWORD and SESSION_SECRET"
         raise RuntimeError(msg)
+    folder = Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX
+    catalog = read_catalog(folder / CATALOG_FILE)
+    backend = ModalBackend()
+    key = settings.openrouter_api_key
+    publishable = read_publishable(folder / PUBLISHABLE_FILE)
+    limits = Limits(settings.chat_conversation_usd, settings.chat_day_usd)
+
+    def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:
+        assert key is not None
+        return ChatService(
+            backend=backend,
+            model=OpenRouterModel(key),
+            thumbs=ThumbSource(publishable, fetch),
+            spend=DictSpend(),
+            limits=limits,
+            index_size=(len(catalog.images), catalog.entity_count),
+        )
+
     return create_app(
-        catalog=read_catalog(Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX / CATALOG_FILE),
-        backend=ModalBackend(),
+        catalog=catalog,
+        backend=backend,
         password=settings.app_password.get_secret_value(),
         session_key=settings.session_secret.get_secret_value().encode(),
+        chat=None if key is None else chat,
     )

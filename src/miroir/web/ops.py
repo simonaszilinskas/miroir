@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from miroir.config import ENV_FILE, ENV_PASSWORD_KEY, WEB_INDEX, Settings
@@ -93,6 +94,23 @@ def write_env_password(env_file: Path, password: str) -> None:
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def set_chat_secret(settings: Settings) -> None:
+    """Copy OPENROUTER_API_KEY from `.env` into the Modal secret the conversation page reads.
+    The key is never printed or logged."""
+    import modal  # noqa: PLC0415
+
+    from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
+
+    if settings.openrouter_api_key is None:
+        msg = "no OPENROUTER_API_KEY in .env or the environment"
+        raise RuntimeError(msg)
+    modal.Secret.objects.delete(CHAT_SECRET_NAME, allow_missing=True)
+    modal.Secret.objects.create(
+        CHAT_SECRET_NAME, {"OPENROUTER_API_KEY": settings.openrouter_api_key.get_secret_value()}
+    )
+    logger.info("OpenRouter key written to the %s Modal secret", CHAT_SECRET_NAME)
+
+
 def deploy() -> str:
     """Deploy the `miroir-web` app. Returns the site's URL."""
     import modal  # noqa: PLC0415
@@ -105,13 +123,28 @@ def deploy() -> str:
     return url or "(no URL: check `modal app list`)"
 
 
-def serve_locally(settings: Settings, *, name: str, port: int, real: bool = False) -> None:
+def serve_locally(
+    settings: Settings, *, name: str, port: int, real: bool = False, fake_llm: bool = False
+) -> None:
     """The site on http://localhost:<port>, with fake models over the local bundle, or with
-    `real` the deployed GPU search (models on Modal; the page and catalog stay local)."""
+    `real` the deployed GPU search (models on Modal; the page and catalog stay local).
+
+    The conversation page uses Mistral Large 4 through OpenRouter when OPENROUTER_API_KEY is
+    set (with the same caps as the deployed site; the day's spending is kept in
+    `Settings.chat_spend_path`), and a scripted stand-in otherwise or with `fake_llm`."""
     import uvicorn  # noqa: PLC0415
 
     from miroir.web.app import SearchBackend, create_app  # noqa: PLC0415
-    from miroir.web.fake import LocalBackend, fake_engine  # noqa: PLC0415
+    from miroir.web.chat import (  # noqa: PLC0415
+        ChatModel,
+        ChatService,
+        FileSpend,
+        Limits,
+        OpenRouterModel,
+        ThumbSource,
+    )
+    from miroir.web.fake import FakeGuide, LocalBackend, fake_engine  # noqa: PLC0415
+    from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
     folder = settings.web_index_dir(name)
     bundle_files(folder)
@@ -125,13 +158,29 @@ def serve_locally(settings: Settings, *, name: str, port: int, real: bool = Fals
         from miroir.web.modal_app import ModalBackend  # noqa: PLC0415
 
         backend = ModalBackend(deployed=True)
+    key = None if fake_llm else settings.openrouter_api_key
+    model: ChatModel = FakeGuide() if key is None else OpenRouterModel(key)
+    publishable = read_publishable(folder / PUBLISHABLE_FILE)
+
+    def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:
+        return ChatService(
+            backend=backend,
+            model=model,
+            thumbs=ThumbSource(publishable, fetch),
+            spend=FileSpend(settings.chat_spend_path),
+            limits=Limits(settings.chat_conversation_usd, settings.chat_day_usd),
+            index_size=(len(engine.catalog.images), engine.catalog.entity_count),
+        )
+
     site = create_app(
         catalog=engine.catalog,
         backend=backend,
         password=password,
         session_key=secrets.token_bytes(32),
         secure_cookies=False,
+        chat=chat,
     )
+    logger.info("conversation page: %s", model.model)
     if not real:
         logger.info("fake models: photo results are look-alikes, not a real search")
     uvicorn.run(site, host="127.0.0.1", port=port, log_level="info")

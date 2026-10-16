@@ -120,6 +120,10 @@ class Settings(BaseSettings):
         default=None, validation_alias=AliasChoices("MIROIR_SESSION_SECRET", "SESSION_SECRET")
     )
 
+    # The conversation page (step H5): a model through OpenRouter leads the search. Spending
+    # caps, in dollars, per conversation and per UTC day (all conversations together).
+    chat_conversation_usd: float = 0.10
+    chat_day_usd: float = 2.0
     #: Cap on the resized-image cache, in megabytes. Oldest files go first.
     image_cache_mb: int = 1024
 
@@ -302,6 +306,10 @@ class Settings(BaseSettings):
         return self.vectors_dir / run
 
     # --- the prototype website ------------------------------------------------
+    @property
+    def chat_spend_path(self) -> Path:
+        """Dollars the conversation page spent per day when run on the Mac (`miroir web dev`)."""
+        return self.data_root / "spend" / "chat-days.json"
 
     def web_index_dir(self, name: str) -> Path:
         """One web index bundle, built on the Mac before it is uploaded to Modal."""

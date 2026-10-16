@@ -11,16 +11,17 @@ import asyncio
 import base64
 import binascii
 import hashlib
+import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Protocol
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -40,9 +41,11 @@ from miroir.web.catalog import (
     Filters,
     display_url,
 )
+from miroir.web.chat import MAX_WORDS, BusyError, ChatService, Visit, VisitorInput
 from miroir.web.engine import MAX_TEXT, SearchRequest, SearchResponse
 from miroir.web.examples import EXAMPLES
 from miroir.web.nearby import Position
+from miroir.web.toolsearch import ToolHits, ToolQuery
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,10 @@ class SearchBackend(Protocol):
 
     async def detect(self, jpeg: bytes) -> Outlines:
         """Outlines of the objects in a photo (F4)."""
+        ...
+
+    async def tool_search(self, query: ToolQuery) -> ToolHits:
+        """A search the conversation page's model asked for (`miroir.web.toolsearch`)."""
         ...
 
 
@@ -186,6 +193,8 @@ class Site:
     facet_options: FacetOptions
     fetch: Callable[[str], Awaitable[bytes]]
     example_cache: dict[str, bytes]
+    chat: ChatService | None
+    """The conversation page (step H5); None when no model is set up."""
 
 
 def get_site(request: Request) -> Site:
@@ -213,8 +222,10 @@ def create_app(
     session_key: bytes,
     secure_cookies: bool = True,
     fetch: Callable[[str], Awaitable[bytes]] | None = None,
+    chat: Callable[[Callable[[str], Awaitable[bytes]]], ChatService] | None = None,
 ) -> FastAPI:
-    """The app. `fetch` downloads an example photo (tests pass a fake)."""
+    """The app. `fetch` downloads an example photo or a thumbnail (tests pass a fake);
+    `chat` makes the conversation page's service, given that `fetch`."""
     if not password:
         msg = "the site needs a password (`miroir web secret` sets it)"
         raise ValueError(msg)
@@ -231,9 +242,11 @@ def create_app(
         facet_options=catalog.facet_options(),
         fetch=fetch or _fetch,
         example_cache={},
+        chat=None if chat is None else chat(fetch or _fetch),
     )
     app.middleware("http")(_headers)
     app.add_api_route("/", _index, methods=["GET"], include_in_schema=False)
+    app.add_api_route("/chat", _chat_page, methods=["GET"], include_in_schema=False)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(api)
     return app
@@ -255,6 +268,11 @@ async def _headers(
 
 async def _index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+async def _chat_page() -> RedirectResponse:
+    """The conversation page is a view of the one page."""
+    return RedirectResponse("/#/conversation", status_code=307)
 
 
 @api.post("/login")
@@ -392,6 +410,99 @@ async def _wait_for[T](work: Awaitable[T], what: str) -> T:
     except ValueError as err:
         logger.warning("%s refused: %s", what, err)
         raise HTTPException(status_code=422, detail="Cette image n’a pas pu être lue.") from err
+
+
+# --- the conversation page (step H5, `miroir.web.chat`) -----------------------------------------
+
+
+class ChatOpenBody(BaseModel):
+    image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
+    text: str = Field(default="", max_length=MAX_WORDS)
+    position: PositionBody | None = None
+
+
+class ChatSendBody(BaseModel):
+    conversation_id: str = Field(max_length=64)
+    kind: Visit
+    text: str = Field(default="", max_length=MAX_WORDS)
+    region: str | None = Field(default=None, description="The framed part, base64 JPEG.")
+    position: PositionBody | None = None
+
+
+class ChatEventsBody(BaseModel):
+    conversation_id: str = Field(max_length=64)
+    after: int = Field(default=0, ge=0)
+
+
+def _chat(site: Site) -> ChatService:
+    if site.chat is None:
+        raise HTTPException(
+            status_code=503, detail="La recherche en conversation n’est pas activée ici."
+        )
+    return site.chat
+
+
+def _position(body: PositionBody | None) -> Position | None:
+    return None if body is None else Position(body.latitude, body.longitude)
+
+
+@api.get("/chat/status")
+async def chat_status(_: SessionId, site: SiteDep) -> dict[str, bool]:
+    return {"enabled": site.chat is not None}
+
+
+@api.post("/chat/open")
+async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) -> dict[str, str]:
+    """A new conversation; with a photo, the usual search starts at once."""
+    chat = _chat(site)
+    if not site.search_limit.allow(session_id):
+        raise HTTPException(status_code=429, detail="Trop de messages en une minute.")
+    image = _decode_photo(body.image)
+    if image is None and not body.text.strip():
+        raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
+    found = chat.open(session_id, photo=image, words=body.text, position=_position(body.position))
+    return {"conversation_id": found.id}
+
+
+@api.post("/chat/send")
+async def chat_send(body: ChatSendBody, session_id: SessionId, site: SiteDep) -> dict[str, int]:
+    """The visitor's goal, answer, framed region or message: the model's turn starts."""
+    chat = _chat(site)
+    if not site.search_limit.allow(session_id):
+        raise HTTPException(status_code=429, detail="Trop de messages en une minute.")
+    conversation = chat.get(session_id, body.conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation introuvable. Recommencez.")
+    given = VisitorInput(
+        kind=body.kind,
+        text=body.text,
+        region=_decode_photo(body.region),
+        position=_position(body.position),
+    )
+    try:
+        after = chat.send(conversation, given)
+    except BusyError as err:
+        raise HTTPException(status_code=409, detail="Le modèle travaille encore.") from err
+    return {"after": after}
+
+
+@api.post("/chat/events")
+async def chat_events(body: ChatEventsBody, session_id: SessionId, site: SiteDep) -> Response:
+    """What the model does, one JSON object per line, as it happens."""
+    chat = _chat(site)
+    conversation = chat.get(session_id, body.conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation introuvable. Recommencez.")
+
+    async def lines() -> AsyncIterator[bytes]:
+        async for event in chat.stream(conversation, body.after):
+            yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @api.get("/entity/{entity_id}")

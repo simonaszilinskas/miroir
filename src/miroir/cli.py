@@ -1439,11 +1439,28 @@ def web_dev(
     real: Annotated[
         bool, typer.Option(help="Search with the deployed models on Modal (costs GPU time).")
     ] = False,
+    fake_llm: Annotated[
+        bool,
+        typer.Option(help="The conversation page uses a scripted stand-in, even with a key."),
+    ] = False,
 ) -> None:
-    """Run the website on this Mac with fake models (no model is loaded here)."""
+    """Run the website on this Mac with fake models (no model is loaded here).
+
+    The conversation page (/chat) calls Mistral Large 4 through OpenRouter when
+    OPENROUTER_API_KEY is set, within the same spending caps as the deployed site."""
     from miroir.web.ops import serve_locally  # noqa: PLC0415
 
-    serve_locally(get_settings(), name=index, port=port, real=real)
+    serve_locally(get_settings(), name=index, port=port, real=real, fake_llm=fake_llm)
+
+
+@web_app.command("chat-secret")
+def web_chat_secret() -> None:
+    """Copy OPENROUTER_API_KEY from .env into the Modal secret the conversation page reads."""
+    from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
+    from miroir.web.ops import set_chat_secret  # noqa: PLC0415
+
+    set_chat_secret(get_settings())
+    typer.echo(f"key written to the {CHAT_SECRET_NAME} Modal secret (not shown)")
 
 
 def main() -> None:
