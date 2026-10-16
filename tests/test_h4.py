@@ -529,3 +529,12 @@ def test_questions_are_sorted_by_what_they_ask() -> None:
     assert question_kind("Dans quel musée êtes-vous ?") == "museum"
     assert question_kind("Est-ce un bâtiment ou un objet ?") == "kind"
     assert question_kind("Connaissez-vous le nom de l'artiste ?") == "name"
+
+
+def test_an_id_listed_twice_keeps_its_first_place() -> None:
+    world, q = _world()
+    fallback = world.g5(q)
+    hidden = ~np.isfinite(fallback)
+    out = answer_scores(["PA002", "PA001", "M001", "PA002"], fallback, world.catalog, hidden=hidden)
+    order = [world.catalog.entity_ids[j] for j in np.argsort(-out, kind="stable")]
+    assert order == ["PA002", "PA001", "M001"]

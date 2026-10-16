@@ -477,7 +477,7 @@ def answer_scores(
     """
     finite = np.where(np.isfinite(fallback), fallback, -1e6)
     out = finite.astype(np.float32)
-    for i, entity_id in enumerate(final):
+    for i, entity_id in enumerate(dict.fromkeys(final)):  # an id listed twice keeps its first place
         col = catalog.column(entity_id)
         if col is not None and not hidden[col]:
             out[col] = 1e6 - i
