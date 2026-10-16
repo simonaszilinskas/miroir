@@ -1389,6 +1389,28 @@ def web_places(
         typer.echo(f"{PLACES_FILE} uploaded; `miroir web deploy` makes the site read it")
 
 
+@web_app.command("publishable")
+def web_publishable(
+    index: WebIndex = WEB_INDEX,
+    *,
+    upload: Annotated[
+        bool, typer.Option(help="Also copy publishable.txt.gz alone to the volume.")
+    ] = False,
+) -> None:
+    """Mark which images of a built bundle may go to an outside model (the conversation page)."""
+    from miroir.web.bundle import add_publishable  # noqa: PLC0415
+    from miroir.web.publishable import PUBLISHABLE_FILE  # noqa: PLC0415
+
+    settings = get_settings()
+    count = add_publishable(settings, settings.web_index_dir(index))
+    typer.echo(f"{index}: {count:,} images may go to an outside model")
+    if upload:
+        from miroir.web.ops import upload_file  # noqa: PLC0415
+
+        upload_file(settings, index, PUBLISHABLE_FILE)
+        typer.echo(f"{PUBLISHABLE_FILE} uploaded; `miroir web deploy` makes the site read it")
+
+
 @web_app.command("secret")
 def web_secret(
     *,

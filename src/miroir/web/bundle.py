@@ -36,6 +36,7 @@ from miroir.config import Settings
 from miroir.eval import router
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
+from miroir.jobs.privacy import PublishableImages
 from miroir.records.model import Record
 from miroir.records.store import read_commons, read_places, read_records
 from miroir.web import ranking
@@ -59,6 +60,7 @@ from miroir.web.engine import (
 )
 from miroir.web.levels import LEVELS_FILE
 from miroir.web.nearby import PLACES_FILE, write_places
+from miroir.web.publishable import PUBLISHABLE_FILE, write_publishable
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
@@ -209,6 +211,7 @@ def build_index(settings: Settings, name: str) -> Path:
 
     if settings.places_parquet.exists():  # step H2: `miroir geo places`
         add_places(settings, out, catalog)
+    add_publishable(settings, out, ids)
 
     entity_of = {i.image_id: i.entity_id for i in data.images}
     if spec.saved_guess is not None:
@@ -254,6 +257,18 @@ def add_places(settings: Settings, folder: Path, catalog: Catalog | None = None)
     placed = {p.entity_id: (p.latitude, p.longitude) for p in read_places(settings.places_parquet)}
     count = write_places(folder / PLACES_FILE, catalog.entity_ids, placed)
     logger.info("places: %d of %d entities placed", count, catalog.entity_count)
+    return count
+
+
+def add_publishable(settings: Settings, folder: Path, ids: Sequence[str] | None = None) -> int:
+    """Write `publishable.txt.gz` into a bundle: its images that may go to an outside model
+    service, by the rule of `PublishableImages`. Returns how many."""
+    if ids is None:
+        ids = (folder / IDS_FILE).read_text(encoding="utf-8").split()
+    store = PublishableImages.load(settings)
+    kept = store.only_publishable(ids)
+    count = write_publishable(folder / PUBLISHABLE_FILE, kept)
+    logger.info("publishable: %d of %d images may go to an outside service", count, len(ids))
     return count
 
 
