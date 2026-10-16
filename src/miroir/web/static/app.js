@@ -3,9 +3,10 @@
 // and the theme switch; this file handles the views and talks to /api.
 
 import { exifPosition } from './exif.js';
-
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+import {
+  $, $$, api, COLLECTION_NAMES, el, fill, grid, img, levelBadge,
+} from './ui.js';
+import { setupChat } from './chat.js';
 
 /** Longest side, in pixels, of a photo sent to the server (it shrinks to 512 px again). */
 const SEND_SIDE = 1024;
@@ -43,72 +44,16 @@ const state = {
   // An archive print on its card: the caption to send (null: the server reads it), and
   // whether to search the print alone (true) or the whole photo.
   archive: { caption: null, mount: true },
+  // Set while the conversation view asks the visitor to frame part of their photo: called
+  // with the framed part as a data URL, or null when they leave without framing.
+  pick: null,
 };
 
 function emptyFilters() {
   return { collections: [], region: '', departement: '', domain: '', period: '' };
 }
 
-const COLLECTION_NAMES = {
-  joconde: 'Joconde (musées)',
-  memoire: 'Mémoire (photographies)',
-  'rose-valland': 'Rose Valland (MNR)',
-};
 const TYPE_LABELS = { building: 'Bâtiment', object: 'Objet' };
-
-// --- small helpers ---------------------------------------------------------------------------
-
-function el(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value === null || value === undefined || value === false) continue;
-    if (key === 'class') node.className = value;
-    else if (key === 'text') node.textContent = value;
-    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
-    else node.setAttribute(key, value === true ? '' : value);
-  }
-  for (const child of children.flat()) {
-    if (child === null || child === undefined || child === false) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
-  }
-  return node;
-}
-
-/** Like `node.replaceChildren`, but skips null and false (which it would print as text). */
-function fill(node, ...children) {
-  node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
-}
-
-function img(src, fallback, attrs = {}) {
-  const node = el('img', { src, alt: '', loading: 'lazy', decoding: 'async', ...attrs });
-  if (fallback && fallback !== src) {
-    node.addEventListener('error', () => { if (node.src !== fallback) node.src = fallback; }, { once: true });
-  }
-  return node;
-}
-
-class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
-
-async function api(path, { method = 'GET', body } = {}) {
-  const response = await fetch(`/api/${path}`, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'same-origin',
-  });
-  if (response.status === 401 && path !== 'login') {
-    go('#/connexion');
-    throw new ApiError(401, 'Connectez-vous pour continuer.');
-  }
-  if (!response.ok) {
-    let detail = `Erreur ${response.status}`;
-    try { detail = (await response.json()).detail || detail; } catch { /* not JSON */ }
-    throw new ApiError(response.status, typeof detail === 'string' ? detail : 'Requête refusée.');
-  }
-  return response.json();
-}
 
 function warm() {
   if (Date.now() - state.lastWarm < WARM_EVERY_MS) return;
@@ -129,8 +74,10 @@ function show(name) {
 
 async function route() {
   const hash = location.hash || '#/';
+  if (state.pick && hash !== '#/photo') endPick(null);
   if (hash === '#/connexion') { show('login'); $('#password').focus(); return; }
   if (!(await loggedIn())) { go('#/connexion'); return; }
+  if (hash === '#/conversation') { show('conversation'); chat.enter(); return; }
   if (hash === '#/photo') {
     if (!state.photo) { go('#/'); return; }
     show('photo'); drawBox(); drawOutlines(); warm(); return;
@@ -541,6 +488,7 @@ function drawOutlines() {
 // --- search ----------------------------------------------------------------------------------
 
 async function searchPhoto(keepText = true) {
+  if (state.pick) { endPick(await queryImage()); return; }
   state.text = keepText ? $('#refine-input').value.trim() : '';
   const image = await queryImage();
   runSearch({ image, text: state.text, ...state.archive });
@@ -813,21 +761,6 @@ function levelLegend() {
     levelBadge('ressemblance', 'Ressemblance'), ' à comparer avec votre photo');
 }
 
-const LEVEL_TITLES = {
-  'tres-proche': 'Très proche : sans doute la bonne notice',
-  proche: 'Proche : peut-être la bonne notice, à vérifier',
-  ressemblance: 'Ressemblance : une image qui ressemble, à comparer avec votre photo',
-};
-const LEVEL_CLASSES = {
-  'tres-proche': 'fr-badge--success',
-  proche: 'fr-badge--info',
-  ressemblance: '',
-};
-
-function levelBadge(level, label) {
-  return el('span', { class: `fr-badge fr-badge--sm fr-badge--no-icon miroir-level ${LEVEL_CLASSES[level] ?? ''}`, title: LEVEL_TITLES[level] || '', text: label });
-}
-
 /** After a weak building search: what helps most, in the visitor's terms. */
 function buildingTip(response) {
   if (response.guessed_type !== 'building' || state.text) return null;
@@ -835,28 +768,6 @@ function buildingTip(response) {
     ? 'Devant un monument, activez « Utiliser ma position » ou ajoutez le nom de la commune avec « Préciser avec des mots » : Miroir cherchera d’abord ce qui est à côté. Une photo de toute la façade aide aussi.'
     : 'Ajoutez le nom du monument ou de la commune avec « Préciser avec des mots ». Une photo de toute la façade aide aussi.';
   return el('p', { class: 'fr-text--sm fr-mb-2w', text });
-}
-
-function grid(cards) {
-  return el('ul', { class: 'miroir-grid' }, cards.map((c) => el('li', {}, card(c))));
-}
-
-function card(c) {
-  const href = `#/fiche/${encodeURIComponent(c.entity_id)}`;
-  return el('article', { class: 'miroir-card' },
-    el('div', { class: 'miroir-card__media' },
-      c.image_url
-        ? img(c.image_url, c.image_fallback_url, { alt: '' })
-        : el('p', { class: 'miroir-card__noimage fr-text--sm', text: 'Pas d’image dans POP' }),
-      c.matched ? el('p', { class: 'fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon miroir-card__matched', title: 'L’image qui ressemble le plus n’est pas l’image principale de la notice', text: `Correspond : ${c.matched.toLowerCase()}` }) : null,
-      c.photo_count > 1 ? el('span', { class: 'miroir-card__count', text: `${c.photo_count} photos` }) : null),
-    el('div', { class: 'miroir-card__body' },
-      levelBadge(c.level, c.level_label),
-      el('h3', { class: 'miroir-card__title' }, el('a', { href, text: c.title })),
-      c.place ? el('p', { class: 'miroir-card__place', text: c.place }) : null,
-      el('div', { class: 'miroir-card__foot' },
-        el('p', { class: 'fr-badge fr-badge--sm fr-badge--no-icon fr-mb-0', text: COLLECTION_NAMES[c.collection]?.split(' (')[0] || c.collection_label }),
-        el('a', { class: 'fr-link fr-link--sm', href: c.pop_url, target: '_blank', rel: 'noopener', title: `${c.title} sur POP, nouvelle fenêtre`, text: 'Voir sur POP' }))));
 }
 
 // --- filters (F3) ----------------------------------------------------------------------------
@@ -985,6 +896,55 @@ async function renderRecord(entityId) {
   else viewer.append(el('p', { class: 'miroir-card__noimage fr-text--sm', text: 'Pas d’image dans POP pour cette notice' }));
   document.title = `${page.title} · Miroir`;
 }
+
+// --- framing for the conversation view (its ask_region step) ---------------------------------
+
+const PICK_LABELS = { box: 'Envoyer ce cadre', whole: 'Envoyer toute la photo' };
+let photoLabels = null;
+
+/** Open the photo view on `blob` so the visitor frames a part of it; resolves with the framed
+ * part (a JPEG data URL), the whole photo, or null when they go back without choosing. */
+async function pickRegion(blob) {
+  await usePhoto(blob);
+  return new Promise((resolve) => {
+    state.pick = resolve;
+    photoLabels = { box: $('#search-box').textContent, whole: $('#search-whole').textContent };
+    $('#search-box').textContent = PICK_LABELS.box;
+    $('#search-whole').textContent = PICK_LABELS.whole;
+    $('#position-toggle').hidden = true;
+    $('#photo-position').hidden = true;
+    $('#change-photo').hidden = true;
+    go('#/photo');
+  });
+}
+
+function endPick(dataUrl) {
+  const resolve = state.pick;
+  state.pick = null;
+  if (photoLabels) {
+    $('#search-box').textContent = photoLabels.box;
+    $('#search-whole').textContent = photoLabels.whole;
+  }
+  $('#change-photo').hidden = false;
+  showPhotoPosition();
+  if (resolve) resolve(dataUrl);
+  if (dataUrl !== null && location.hash === '#/photo') go('#/conversation');
+}
+
+/** The usual search, from the conversation view (when its spending cap is reached). */
+async function normalSearch(blob, text) {
+  if (blob) {
+    await usePhoto(blob);
+    $('#refine-input').value = text || '';
+    searchPhoto(true);
+  } else if (text) {
+    state.photo = null; state.box = null; state.queryUrl = null;
+    $('#refine-input').value = text;
+    runSearch({ text });
+  }
+}
+
+const chat = setupChat({ go, pickRegion, normalSearch, warm });
 
 window.addEventListener('hashchange', () => {
   if (!location.hash.startsWith('#/fiche/')) document.title = 'Miroir · retrouver une œuvre ou un monument à partir d’une photo';

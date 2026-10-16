@@ -250,3 +250,52 @@ main { min-height: 60vh; }
 
 .miroir-footer .fr-footer__content { flex-basis: 100%; max-width: 100%; }
 .miroir-footer .fr-footer__body { padding-top: 0; }
+
+/* --- conversation view (H5) ----------------------------------------------------------------- */
+
+.miroir-chat { max-width: 56rem; }
+.miroir-chat__notice { color: var(--text-mention-grey); }
+.miroir-chat__row { display: flex; gap: .5rem; align-items: flex-start; }
+.miroir-chat__row .fr-input { flex: 1; margin-top: 0; }
+.miroir-chat__goal-head { margin-bottom: 1rem; }
+.miroir-chat__goal-photo { max-height: 10rem; max-width: 100%; border-radius: .25rem; display: block; }
+.miroir-chat__status { margin: .5rem 0 1rem; }
+.miroir-chat__composer { position: sticky; bottom: 0; z-index: 2; padding: .75rem 0; background-color: var(--background-default-grey, #fff); box-shadow: 0 -1px 0 var(--border-default-grey); }
+.miroir-chat__alert { list-style: none; margin: .5rem 0; }
+
+.miroir-thread { list-style: none; padding: 0; margin: 0 0 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.miroir-thread > li::marker { content: none; }
+
+.miroir-bubble { max-width: 85%; padding: .625rem .875rem; border-radius: .75rem; }
+.miroir-bubble--visitor { align-self: flex-end; background: var(--background-action-low-blue-france); }
+.miroir-bubble--model { align-self: flex-start; background: var(--background-alt-grey); }
+.miroir-bubble__photo { display: block; max-height: 9rem; max-width: 100%; border-radius: .5rem; margin-bottom: .375rem; }
+
+.miroir-call { font-size: .875rem; color: var(--text-mention-grey); border-left: 2px solid var(--border-default-grey); padding: 0 0 0 .625rem; }
+.miroir-call.is-error { border-left-color: var(--border-plain-warning); }
+.miroir-call__line { display: block; margin: 0; cursor: default; }
+.miroir-call__line > .miroir-spinner, .miroir-call__line > .miroir-call__icon { display: inline-block; vertical-align: -.2em; margin-right: .375rem; }
+.miroir-call summary.miroir-call__line { cursor: pointer; }
+.miroir-call__label { color: var(--text-default-grey); }
+.miroir-call__icon::before { --icon-size: 1rem; }
+.miroir-call .miroir-spinner { width: 1rem; height: 1rem; }
+.miroir-call__thumbs { list-style: none; display: flex; flex-wrap: wrap; gap: .375rem; padding: .5rem 0 .25rem; margin: 0; }
+.miroir-call__thumbs li { padding: 0; }
+.miroir-call__thumbs a { display: block; background-image: none; }
+.miroir-call__thumbs img { width: 4rem; height: 4rem; object-fit: cover; border-radius: .25rem; display: block; }
+.miroir-call__noimage { display: flex; width: 4rem; height: 4rem; font-size: .625rem; overflow: hidden; background: var(--background-alt-grey); }
+
+.miroir-ask { align-self: stretch; border: 1px solid var(--border-default-blue-france); border-radius: .5rem; padding: 1rem; }
+.miroir-ask.is-answered { opacity: .6; }
+.miroir-ask__question { font-weight: 700; margin-bottom: .75rem; }
+.miroir-ask__form { display: flex; gap: .5rem; margin-bottom: .5rem; }
+.miroir-ask__form .fr-input { flex: 1; margin-top: 0; }
+.miroir-ask__choices { margin-bottom: 0; }
+
+.miroir-picks { align-self: stretch; }
+.miroir-card__reason { margin: .25rem 0 .5rem; font-style: italic; }
+
+@media (max-width: 36em) {
+  .miroir-bubble { max-width: 100%; }
+}
+.miroir-chat__status[hidden], .miroir-chat__composer[hidden], .miroir-panel[hidden] { display: none; }

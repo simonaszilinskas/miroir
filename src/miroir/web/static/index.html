@@ -105,6 +105,7 @@
                 <label class="fr-btn fr-btn--lg fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="upload-input">Importer une image</label>
                 <input type="file" id="upload-input" accept="image/*" class="fr-sr-only" tabindex="-1">
               </div>
+              <p class="fr-mt-2w fr-mb-0"><a class="fr-link fr-icon-chat-3-line fr-link--icon-left" href="#/conversation">Essai : recherche en conversation (expérimental)</a></p>
               <form class="miroir-describe" id="describe-form" role="search">
                 <label class="fr-label" for="describe-input">Décrivez ce que vous voyez
                   <span class="fr-hint-text">Ce que vous voyez, un lieu ou un artiste, en français ou dans une autre langue</span>
@@ -174,7 +175,7 @@
               <li><button class="fr-btn fr-btn--icon-left fr-icon-search-line" id="search-box" hidden>Rechercher dans le cadre</button></li>
               <li><button class="fr-btn fr-btn--icon-left fr-icon-search-line" id="search-whole">Rechercher toute la photo</button></li>
               <li><button class="fr-btn fr-btn--tertiary fr-btn--icon-left fr-icon-close-line" id="clear-box" hidden>Effacer le cadre</button></li>
-              <li><label class="fr-btn fr-btn--tertiary-no-outline fr-btn--icon-left fr-icon-image-line" for="upload-input">Changer de photo</label></li>
+              <li id="change-photo"><label class="fr-btn fr-btn--tertiary-no-outline fr-btn--icon-left fr-icon-image-line" for="upload-input">Changer de photo</label></li>
             </ul>
             <p class="fr-text--sm fr-icon-map-pin-2-line miroir-position" id="photo-position" hidden>
               <strong>Position de la photo utilisée</strong> : Miroir met en avant ce qui se trouve près de l’endroit où elle a été prise.
@@ -246,6 +247,62 @@
             <div id="results"></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- Essai : recherche en conversation (H5) -->
+    <section class="view" data-view="conversation" hidden>
+      <div class="fr-container fr-py-4w miroir-chat">
+        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="home">Recherche habituelle</button>
+        <h1 class="fr-h3 fr-mb-1w">Recherche en conversation <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></h1>
+        <p class="fr-text--sm miroir-muted fr-mb-1w">Un modèle ouvert, Mistral Large 4, mène la recherche&nbsp;: il vous pose des questions, cherche, regarde les images, puis vous propose des notices.</p>
+        <p class="fr-text--xs fr-icon-information-line miroir-chat__notice">Votre photo est envoyée à ce modèle, par le service OpenRouter, le temps de la conversation.</p>
+
+        <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-3w" id="chat-off" hidden>
+          <p>La recherche en conversation n’est pas activée ici. <a href="#/">Utilisez la recherche habituelle.</a></p>
+        </div>
+
+        <div class="miroir-panel fr-p-3w fr-mb-3w" id="chat-start" hidden>
+          <h2 class="fr-h6 fr-mb-2w">Une photo, des mots, ou les deux</h2>
+          <div class="miroir-actions">
+            <label class="fr-btn fr-btn--icon-left fr-icon-camera-line" for="chat-camera">Prendre une photo</label>
+            <input type="file" id="chat-camera" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
+            <label class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="chat-upload">Importer une image</label>
+            <input type="file" id="chat-upload" accept="image/*" class="fr-sr-only" tabindex="-1">
+          </div>
+          <form id="chat-words-form" class="fr-mt-2w">
+            <label class="fr-label" for="chat-words">Ou décrivez ce que vous cherchez
+              <span class="fr-hint-text">Un lieu, un nom, ce que vous voyez</span>
+            </label>
+            <div class="miroir-chat__row fr-mt-1w">
+              <input class="fr-input" type="text" id="chat-words" maxlength="300" autocomplete="off">
+              <button class="fr-btn fr-btn--secondary" type="submit">Continuer</button>
+            </div>
+          </form>
+        </div>
+
+        <ol class="miroir-thread" id="chat-thread" aria-live="polite"></ol>
+
+        <form class="miroir-panel fr-p-3w fr-mb-3w" id="chat-goal" hidden>
+          <div class="miroir-chat__goal-head" id="chat-goal-photo"></div>
+          <label class="fr-label fr-text--lg fr-text--bold" for="chat-goal-input">Que cherchez-vous&nbsp;?
+            <span class="fr-hint-text">Dites-le avec vos mots. Touchez une suggestion pour commencer votre phrase.</span>
+          </label>
+          <ul class="fr-tags-group fr-mt-1w" id="chat-goal-chips" aria-label="Suggestions"></ul>
+          <textarea class="fr-input" id="chat-goal-input" rows="2" maxlength="500"></textarea>
+          <button class="fr-btn fr-mt-2w fr-icon-arrow-right-line fr-btn--icon-right" type="submit">Lancer la recherche</button>
+        </form>
+
+        <p class="miroir-waiting miroir-chat__status" id="chat-status" role="status" hidden></p>
+
+        <form class="miroir-chat__composer" id="chat-composer" hidden>
+          <label class="fr-label fr-sr-only" for="chat-message">Votre message</label>
+          <div class="miroir-chat__row">
+            <input class="fr-input" type="text" id="chat-message" maxlength="500" autocomplete="off" placeholder="Précisez ou corrigez">
+            <button class="fr-btn" type="submit">Envoyer</button>
+          </div>
+        </form>
+        <p class="fr-mt-3w"><button class="fr-btn fr-btn--sm fr-btn--tertiary fr-icon-refresh-line fr-btn--icon-left" type="button" id="chat-restart" hidden>Nouvelle conversation</button></p>
       </div>
     </section>
 
