@@ -155,14 +155,15 @@ _LISTED = re.compile(r"^\d+\. ([^ |]+) \|", re.MULTILINE)
 
 class FakeGuide:
     """A rule-following stand-in for the model, so the page runs on the Mac at no cost: one
-    question when there is a photo, an image search, a look at three thumbnails, then three
-    results. A message from the visitor gets a text search of their words."""
+    question when there is a photo (a request to frame part of it when the goal says
+    "cadre"), an image search, a look at three thumbnails, then three results. A message from
+    the visitor gets a text search of their words."""
 
     @property
     def model(self) -> str:
         return "fake-guide"
 
-    async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
+    async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:  # noqa: PLR0911 (one rule per return)
         messages = _dicts(body.get("messages"))
         tools = {str(_dict(t.get("function")).get("name")) for t in _dicts(body.get("tools"))}
         last = messages[-1]
@@ -170,6 +171,9 @@ class FakeGuide:
         content = _content_text(last)
         listed = [i for m in messages if m.get("role") == "tool" for i in _ids(_content_text(m))]
         if role == "user" and "The visitor's goal" in content:
+            if "ask_region" in tools and "cadre" in content:
+                reason = {"reason": "Encadrez la partie de la photo qui vous intéresse."}
+                return _answer("", [("ask_region", reason)])
             if "image_search" in tools:
                 question: dict[str, JSON] = {
                     "question": "Que montre votre photo, en quelques mots ?",
@@ -180,7 +184,9 @@ class FakeGuide:
                 )
             words = _between(content, "typed words: «", "»") or "église"
             return _answer("", [("text_search", {"query": words})])
-        if role == "tool" and "The visitor answers" in content:
+        if role == "user" and "The part the visitor framed" in content:
+            return _answer("", [("image_search", {"source": "region", "model": "auto"})])
+        if role == "tool" and ("The visitor answers" in content or "framed nothing" in content):
             return _answer("", [("image_search", {"model": "auto", "top_k": 10})])
         if role == "user" and "The visitor writes" in content:
             words = _between(content, "«", "»") or "église"

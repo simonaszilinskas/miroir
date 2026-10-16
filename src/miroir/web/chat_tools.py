@@ -13,15 +13,17 @@ that repeats an earlier one, or nearly, is not run and the model is told so.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from miroir.eval.bm25 import tokens
+from miroir.eval.bm25 import fold, tokens
 from miroir.jobs.openrouter import JSON
 from miroir.records.bases import Base
 from miroir.web.nearby import Position
@@ -247,7 +249,7 @@ def parse_filters(raw: object, position: Position | None) -> ToolFilters:
         raise ArgumentError(msg)
     bases: list[Base] = []
     for value in _strings(given.get("base"), "base"):
-        key = value.strip().lower().replace("é", "e").replace("_", "-")
+        key = re.sub(r"[^a-z-]", "", fold(value).replace("_", "-"))
         match = next((b for b in Base if key in (b.value, b.value.replace("-", ""))), None)
         if match is None:
             msg = f"unknown base {value!r}. Valid bases: {', '.join(_BASES)}."
@@ -477,8 +479,8 @@ async def view_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     found = await ctx.search(ToolQuery(SearchKind.VIEW, image=ctx.photo, entity_ids=tuple(wanted)))
     lines: list[str] = []
     thumbnails: list[Thumbnail] = []
-    for i, hit in enumerate(found.hits, start=1):
-        image_id = await ctx.thumbnail(hit)
+    fetched = await asyncio.gather(*(ctx.thumbnail(hit) for hit in found.hits))
+    for i, (hit, image_id) in enumerate(zip(found.hits, fetched, strict=True), start=1):
         if image_id is None:
             lines.append(f"[{i}] {hit_line(hit, score=False)} (no image may be shown)")
             continue
@@ -504,7 +506,9 @@ async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
     if not question:
         msg = "ask_visitor needs a question, in French"
         raise ArgumentError(msg)
-    choices = tuple(dict.fromkeys(c[:80] for c in _strings(args.get("choices"), "choices")))
+    # The page always offers "Je ne sais pas" itself.
+    given = _strings(args.get("choices"), "choices")
+    choices = tuple(dict.fromkeys(c[:80] for c in given if "ne sais pas" not in fold(c)))
     if not MIN_CHOICES <= len(choices) <= MAX_CHOICES:
         msg = f"ask_visitor needs {MIN_CHOICES} to {MAX_CHOICES} short suggested answers"
         raise ArgumentError(msg)

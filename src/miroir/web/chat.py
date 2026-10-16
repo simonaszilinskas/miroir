@@ -56,8 +56,11 @@ logger = logging.getLogger(__name__)
 MODEL = "mistralai/mistral-large-4-0"
 MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "reasoning": {"effort": "none"}}
 MAX_TOKENS = 800
-#: Search and view calls per visitor message; then the model must show results or ask.
+#: Searches per visitor message; then the model must show results or ask.
 MAX_TOOL_CALLS = 8
+#: Looks at thumbnails per visitor message, apart from the searches (the smoke test with
+#: Mistral spent its 8 calls on searches and could not check its picks by eye).
+MAX_VIEWS = 3
 #: Model calls per visitor message, all told.
 MAX_MODEL_CALLS = 12
 #: Thumbnails kept in what the model is sent again each call; older ones become a note.
@@ -277,6 +280,8 @@ class Conversation:
         self.last_call_usd = FIRST_CALL_USD
         self.calls = 0
         self.steps = 0
+        self.views = 0
+        """Looks at thumbnails in the current turn."""
 
     # --- ToolContext ---------------------------------------------------------------------------
 
@@ -545,10 +550,12 @@ class ChatService:
     async def _loop(self, c: Conversation) -> str:
         """Model calls and their tools until the model shows results, asks, or stops."""
         tools = tools_for(photo=c.photo_bytes is not None)
+        c.views = 0
         schemas = [t.schema() for t in tools]
         offered = {t.name.value for t in tools}
         used = 0
         told_last = False
+        nudged = False
         for _ in range(MAX_MODEL_CALLS):
             stop = await self._over_limit(c)
             if stop is not None:
@@ -577,7 +584,13 @@ class ChatService:
                 c.emit({"type": "say", "text": said})
             if not answer.tool_calls:
                 c.messages.append({"role": "assistant", "content": answer.text})
-                return "message"
+                if nudged:
+                    return "message"
+                # Mistral sometimes says what it will do next and stops: once a turn, it is
+                # asked to do it.
+                c.messages.append(_user(_text(NUDGE)))
+                nudged = True
+                continue
             ids = [_call_id(call, c.calls, n) for n, call in enumerate(answer.tool_calls)]
             c.messages.append(_assistant(answer.text, answer.tool_calls, ids))
             waiting, thumbs, used = await self._calls(c, answer.tool_calls, ids, offered, used)
@@ -599,6 +612,9 @@ class ChatService:
         offered: set[str],
         used: int,
     ) -> tuple[str | None, list[tuple[str, str]], int]:
+        """Run one reply's tool calls. `used` counts the turn's searches; views are counted
+        in `Conversation.views`."""
+        views = c.views
         waiting: str | None = None
         thumbs: list[tuple[str, str]] = []
         for call, call_id in zip(calls, ids, strict=True):
@@ -612,7 +628,13 @@ class ChatService:
             counted = call.name in COUNTED
             if counted and used >= MAX_TOOL_CALLS:
                 c.messages.append(_tool(call_id, call.name, NOT_RUN_CAP))
+                logger.info("chat %s: %s refused, no searches left", c.id[:8], call.name)
                 continue
+            if call.name == ToolName.VIEW_RESULTS.value:
+                if views >= MAX_VIEWS:
+                    c.messages.append(_tool(call_id, call.name, NOT_RUN_VIEWS))
+                    continue
+                views += 1
             c.steps += 1
             step = c.steps
             if counted:
@@ -631,6 +653,7 @@ class ChatService:
             )
             waiting = self._outcome(c, outcome, step, call_id, call.name)
             thumbs += [(t.label, t.image_id) for t in outcome.thumbnails]
+        c.views = views
         return waiting, thumbs, used
 
     def _outcome(
@@ -703,7 +726,12 @@ class ChatService:
 
     def _brief(self) -> str:
         images, entities = self.index_size
-        return BRIEF.format(images=f"{images:,}", entities=f"{entities:,}", calls=MAX_TOOL_CALLS)
+        return BRIEF.format(
+            images=f"{images:,}",
+            entities=f"{entities:,}",
+            calls=MAX_TOOL_CALLS,
+            views=MAX_VIEWS,
+        )
 
     def _render(self, c: Conversation) -> list[JSON]:
         """The messages with images as data URLs. Only the last `KEEP_THUMBS` thumbnails go
@@ -742,7 +770,7 @@ class ChatService:
         return out
 
 
-COUNTED = {ToolName.IMAGE_SEARCH.value, ToolName.TEXT_SEARCH.value, ToolName.VIEW_RESULTS.value}
+COUNTED = {ToolName.IMAGE_SEARCH.value, ToolName.TEXT_SEARCH.value}
 RUNNING = {
     ToolName.IMAGE_SEARCH.value: "Recherche par image…",
     ToolName.TEXT_SEARCH.value: "Recherche par mots…",
@@ -750,11 +778,17 @@ RUNNING = {
 }
 
 LAST_CALL = (
-    f"You have used your {MAX_TOOL_CALLS} search and view calls for this message. Call "
-    "show_results now with the best you have, or ask_visitor one question."
+    f"You have used your {MAX_TOOL_CALLS} searches for this message. Call show_results now "
+    "with the best you have, or ask_visitor one question."
 )
-NOT_RUN_CAP = (
-    "not run: no search or view calls left for this message. Call show_results, or ask_visitor."
+NOT_RUN_CAP = "not run: no searches left for this message. Call show_results, or ask_visitor."
+NOT_RUN_VIEWS = (
+    f"not run: {MAX_VIEWS} looks at thumbnails already for this message. Call show_results."
+)
+NUDGE = (
+    "(Not from the visitor.) You wrote without calling a tool. If you meant to search, call "
+    "the tool now; to ask the visitor, call ask_visitor; to finish, call show_results. If you "
+    "only meant to answer the visitor, write nothing more."
 )
 NOT_RUN_WAITING = "not run: you are waiting for the visitor. Call it again after their answer."
 MODEL_DOWN = (
@@ -801,8 +835,10 @@ the records give (author, date, place), and show it.
 - Anything else: do what they ask.
 
 Questions. Ask only what would narrow the search for this photo, and only when the photo, \
-its words and the first look leave you unsure. One question at a time, at most 3 in a \
-conversation. Fit the question to the subject: a building, a painting, an object, an archive \
+its words and the first look leave you unsure. When the first look and one more search have \
+not settled it, ask before you guess: one answer from the visitor beats many searches, and \
+never search a name you only guessed. One question at a time, at most 3 in a conversation. \
+Fit the question to the subject: a building, a painting, an object, an archive \
 print each call for different things (the town or the street; the museum or the room; what \
 the object is or where it is kept; the caption you cannot read). Give 2 to 4 short suggested \
 answers; the visitor can also write their own or say they do not know. Set offer_position \
@@ -822,16 +858,18 @@ right answer.
 - Do not run a search again with reworded words: it will be refused. If two searches fail, \
 change approach: another image model, a filter, view_results to compare by eye, a question, \
 or show what you have.
-- At most {calls} search and view calls per visitor message.
-- Before you show picks for an exact match, check them by eye with view_results.
+- At most {calls} searches and {views} looks at thumbnails per visitor message.
+- Before you show picks for an exact match, check them by eye with view_results. Do not say \
+a pick looks like the photo unless you have seen its thumbnail.
 
 End each turn with show_results: ids you have seen in results, best first, each with one short \
 reason in French ("même portail roman, même commune"). If nothing fits, say so in one short \
 sentence and show the closest anyway, or ask one question. The visitor may write again \
 ("pas celle-ci, l'église est plus ancienne"): search again with what they say.
 
-Write to the visitor in French, in short plain sentences, without database words (no "base", \
-"entité", "score", "id"). Never invent a name, a date or a place the records do not give."""
+Everything you write outside a tool call is shown to the visitor: write it in French, in one \
+or two short plain sentences, without database words (no "base", "entité", "score", "id"), \
+and never in English. Never invent a name, a date or a place the records do not give."""
 
 
 # --- message helpers ---------------------------------------------------------------------------

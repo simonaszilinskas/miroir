@@ -39,6 +39,15 @@ def base_of(collection: Collection, entity_id: str) -> Base:
     return Base.MEMOIRE
 
 
+#: POP writes a commune's article after it: "Ferté-Bernard (La)", "Isle-Adam (L')".
+_ARTICLE_AFTER = re.compile(r"^(.*?)\s*\((le|la|les|l')\)\s*$")
+
+
 def place_key(text: str) -> str:
-    """A commune or département name folded for comparison: "Saint-Étienne" = "saint etienne"."""
-    return " ".join(re.findall(r"[a-z0-9]+", fold(text)))
+    """A commune or département name folded for comparison: "Saint-Étienne" = "saint etienne",
+    and "Ferté-Bernard (La)", as POP writes it, = "La Ferté-Bernard"."""
+    folded = fold(text).replace("’", "'").strip()
+    moved = _ARTICLE_AFTER.match(folded)
+    if moved is not None:
+        folded = f"{moved.group(2)} {moved.group(1)}"
+    return " ".join(re.findall(r"[a-z0-9]+", folded))

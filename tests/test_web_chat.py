@@ -13,10 +13,12 @@ from fastapi.testclient import TestClient
 
 from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import Outlines
+from miroir.records.bases import place_key
 from miroir.web.app import create_app
 from miroir.web.chat import (
     BRIEF,
     MAX_TOOL_CALLS,
+    MAX_VIEWS,
     ChatService,
     Limits,
     MemorySpend,
@@ -563,3 +565,64 @@ def test_the_publishable_file_round_trips_and_a_missing_one_lets_nothing_out(
     assert found.allows("j1")
     assert not found.allows("r1")
     assert len(read_publishable(tmp_path / "missing.txt.gz")) == 0
+
+
+@pytest.mark.parametrize(
+    ("pop", "said"),
+    [
+        ("Ferté-Bernard (La)", "La Ferté-Bernard"),
+        ("Isle-Adam (L')", "L’Isle-Adam"),
+        ("Mans (Le)", "le mans"),
+        ("Saint-Étienne", "saint etienne"),
+    ],
+)
+def test_a_commune_matches_however_its_article_is_placed(pop: str, said: str) -> None:
+    assert place_key(pop) == place_key(said)
+
+
+def say_only(text: str) -> ChatAnswer:
+    return ChatAnswer(text, 0.001, 10, 5, "stop")
+
+
+def test_a_reply_without_a_tool_call_is_nudged_once() -> None:
+    script = [
+        say_only("Je relance avec une recherche par mots."),
+        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        say_only("Merci !"),
+        say_only("Bonne visite."),
+    ]
+    with Rig(script) as rig:
+        cid = rig.start()
+        first = rig.send(cid, "goal", EXACT)
+        assert card_ids(first) == ["PA1"]
+        second = rig.send(cid, "message", "Merci")
+    assert "You wrote without calling a tool" in body_text(rig.model.bodies[1])
+    assert [e["text"] for e in of(second, "say")] == ["Merci !", "Bonne visite."]
+    assert second[-1]["waiting"] == "message"
+    assert len(rig.model.bodies) == 4
+
+
+def test_looks_at_thumbnails_have_their_own_cap() -> None:
+    views = [call("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2", "PA1")]
+    script = [
+        call("text_search", {"query": "église vase nature"}),
+        *views,
+        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+    ]
+    with Rig(script) as rig:
+        cid = rig.start()
+        rig.send(cid, "goal", EXACT)
+    last = tool_messages(rig.model.bodies[-1])
+    assert last[-1].startswith(f"not run: {MAX_VIEWS} looks at thumbnails")
+
+
+def test_the_page_links_to_the_conversation_view() -> None:
+    with Rig([]) as rig:
+        page = rig.client.get("/").text
+        assert 'data-view="conversation"' in page
+        assert "Essai : recherche en conversation (expérimental)" in page
+        assert "Votre photo est envoyée à ce modèle" in page
+        script = rig.client.get("/static/chat.js")
+        assert script.status_code == 200
+        assert "GOAL_CHIPS" in script.text
+        assert rig.client.get("/static/ui.js").status_code == 200

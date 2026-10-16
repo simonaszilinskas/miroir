@@ -123,6 +123,40 @@ def deploy() -> str:
     return url or "(no URL: check `modal app list`)"
 
 
+class LedgerSpend:
+    """The day's totals of `FileSpend`, and each paid call in the project's spend ledger too
+    (experiments.md §1 rule 5), when the local page talks to OpenRouter."""
+
+    def __init__(self, settings: Settings, model: str) -> None:
+        from miroir.jobs.spend import SpendLedger  # noqa: PLC0415
+        from miroir.web.chat import FileSpend  # noqa: PLC0415
+
+        self._days = FileSpend(settings.chat_spend_path)
+        self._ledger = SpendLedger(settings.spend_ledger)
+        self._model = model
+
+    async def spent(self, day: str) -> float:
+        return await self._days.spent(day)
+
+    async def add(self, day: str, usd: float) -> float:
+        from miroir.jobs.spend import SpendKind  # noqa: PLC0415
+
+        if usd > 0:
+            self._ledger.record(
+                SpendKind.RUN,
+                option=CHAT_OPTION,
+                run=f"{CHAT_OPTION}-local",
+                model=self._model,
+                cost_usd=usd,
+                items=1,
+            )
+        return await self._days.add(day, usd)
+
+
+#: The conversation page's line in the spend ledger.
+CHAT_OPTION = "H5-chat"
+
+
 def serve_locally(
     settings: Settings, *, name: str, port: int, real: bool = False, fake_llm: bool = False
 ) -> None:
@@ -138,7 +172,6 @@ def serve_locally(
     from miroir.web.chat import (  # noqa: PLC0415
         ChatModel,
         ChatService,
-        FileSpend,
         Limits,
         OpenRouterModel,
         ThumbSource,
@@ -167,7 +200,7 @@ def serve_locally(
             backend=backend,
             model=model,
             thumbs=ThumbSource(publishable, fetch),
-            spend=FileSpend(settings.chat_spend_path),
+            spend=LedgerSpend(settings, model.model),
             limits=Limits(settings.chat_conversation_usd, settings.chat_day_usd),
             index_size=(len(engine.catalog.images), engine.catalog.entity_count),
         )
