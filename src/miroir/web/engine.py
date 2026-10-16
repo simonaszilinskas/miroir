@@ -50,6 +50,7 @@ from miroir.web.nearby import NEAR_KM, PLACES_FILE, EntityPlaces, Position, read
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
+    Bucket,
     Guess,
     PhotoType,
     Routing,
@@ -384,9 +385,16 @@ class Engine:
 
     # --- the two kinds of query ------------------------------------------------------------
 
-    def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
+    def photo_cosines(self, data: bytes) -> PhotoCosines:
+        """A photo's cosines with every image, both models, and the bucket G5 routes it to.
+        The conversation page's image search mixes them its own way (`miroir.web.toolsearch`)."""
+        mask = np.ones(len(self.catalog.images), dtype=bool)
+        return self._cosines(prepare_photo(data), mask, {})
+
+    def _cosines(
+        self, jpeg: bytes, mask: NDArray[np.bool_], timings: dict[str, float]
+    ) -> PhotoCosines:
         tick = time.monotonic()
-        jpeg = prepare_photo(data)
         a7_query, a3_query = self.encoders.image(jpeg)
         a7_query = unit(a7_query)
         a3_full = unit(a3_query)
@@ -401,6 +409,12 @@ class Engine:
         photo_type, _ = self.guess.photo_type(a7_query)
         chroma = chroma_spread(jpeg)
         bucket = self.routing.choose(photo_type, chroma)
+        return PhotoCosines(a7=a7, a3=a3, bucket=bucket, photo_type=photo_type, chroma=chroma)
+
+    def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
+        cosines = self._cosines(prepare_photo(data), mask, timings)
+        a7, a3, bucket = cosines.a7, cosines.a3, cosines.bucket
+        photo_type, chroma = cosines.photo_type, cosines.chroma
         w = bucket.a7_weight
         e7 = ranking.entity_max(a7, self.catalog)
         e3 = ranking.entity_max(a3, self.catalog)
@@ -477,6 +491,17 @@ class Engine:
             level=level,
             level_label=LEVEL_LABELS[level],
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCosines:
+    a7: Floats
+    """EmbeddingGemma 2 cosine of the photo with every image, in catalog order."""
+    a3: Floats
+    """MegaLoc, the same."""
+    bucket: Bucket
+    photo_type: PhotoType
+    chroma: float
 
 
 @dataclass(frozen=True, slots=True)
