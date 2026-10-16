@@ -395,6 +395,8 @@ class PlaceHint:
     """The commune's INSEE code (Mémoire `INSEE`), first value."""
     museum: str | None
     """The Muséofile id of the museum holding the object (Joconde `MUSEO`)."""
+    museum_name: str | None = None
+    """That museum's name as Joconde gives it (`NOMOFF`), e.g. "musée des Amériques - Auch"."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +415,7 @@ def place_hint(raw: RawRecord) -> PlaceHint:
         ref=_ref(raw),
         insee=insee if insee and _INSEE_RE.match(insee) else None,
         museum=_first(raw, ("MUSEO",)),
+        museum_name=_first(raw, ("NOMOFF",)) if raw.get("MUSEO") else None,
     )
 
 

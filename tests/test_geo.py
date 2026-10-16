@@ -161,3 +161,9 @@ def test_camera_positions_keep_the_camera_only(tmp_path: Path) -> None:
     )
     found = camera_positions(client, ["File:a.jpg", "File:b.jpg", "File:c.jpg"])
     assert found == {"File:a.jpg": (43.95, 4.81)}
+
+
+def test_place_hint_keeps_the_museum_name() -> None:
+    hint = place_hint({"REF": "J1", "MUSEO": "M0569", "NOMOFF": "musée des Amériques - Auch"})
+    assert hint.museum_name == "musée des Amériques - Auch"
+    assert place_hint({"REF": "AP1", "NOMOFF": "x"}).museum_name is None

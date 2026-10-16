@@ -34,6 +34,7 @@ from miroir.eval.bm25 import fold, tokens
 from miroir.eval.fusion import min_max
 from miroir.eval.scoring import Floats, SearchQuery
 from miroir.eval.vlm import TextGallery
+from miroir.geo.model import distance_km
 from miroir.records.model import Collection, Record
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,8 @@ class EntityInfo:
     domain_words: frozenset[str]
     """Folded words of its records' domains and denominations."""
     period_words: frozenset[str]
+    position: tuple[float, float] | None = None
+    """Latitude and longitude (`places.parquet`: Mérimée point, museum, or commune centre)."""
 
     @property
     def place(self) -> str:
@@ -102,8 +105,13 @@ class EntityInfo:
         return commune or dept
 
 
-def entity_infos(records: Sequence[Record], entity_ids: Sequence[str]) -> tuple[EntityInfo, ...]:
+def entity_infos(
+    records: Sequence[Record],
+    entity_ids: Sequence[str],
+    positions: Mapping[str, tuple[float, float]] | None = None,
+) -> tuple[EntityInfo, ...]:
     """What the tools say about each entity, from every record that shows it."""
+    where = positions or {}
     by_entity: dict[str, list[Record]] = {}
     for record in records:
         by_entity.setdefault(record.entity_id, []).append(record)
@@ -113,11 +121,13 @@ def entity_infos(records: Sequence[Record], entity_ids: Sequence[str]) -> tuple[
         if not found:
             msg = f"entity {entity_id} has no record"
             raise ValueError(msg)
-        out.append(_info(entity_id, sorted(found, key=lambda r: r.ref)))
+        out.append(_info(entity_id, sorted(found, key=lambda r: r.ref), where.get(entity_id)))
     return tuple(out)
 
 
-def _info(entity_id: str, records: Sequence[Record]) -> EntityInfo:
+def _info(
+    entity_id: str, records: Sequence[Record], position: tuple[float, float] | None
+) -> EntityInfo:
     # A building's own record title names it; a Mémoire photo title often names a part of it.
     titled = [r.title for r in records if r.title]
     title = titled[0] if titled else ""
@@ -137,6 +147,7 @@ def _info(entity_id: str, records: Sequence[Record]) -> EntityInfo:
             tokens(" ".join(w for r in records for w in (*r.domain, *r.denomination)))
         ),
         period_words=frozenset(tokens(" ".join(p for r in records for p in r.period))),
+        position=position,
     )
 
 
@@ -159,6 +170,8 @@ class Filters:
     communes: tuple[str, ...] = ()
     domains: tuple[str, ...] = ()
     periods: tuple[str, ...] = ()
+    near: tuple[float, float, float] | None = None
+    """(latitude, longitude, km): entities placed within km of that point."""
     mode: FilterMode = FilterMode.BOOST
     ignored: tuple[str, ...] = ()
     """Values the model gave that mean nothing here (an unknown base), reported back to it."""
@@ -166,7 +179,12 @@ class Filters:
     @property
     def empty(self) -> bool:
         return not (
-            self.bases or self.departements or self.communes or self.domains or self.periods
+            self.bases
+            or self.departements
+            or self.communes
+            or self.domains
+            or self.periods
+            or self.near
         )
 
     def describe(self) -> str:
@@ -183,6 +201,8 @@ class Filters:
             )
             if values
         ]
+        if self.near is not None:
+            parts.append(f"near={self.near[0]:.4f},{self.near[1]:.4f} within {self.near[2]:g} km")
         return f"{', '.join(parts)} ({self.mode.value})"
 
 
@@ -208,9 +228,27 @@ def parse_filters(raw: object) -> Filters:
         communes=_strings(given.get("commune")),
         domains=_strings(given.get("domain")),
         periods=_strings(given.get("period")),
+        near=_near(given.get("near")),
         mode=mode,
         ignored=tuple(ignored),
     )
+
+
+#: Radius of a `near` filter when the model gives none, and the largest it may ask for.
+NEAR_KM = 2.0
+MAX_NEAR_KM = 50.0
+
+
+def _near(value: object) -> tuple[float, float, float] | None:
+    if not isinstance(value, dict):
+        return None
+    given: dict[str, object] = {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    lat = _number(given.get("lat", given.get("latitude")), np.nan)
+    lon = _number(given.get("lon", given.get("longitude")), np.nan)
+    if not (np.isfinite(lat) and np.isfinite(lon)) or abs(lat) > 90 or abs(lon) > 180:
+        return None
+    km = min(max(_number(given.get("km"), NEAR_KM), 0.1), MAX_NEAR_KM)
+    return (lat, lon, km)
 
 
 def _strings(value: object) -> tuple[str, ...]:
@@ -241,6 +279,12 @@ class Catalog:
     def column(self, entity_id: str) -> int | None:
         return self._column.get(entity_id)
 
+    def _near(self, near: tuple[float, float, float]) -> NDArray[np.bool_]:
+        lat = np.asarray([i.position[0] if i.position else np.nan for i in self.infos])
+        lon = np.asarray([i.position[1] if i.position else np.nan for i in self.infos])
+        km = distance_km(near[0], near[1], lat, lon)
+        return np.nan_to_num(km, nan=np.inf) <= near[2]
+
     def mask(self, filters: Filters) -> NDArray[np.bool_]:
         """Entities that match every given field."""
         keep = np.ones(len(self.infos), dtype=bool)
@@ -251,7 +295,11 @@ class Catalog:
         communes = {place_key(c) for c in filters.communes}
         domains = set(tokens(" ".join(filters.domains)))
         periods = set(tokens(" ".join(filters.periods)))
+        if filters.near is not None:
+            keep &= self._near(filters.near)
         for j, info in enumerate(self.infos):
+            if not keep[j]:
+                continue
             keep[j] = (
                 (not bases or info.base in bases)
                 and (not depts or any(place_key(d) in depts for d in info.departements))

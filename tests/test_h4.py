@@ -434,3 +434,98 @@ def test_cost_report_counts_tokens_tools_and_filters(tmp_path: Path) -> None:
     assert s3["tools"] == {"text_search": 1, "image_search": 1}
     assert s3["searches_by_filter"] == {"hard": 1, "none": 1}
     assert s3["queries_with_hard_filter"] == 1
+
+
+# --- S4: ask, then search ------------------------------------------------------------------------
+
+
+def test_the_visitor_never_learns_a_title_author_or_date() -> None:
+    from dataclasses import fields  # noqa: PLC0415
+
+    from miroir.eval.h4_visitor import VISITOR_FIELDS, VisitorFacts, visitor_facts  # noqa: PLC0415
+
+    assert tuple(f.name for f in fields(VisitorFacts)) == VISITOR_FIELDS
+    secret = Record(
+        ref="SECRETREF",
+        collection=Collection.JOCONDE,
+        entity_id="M009",
+        title="SECRETTITLE Portrait de Madame X",
+        description="SECRETDESC peint en 1850",
+        denomination=("SECRETDENOM", "tableau"),
+        domain=("peinture",),
+        authors=("SECRETAUTHOR",),
+        period=("SECRETPERIOD 19e siècle",),
+        region="Occitanie",
+        departement="Haute-Garonne",
+        commune="Toulouse",
+        publishable=True,
+        pop_url="https://pop/SECRETURL",
+        linked_refs=("SECRETLINK",),
+        images=(),
+        photographers=("SECRETPHOTOGRAPHER",),
+        photo_date="SECRETDATE 1972",
+    )
+    facts = visitor_facts(
+        [secret], Base.JOCONDE, position=(43.6, 1.44), museum="musée des Augustins"
+    )
+    told = facts.text() + json.dumps(facts.given(), ensure_ascii=False)
+    assert "SECRET" not in told
+    assert "1850" not in told
+    assert "1972" not in told
+    assert facts.kind == "un tableau"
+    assert facts.museum == "musée des Augustins"
+    assert facts.commune == "Toulouse"
+    assert "43.60000, 1.44000" in facts.text()
+    building = visitor_facts([RECORDS[0]], Base.MERIMEE, position=None, museum="ignored")
+    assert building.museum == ""
+    assert "bâtiment" in building.kind
+
+
+def test_near_filter_keeps_entities_placed_close_to_a_point() -> None:
+    infos = entity_infos(
+        RECORDS,
+        ["M001", "PA001", "PA002"],
+        {"PA001": (45.43, 4.39), "PA002": (45.76, 4.83)},  # Saint-Étienne, Lyon
+    )
+    catalog = Catalog(infos)
+    f = parse_filters({"near": {"lat": 45.44, "lon": 4.39, "km": 5}, "mode": "hard"})
+    assert f.near == (45.44, 4.39, 5.0)
+    assert catalog.mask(f).tolist() == [False, True, False]
+    assert parse_filters({"near": {"lat": "x"}}).near is None
+
+
+def test_s4_asks_the_visitor_then_searches_with_the_answers(tmp_path: Path) -> None:
+    from miroir.eval.h4_visitor import VisitorFacts  # noqa: PLC0415
+    from miroir.jobs.h4_agent import TOOLS_S4, run_s4  # noqa: PLC0415
+
+    world, q = _world()
+    model = ScriptedModel(
+        [
+            _text('{"questions": ["Dans quel musée êtes-vous ?", "Qui est l\'artiste ?"]}'),
+            _text('{"answers": ["Au musée Saint-Raymond, à Toulouse."]}'),
+            _calls(("text_search", {"query": "vase", "filters": {"commune": ["Toulouse"]}})),
+            _calls(("final_answer", {"entity_ids": ["M001"]})),
+        ]
+    )
+    facts = VisitorFacts(commune="Toulouse", kind="un vase ou une poterie", museum="musée X")
+    out = run_s4(_caller(tmp_path, model), world, q, facts)
+    assert out.final == ("M001",)
+    assert out.detail["questions"] == ["Dans quel musée êtes-vous ?", "Qui est l'artiste ?"]
+    assert out.detail["answers"] == ["Au musée Saint-Raymond, à Toulouse.", "je ne sais pas"]
+    visitor_call = json.dumps(model.bodies[1], ensure_ascii=False)
+    assert "data:image" not in visitor_call  # the visitor gets words, not the photo
+    assert "musée X" in visitor_call
+    search_call = json.dumps(model.bodies[2], ensure_ascii=False)
+    assert "Au musée Saint-Raymond" in search_call
+    assert model.bodies[2]["tools"] == list(TOOLS_S4)
+    assert "near" in json.dumps(TOOLS_S4)
+    assert len(out.calls) == 4
+
+
+def test_questions_are_sorted_by_what_they_ask() -> None:
+    from miroir.eval.h4 import question_kind  # noqa: PLC0415
+
+    assert question_kind("Où avez-vous pris la photo ?") == "place"
+    assert question_kind("Dans quel musée êtes-vous ?") == "museum"
+    assert question_kind("Est-ce un bâtiment ou un objet ?") == "kind"
+    assert question_kind("Connaissez-vous le nom de l'artiste ?") == "name"

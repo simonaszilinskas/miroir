@@ -41,6 +41,7 @@ from miroir.eval.h4_tools import (
     MAX_ANSWER,
     MAX_TOP_K,
     MAX_VIEW,
+    NEAR_KM,
     Base,
     FilterMode,
     Filters,
@@ -54,6 +55,7 @@ from miroir.eval.h4_tools import (
     plan_scores,
     top,
 )
+from miroir.eval.h4_visitor import VisitorFacts
 from miroir.eval.scoring import Floats
 from miroir.images.fetch import LONG_SIDE, ImageFetcher, to_jpeg
 from miroir.jobs.describe import PROMPT as H1_PROMPT
@@ -73,7 +75,10 @@ REVIEW_SIZE = 20
 THUMB_PX = 256
 #: Requests that fail in a row before the run stops (out of credit, model gone).
 MAX_FAILURES_IN_A_ROW = 5
-MAX_TOKENS = {"H1": 700, "S1": 700, "S2": 400, "S3": 800}
+MAX_TOKENS = {"H1": 700, "S1": 700, "S2": 400, "S3": 800, "S4": 800}
+#: Questions S4 may ask the visitor, and results of the first look it sees.
+MAX_QUESTIONS = 3
+FIRST_LOOK = 10
 
 
 class Scenario(StrEnum):
@@ -82,6 +87,8 @@ class Scenario(StrEnum):
     S1 = "S1"
     S2 = "S2"
     S3 = "S3"
+    S4 = "S4"
+    """Ask, then search: G5's first look, up to 3 questions to a simulated visitor, then S3."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,21 +424,63 @@ up to {MAX_ANSWER} ids, best first."""
 
 S3_NUDGE = "Call a tool, or final_answer to finish."
 
-_FILTERS_SCHEMA: JSON = {
+S4_ASK = """A visitor took this photo and wants to know what it shows. A first image search \
+already found these results (they may be wrong):
+{look}
+
+Before you search, you may ask the visitor up to 3 short questions, in French, in plain \
+words a visitor understands. Ask only what would help you find the record: the visitor knows \
+where they are and what they photographed, but not the names experts use. Answer with one \
+JSON object only: {{"questions": ["...", "..."]}} (an empty list if you need nothing)."""
+
+S4_TASK = f"""Find the building or object this photo shows. You have the photo, a first image \
+search, and the visitor's answers to your questions. Call the tools as you like: \
+image_search and text_search list results, view_results shows thumbnails. Filters also take \
+"near": {{"lat": ..., "lon": ..., "km": ...}} to favour or keep records placed within km of \
+a position (default {NEAR_KM:g} km). You may make up to {MAX_TOOL_CALLS} tool calls, then call \
+final_answer with up to {MAX_ANSWER} ids, best first. Only ids you have seen in results count."""
+
+VISITOR = """Tu joues un visiteur qui a pris une photo d'un monument ou d'une œuvre et qui \
+répond aux questions d'un assistant. Tu ne sais que ce qui t'est donné ci-dessous. Réponds \
+comme un visiteur, en mots simples, en une phrase courte par question, jamais avec des termes \
+de base de données. Pour tout ce que tu ne sais pas, réponds exactement "je ne sais pas". \
+N'invente aucun nom."""
+
+VISITOR_TASK = """Ce que tu sais :
+{facts}
+
+Questions :
+{questions}
+
+Réponds par un objet JSON seulement : {{"answers": ["réponse 1", "réponse 2", ...]}}, une \
+réponse par question, dans l'ordre. Si une question porte sur une partie de la photo, réponds \
+"toute la photo"."""
+
+DONT_KNOW = "je ne sais pas"
+
+_FILTER_PROPERTIES: dict[str, JSON] = {
+    "base": {"type": "array", "items": {"type": "string", "enum": [b.value for b in Base]}},
+    "departement": {"type": "array", "items": {"type": "string"}},
+    "commune": {"type": "array", "items": {"type": "string"}},
+    "domain": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Words of the record's domain or type: église, peinture, monnaie...",
+    },
+    "period": {"type": "array", "items": {"type": "string"}},
+    "mode": {"type": "string", "enum": [m.value for m in FilterMode]},
+}
+_FILTERS_SCHEMA_DICT: dict[str, JSON] = {
     "type": "object",
     "description": "Favour (boost) or keep only (hard) records matching every field given.",
-    "properties": {
-        "base": {"type": "array", "items": {"type": "string", "enum": [b.value for b in Base]}},
-        "departement": {"type": "array", "items": {"type": "string"}},
-        "commune": {"type": "array", "items": {"type": "string"}},
-        "domain": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Words of the record's domain or type: église, peinture, monnaie...",
-        },
-        "period": {"type": "array", "items": {"type": "string"}},
-        "mode": {"type": "string", "enum": [m.value for m in FilterMode]},
-    },
+    "properties": _FILTER_PROPERTIES,
+}
+_FILTERS_SCHEMA: JSON = _FILTERS_SCHEMA_DICT
+
+_NEAR_SCHEMA: JSON = {
+    "type": "object",
+    "description": f"Records placed within km of this point (default {NEAR_KM:g} km).",
+    "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}, "km": {"type": "number"}},
 }
 
 TOOLS: tuple[JSON, ...] = (
@@ -497,6 +546,20 @@ TOOLS: tuple[JSON, ...] = (
         },
     },
 )
+
+
+def _with_near(tool: JSON) -> JSON:
+    """A tool whose filters also take "near" (S4 only, so S3's requests stay as they were)."""
+    text = json.dumps(tool)
+    filters = json.dumps(_FILTERS_SCHEMA)
+    if filters not in text:
+        return tool
+    wider = {**_FILTERS_SCHEMA_DICT, "properties": {**_FILTER_PROPERTIES, "near": _NEAR_SCHEMA}}
+    out: JSON = json.loads(text.replace(filters, json.dumps(wider)))
+    return out
+
+
+TOOLS_S4: tuple[JSON, ...] = tuple(_with_near(t) for t in TOOLS)
 
 
 def _system(text: str) -> Message:
@@ -725,10 +788,12 @@ def run_s2(caller: Caller, world: World, q: QueryData, s1: Outcome) -> Outcome:
 
 
 class _Loop:
-    """S3's running state for one query."""
+    """S3's (and S4's) running state for one query."""
 
-    def __init__(self, messages: list[Message]) -> None:
+    def __init__(self, messages: list[Message], scenario: Scenario, tools: Sequence[JSON]) -> None:
         self.messages = messages
+        self.scenario = scenario
+        self.tools = tools
         self.calls: list[CallRecord] = []
         self.steps: list[Step] = []
         self.replayed = 0
@@ -740,13 +805,22 @@ class _Loop:
 
 
 def run_s3(caller: Caller, world: World, q: QueryData) -> Outcome:
+    intro = [
+        _system(CONTEXT),
+        _user(text_part(S3_TASK), image_part(q.query.image_id, LONG_SIDE)),
+    ]
+    return _search_loop(caller, world, q, _Loop(intro, Scenario.S3, TOOLS))
+
+
+def _search_loop(
+    caller: Caller,
+    world: World,
+    q: QueryData,
+    loop: _Loop,
+    detail: Mapping[str, JSON] | None = None,
+) -> Outcome:
+    """Tool turns until final_answer or the turn limit (S3, and S4 after its questions)."""
     session = Session(world, q)
-    loop = _Loop(
-        [
-            _system(CONTEXT),
-            _user(text_part(S3_TASK), image_part(q.query.image_id, LONG_SIDE)),
-        ]
-    )
     failure = ""
     try:
         for turn in range(MAX_TURNS):
@@ -754,7 +828,7 @@ def run_s3(caller: Caller, world: World, q: QueryData) -> Outcome:
                 break
     except OpenRouterError as err:
         failure = f"api-error: {str(err)[:200]}"
-        logger.warning("S3 %s: %s", q.query.query_id, err)
+        logger.warning("%s %s: %s", loop.scenario.value, q.query.query_id, err)
     if loop.final is None and not failure:
         failure = "no-final-answer"
     final = loop.final or ()
@@ -763,7 +837,7 @@ def run_s3(caller: Caller, world: World, q: QueryData) -> Outcome:
     )
     tools_used = [s.tool for s in loop.steps if s.run]
     return Outcome(
-        Scenario.S3,
+        loop.scenario,
         q.query.query_id,
         q.set_id,
         final,
@@ -772,6 +846,7 @@ def run_s3(caller: Caller, world: World, q: QueryData) -> Outcome:
         loop.replayed,
         failure=failure,
         detail={
+            **(detail or {}),
             "tool_calls": len(tools_used),
             "final_as_text": loop.final_as_text,
             "nudges": loop.nudges,
@@ -779,6 +854,83 @@ def run_s3(caller: Caller, world: World, q: QueryData) -> Outcome:
         },
         steps=tuple(loop.steps),
     )
+
+
+# --- S4: ask, then search ----------------------------------------------------------------------
+
+
+def run_s4(caller: Caller, world: World, q: QueryData, facts: VisitorFacts) -> Outcome:
+    """G5's first look, the model's questions, the visitor's answers, then S3's loop."""
+    first = top(world.g5(q), world.catalog, FIRST_LOOK)
+    look = "\n".join(f"{i}. {world.describe(e, v)}" for i, (e, v) in enumerate(first, start=1))
+    photo = image_part(q.query.image_id, LONG_SIDE)
+    qid = q.query.query_id
+    calls: list[CallRecord] = []
+    replayed = 0
+    questions: tuple[str, ...] = ()
+    answers: tuple[str, ...] = ()
+    try:
+        asked = caller.ask(
+            [_system(CONTEXT), _user(text_part(S4_ASK.format(look=look)), photo)],
+            query_id=qid,
+            scenario=Scenario.S4,
+            step="ask",
+            json_mode=True,
+        )
+        calls.append(asked.record)
+        replayed += int(asked.replayed)
+        questions = tuple(parse_ranking(asked.text, "questions")[:MAX_QUESTIONS])
+        if questions:
+            listed = "\n".join(f"{i}. {t}" for i, t in enumerate(questions, start=1))
+            heard = caller.ask(
+                [
+                    _system(VISITOR),
+                    _user(text_part(VISITOR_TASK.format(facts=facts.text(), questions=listed))),
+                ],
+                query_id=qid,
+                scenario=Scenario.S4,
+                step="visitor",
+                json_mode=True,
+            )
+            calls.append(heard.record)
+            replayed += int(heard.replayed)
+            said = parse_ranking(heard.text, "answers")
+            answers = tuple(
+                said[i] if i < len(said) and said[i] else DONT_KNOW for i in range(len(questions))
+            )
+    except OpenRouterError as err:
+        failed = _failed(Scenario.S4, world, q, err)
+        return Outcome(
+            Scenario.S4,
+            qid,
+            q.set_id,
+            (),
+            failed.ranking,
+            tuple(calls),
+            replayed,
+            failure=failed.failure,
+        )
+    exchange = "\n".join(f"Q: {t}\nR: {a}" for t, a in zip(questions, answers, strict=True))
+    intro = [
+        _system(CONTEXT),
+        _user(
+            text_part(S4_TASK),
+            photo,
+            text_part(f"First look (G5 image search):\n{look}"),
+            text_part(
+                f"The visitor's answers:\n{exchange}" if exchange else "You asked no question."
+            ),
+        ),
+    ]
+    loop = _Loop(intro, Scenario.S4, TOOLS_S4)
+    loop.calls.extend(calls)
+    loop.replayed = replayed
+    detail: dict[str, JSON] = {
+        "questions": list(questions),
+        "answers": list(answers),
+        "visitor_given": dict(facts.given()),
+    }
+    return _search_loop(caller, world, q, loop, detail)
 
 
 def _turn(caller: Caller, q: QueryData, session: Session, loop: _Loop, turn: int) -> bool:
@@ -790,9 +942,9 @@ def _turn(caller: Caller, q: QueryData, session: Session, loop: _Loop, turn: int
     reply = caller.ask(
         loop.messages,
         query_id=q.query.query_id,
-        scenario=Scenario.S3,
+        scenario=loop.scenario,
         step=f"turn-{turn}",
-        tools=TOOLS,
+        tools=loop.tools,
         tool_choice="required" if out_of_calls else "auto",
     )
     loop.calls.append(reply.record)
