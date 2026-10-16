@@ -106,6 +106,16 @@ uv run miroir web dev --real    # the same page searching with the deployed GPU 
 
 To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `WEB_INDEX` in `src/miroir/config.py`, then build-index, upload and deploy.
 
+**Conversation page (H5, `/chat`).** Needs the OpenRouter key in its own Modal secret and the list of images that may go to the model in the bundle:
+
+```sh
+uv run miroir web publishable --upload   # writes publishable.txt.gz into the bundle, copies it to the volume
+uv run miroir web chat-secret            # copies OPENROUTER_API_KEY from .env into the miroir-openrouter secret
+uv run miroir web deploy
+```
+
+The deploy fails until the `miroir-openrouter` secret exists. Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment; to change them on Modal, add them to the `miroir-openrouter` secret. Locally, `miroir web dev` runs the page with Mistral when `OPENROUTER_API_KEY` is in `.env` (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
+
 ## Cost
 
 An L4 with 4 CPUs and 24 GB costs about $1.18 an hour while awake. Each wake-up costs about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Nothing runs when nobody uses the site. Searches are limited to 30 a minute per session, logins to 5 a minute per address.

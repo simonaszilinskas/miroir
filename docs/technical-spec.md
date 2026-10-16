@@ -443,6 +443,40 @@ uv run miroir vlm h4 --all --max-usd <usd>        # every tune query; writes the
 - **Results.** One card per group, listed by closeness: its best-matching POP image (a Commons photo of the entity helps the search but is never shown; the card then shows its best POP image), title, place, collection, a link to POP, and a confidence level: "Très proche", "Proche" or "Ressemblance" (`miroir.web.levels`, thresholds per route in the bundle's `levels.json`, set by `miroir web levels` on the tune halves: "Très proche" right at least 80% of the time, on at most 10% of T8 and T8c searches; prototype.md). A "matched on: back of canvas" tag appears when the shown image isn't `main`. Record pages list POP images only.
 - **Login.** Accounts created by an admin and stored hashed in the API's database. No sign-up page.
 
+### 8.1 The conversation page (step H5)
+
+An experiment beside the usual search, at `/chat` (the view `#/conversation`; the home page links to it as "Essai : recherche en conversation (expérimental)"). Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
+
+**Flow.**
+
+1. The visitor gives a photo, words, or both (`POST /api/chat/open`). With a photo, the site's usual search (G5, with the photo's GPS position when it has one) starts at once, while the visitor writes what they want.
+2. The page asks "Que cherchez-vous ?" in a free-text box, with suggestion chips above it ("Cet objet précis", "Des objets semblables", "Le même lieu", "Qui l'a fait, d'où ça vient"; `GOAL_CHIPS` in `static/chat.js`, the one place to change them). The goal is the first thing the model reads, with the photo, the visitor's words and the first look (the usual search's top 10, with their levels). The brief tells the model how a goal changes the search: one record and 1 to 5 picks for an exact match, up to 10 for similar things, a commune or `near` filter for a place, the records' author and date for "who made it".
+3. The model calls tools until it shows results or asks the visitor something. Questions fit the subject (a building, a painting, an object and an archive print need different ones); the model gives 2 to 4 suggested answers, and the page always adds a free-text box (the main way to answer) and "Je ne sais pas". It may offer "Utiliser ma position". `ask_region` opens the site's framing step on the visitor's photo; the framed part comes back as an image the model can search.
+4. `show_results` ends the turn: the page draws the site's result cards, each with the model's short reason. Ids the model never saw in a result are dropped. The visitor can write again ("pas celle-ci, l'église est plus ancienne"), and the model searches again.
+
+Words alone work too: the model then has text search, thumbnails and questions, no image search and no framing.
+
+**Tools** (`miroir.web.chat_tools`: name, description, JSON schema and handler of each, in one table, so they could be served as an MCP server unchanged). The searches run where the engine runs (`miroir.web.toolsearch`; in the GPU container, `Search.tool_search`).
+
+| Tool | Does |
+|---|---|
+| `image_search(source, model, a7_weight, top_k, filters)` | The photo or the framed part, against the live index: `auto` (G5's routed weight), `A7`, `A3` or `mix`. An archive print on its card is searched without the card, as the site does |
+| `text_search(query, top_k, filters)` | BM25 over record text; lists only records holding a word |
+| `view_results(entity_ids)` | Up to 8 entities the model has seen, each its image closest to the photo, as 256 px thumbnails |
+| `ask_visitor(question, choices, offer_position)` | One question, 2 to 4 suggested answers |
+| `ask_region(reason)` | The visitor frames part of the photo |
+| `show_results(results)` | Up to 10 ids, best first, each with a reason |
+
+Filters (base, département, commune, domain, period, `near`) favour by default: +0.25 on a 0-1 score, and `near` adds H2's soft prior. They cut only with `mode: "hard"` (H4's 10-photo test: a hard museum filter took the right plate from 2nd to 21st). An unknown key or value is an error naming the valid ones; nothing is searched. A commune matches whichever side POP writes its article on ("Ferté-Bernard (La)" = "La Ferté-Bernard"). A search that repeats an earlier one (the same image search, or a text search with the same filters and at least 75% of the same words) is not run, and the model is told to change approach. Each visitor message allows 8 searches and 3 looks at thumbnails; past them the model must show results or ask. A reply with no tool call gets one reminder per message (Mistral sometimes says what it will do and stops).
+
+**Streaming.** A turn runs as a task on the web container and writes events: a step per tool call (a line such as "Recherche par image (MegaLoc), en priorité : Morbihan · 15 résultats", which opens to its thumbnails), the model's words, a question, a request to frame, results, a spending stop, the end of the turn. The page reads them as JSON lines (`POST /api/chat/events`); a stream ends after 110 s (Modal cuts requests at 150 s) and the page asks again from where it stopped.
+
+**Privacy.** The visitor's own photo, and the part they frame, go to the model through OpenRouter; the page says so in one line. Record thumbnails go only for publishable images and Commons photos: `miroir web publishable` runs the `PublishableImages` rule on the Mac and writes the allowed ids into the bundle (`publishable.txt.gz`); every thumbnail id is checked against it before its bytes are read, and again before each request leaves. A bundle without the file sends no record image. Positions are used, never logged.
+
+**Money.** Each conversation stops at `MIROIR_CHAT_CONVERSATION_USD` (default $0.10) and all conversations of a UTC day at `MIROIR_CHAT_DAY_USD` (default $2). A call is refused when it could pass a cap, guessing its cost from the last call's; the page then says so and offers the usual search. Each paid call is logged with its cost, the conversation's total and the day's (never the key). The day's total lives in the `miroir-chat-spend` Modal Dict, so a restarted container keeps it; on the Mac in `~/miroir-data/spend/chat-days.json`, and each paid call also goes to the project ledger.
+
+**Model.** Mistral Large 4 (`mistralai/mistral-large-4-0`), as H4: open, takes images and tools; reasoning off, temperature 0, 800 output tokens. Older thumbnails are replaced by a note after the last 12, to keep each request small. A smoke test against the fake engine (2026-10-16, 3 conversations, 17 calls, $0.082) showed the tool calls work as written; it also led to the reminder, the separate thumbnail cap, the French-only rule for anything the visitor reads, and the commune article fix. A turn costs about $0.02-0.04.
+
 ## 9. Logging and privacy
 
 - **What we log:** each search's query (image hash, box, text, filters), returned refs and timing. Query images are stored only for logged-in testers who agreed in writing.

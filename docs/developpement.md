@@ -32,6 +32,7 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal, unless `~/.modal.toml` exists (`modal token new`) |
 | `MIROIR_OPENROUTER_BUDGET_USD` | Spending cap for paid model runs (OpenRouter and Modal together) |
 | `MIROIR_APP_PASSWORD`, `MIROIR_SESSION_SECRET` | The prototype website's shared password and cookie key (`miroir web secret`) |
+| `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the conversation page, per conversation and per day (defaults 0.10 and 2) |
 
 Data and images are never stored in the repository. Secrets are never committed.
 

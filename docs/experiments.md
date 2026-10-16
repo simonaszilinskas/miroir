@@ -116,6 +116,7 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 | H2 | Use the photo's GPS position to keep only records within 2 km. Tested on T2 photos that carry GPS. Needs coordinates for records (POP coordinates where present, else the commune centre) |
 | H3 | H1 or H2 as one more signal into G3 |
 | H4 | A vision model leads the search: it sees the photo, calls image search, text search and filters as tools, looks at the results and picks the top 10. Mistral Large 4 (open, on OpenRouter), four ways: one plan (S1), plan then review (S2), free loop (S3), ask the visitor up to 3 questions then search (S4). Technical spec §7.4 |
+| H5 | H4 on the website, with real visitors: the conversation page (`/chat`). The visitor gives a photo or words and says what they want (this exact thing, similar things, the same place, who made it); the site's usual search starts at once and Mistral Large 4 gets its first results, asks questions that fit the subject, searches the live index with the tools (soft filters, a refused repeat, a cap of 8 searches a message) and shows its picks as result cards. Technical spec §8.1 |
 
 ## 3. Test sets
 
