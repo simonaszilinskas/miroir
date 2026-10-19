@@ -123,6 +123,34 @@ def deploy() -> str:
     return url or "(no URL: check `modal app list`)"
 
 
+def pull_chat_logs(settings: Settings) -> list[Path]:
+    """Copy the deployed site's conversation logs from the index volume into
+    `Settings.chat_logs_dir / "hosted"`. Returns the files written (new or grown)."""
+    import modal  # noqa: PLC0415
+    from modal.types import FileEntryType  # noqa: PLC0415
+
+    from miroir.config import MODAL_CHAT_LOGS  # noqa: PLC0415
+    from miroir.web.chatlog import pull  # noqa: PLC0415
+    from miroir.web.modal_app import INDEX_VOLUME  # noqa: PLC0415
+
+    volume = modal.Volume.from_name(INDEX_VOLUME)
+
+    def names() -> list[str]:
+        try:
+            entries = volume.listdir(MODAL_CHAT_LOGS, recursive=True)
+        except FileNotFoundError:
+            return []
+        prefix = f"{MODAL_CHAT_LOGS}/"
+        return [
+            e.path.lstrip("/").removeprefix(prefix) for e in entries if e.type == FileEntryType.FILE
+        ]
+
+    def read(name: str) -> bytes:
+        return b"".join(volume.read_file(f"{MODAL_CHAT_LOGS}/{name}"))
+
+    return pull(names, read, settings.chat_logs_dir / "hosted")
+
+
 class LedgerSpend:
     """The day's totals of `FileSpend`, and each paid call in the project's spend ledger too
     (experiments.md §1 rule 5), when the local page talks to OpenRouter."""
@@ -176,6 +204,7 @@ def serve_locally(
         OpenRouterModel,
         ThumbSource,
     )
+    from miroir.web.chatlog import FileChatLog  # noqa: PLC0415
     from miroir.web.fake import FakeGuide, LocalBackend, fake_engine  # noqa: PLC0415
     from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
@@ -203,6 +232,7 @@ def serve_locally(
             spend=LedgerSpend(settings, model.model),
             limits=Limits(settings.chat_conversation_usd, settings.chat_day_usd),
             index_size=(len(engine.catalog.images), engine.catalog.entity_count),
+            log=FileChatLog(settings.chat_logs_dir),
         )
 
     site = create_app(

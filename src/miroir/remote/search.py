@@ -89,6 +89,12 @@ class GpuGallery:
     def a3(self, query: Floats) -> Floats:
         return self._cosines(self._a3, query)
 
+    def a7_row(self, row: int) -> Floats:
+        return self._a7[row].float().cpu().numpy()
+
+    def a3_row(self, row: int) -> Floats:
+        return self._a3[row].float().cpu().numpy()
+
 
 def load_search(directory: Path, captions: CaptionReader | None = None) -> Engine:
     """Everything a search container needs, loaded once at start."""

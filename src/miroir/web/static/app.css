@@ -277,6 +277,7 @@ main { min-height: 60vh; }
 .miroir-call__line > .miroir-spinner, .miroir-call__line > .miroir-call__icon { display: inline-block; vertical-align: -.2em; margin-right: .375rem; }
 .miroir-call summary.miroir-call__line { cursor: pointer; }
 .miroir-call__label { color: var(--text-default-grey); }
+.miroir-call__why { margin: 0 0 .125rem; font-style: italic; color: var(--text-mention-grey); }
 .miroir-call__icon::before { --icon-size: 1rem; }
 .miroir-call .miroir-spinner { width: 1rem; height: 1rem; }
 .miroir-call__thumbs { list-style: none; display: flex; flex-wrap: wrap; gap: .375rem; padding: .5rem 0 .25rem; margin: 0; }

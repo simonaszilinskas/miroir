@@ -98,6 +98,14 @@ class GalleryVectors(Protocol):
         """The same for MegaLoc (after the projection, when the index has one)."""
         ...
 
+    def a7_row(self, row: int) -> Floats:
+        """One image's stored EmbeddingGemma 2 vector (no model runs)."""
+        ...
+
+    def a3_row(self, row: int) -> Floats:
+        """One image's stored MegaLoc vector, in the space `a3` searches."""
+        ...
+
 
 def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
     """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
@@ -390,6 +398,17 @@ class Engine:
         The conversation page's image search mixes them its own way (`miroir.web.toolsearch`)."""
         mask = np.ones(len(self.catalog.images), dtype=bool)
         return self._cosines(prepare_photo(data), mask, {})
+
+    def stored_cosines(self, row: int) -> tuple[Floats, Floats]:
+        """(EmbeddingGemma 2, MegaLoc) cosines of one gallery image's stored vectors with every
+        image: a search by a record's own image, with no model run (the conversation page's
+        `more_like`)."""
+        a7 = self.gallery.a7(unit(self.gallery.a7_row(row)))
+        a3 = self.gallery.a3(unit(self.gallery.a3_row(row)))
+        if self.exact is not None:
+            full = unit(np.asarray(self.exact.rows[row], dtype=np.float32) * self.exact.scale[row])
+            a3 = shortlist_cosines(self.exact, full, a7, a3)
+        return a7.astype(np.float32), a3.astype(np.float32)
 
     def _cosines(
         self, jpeg: bytes, mask: NDArray[np.bool_], timings: dict[str, float]

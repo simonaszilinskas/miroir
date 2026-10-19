@@ -16,6 +16,8 @@ Model code is imported inside the container (`miroir.remote.search`). Secrets co
 the conversation page's OpenRouter key from the `miroir-openrouter` secret
 (OPENROUTER_API_KEY), written by `miroir web chat-secret`. Its spending per day is kept in
 the `miroir-chat-spend` Modal Dict, so a restarted container still knows the day's total.
+Its logs (`miroir.web.chatlog`, no images) go to `chat-logs/` on the index volume, committed
+after each turn; `miroir web chat-logs` copies them to the Mac.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import TYPE_CHECKING, cast
 
 import modal
 
-from miroir.config import MODAL_WEB_INDEX_MOUNT, MODAL_WEIGHTS_MOUNT, WEB_INDEX
+from miroir.config import MODAL_CHAT_LOGS, MODAL_WEB_INDEX_MOUNT, MODAL_WEIGHTS_MOUNT, WEB_INDEX
 from miroir.jobs.modal_app import HF_SECRET_NAME, model_caches, model_libraries
 
 if TYPE_CHECKING:
@@ -205,6 +207,7 @@ def web() -> FastAPI:
     from miroir.web.app import create_app  # noqa: PLC0415
     from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
     from miroir.web.chat import ChatService, Limits, OpenRouterModel, ThumbSource  # noqa: PLC0415
+    from miroir.web.chatlog import FileChatLog  # noqa: PLC0415
     from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
     setup()
@@ -219,6 +222,11 @@ def web() -> FastAPI:
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
     limits = Limits(settings.chat_conversation_usd, settings.chat_day_usd)
 
+    async def commit() -> None:
+        await index_volume.commit.aio()  # pyright: ignore[reportUnknownMemberType]
+
+    log = FileChatLog(Path(MODAL_WEB_INDEX_MOUNT) / MODAL_CHAT_LOGS, commit)
+
     def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:
         assert key is not None
         return ChatService(
@@ -228,6 +236,7 @@ def web() -> FastAPI:
             spend=DictSpend(),
             limits=limits,
             index_size=(len(catalog.images), catalog.entity_count),
+            log=log,
         )
 
     return create_app(

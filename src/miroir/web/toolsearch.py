@@ -8,7 +8,9 @@ deployed (`miroir.web.modal_app.Search.tool_search`), with fake models on the Ma
   entity as the site mixes them (`ranking.fuse`), at G5's routed weight or the one asked for;
 - text search: BM25 over record text, as H4's `text_search`;
 - view: each entity's images, closest to the photo first, so the page can show the model
-  thumbnails (it checks which may go out, `miroir.web.publishable`).
+  thumbnails (it checks which may go out, `miroir.web.publishable`);
+- like: the records that look like one the model has already seen, by that record's own
+  stored vectors (`Engine.stored_cosines`): no model runs, so it costs no embedding.
 
 Filters favour by default: a matching entity gains `BOOST` on its 0-1 score, and a position
 adds the soft prior of step H2. A hard cut happens only when the caller asks (H4's 10-photo
@@ -55,6 +57,7 @@ class SearchKind(StrEnum):
     IMAGE = "image"
     TEXT = "text"
     VIEW = "view"
+    LIKE = "like"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +103,9 @@ class ToolQuery:
     filters: ToolFilters = field(default_factory=ToolFilters)
     top_k: int = DEFAULT_TOP_K
     entity_ids: tuple[str, ...] = ()
-    """View: the entities to show."""
+    """View: the entities to show. Like: the one entity to start from."""
+    image_id: str | None = None
+    """Like: the entity's image to start from (the one the model saw); None: its cover."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +181,8 @@ class ToolSearch:
                 return self._text(query)
             case SearchKind.VIEW:
                 return self._view(query)
+            case SearchKind.LIKE:
+                return self._like(query)
 
     # --- searches ------------------------------------------------------------------------------
 
@@ -223,6 +230,38 @@ class ToolSearch:
         found = self._ranked(fused, per_image, query)
         return ToolHits(
             found.hits, found.matching, words_found=True, near_ignored=found.near_ignored
+        )
+
+    def _like(self, query: ToolQuery) -> ToolHits:
+        catalog = self.engine.catalog
+        entity = catalog.entity_row.get(query.entity_ids[0]) if query.entity_ids else None
+        if entity is None:
+            msg = "a search by a record's image needs a known entity"
+            raise ValueError(msg)
+        row = self.start_row(entity, query.image_id)
+        a7, a3 = self.engine.stored_cosines(row)
+        w = 0.5 if query.a7_weight is None else min(max(query.a7_weight, 0.0), 1.0)
+        signals = [
+            ranking.Signal(ranking.entity_max(a7, catalog), w),
+            ranking.Signal(ranking.entity_max(a3, catalog), 1 - w),
+        ]
+        fused = ranking.fuse([s for s in signals if s.weight > 0])
+        fused[entity] = -np.inf  # the record itself is not news
+        found = self._ranked(fused, weighted(a7, a3, w), query)
+        return ToolHits(found.hits, found.matching, a7_weight=w, near_ignored=found.near_ignored)
+
+    def start_row(self, entity: int, image_id: str | None) -> int:
+        """The image a search by look starts from: the one the model saw when it belongs to
+        the entity, else its cover (POP images before Commons photos)."""
+        catalog = self.engine.catalog
+        rows = [int(r) for r in catalog.entity_image_rows(entity)]
+        if image_id is not None:
+            row = catalog.image_row.get(image_id)
+            if row is not None and row in rows:
+                return row
+        return min(
+            rows,
+            key=lambda r: (catalog.image_record[r] < 0, not catalog.images[r].is_cover, r),
         )
 
     def _view(self, query: ToolQuery) -> ToolHits:

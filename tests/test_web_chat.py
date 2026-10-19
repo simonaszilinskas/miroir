@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import Outlines
 from miroir.records.bases import place_key
+from miroir.web import chat as chat_module
 from miroir.web.app import create_app
 from miroir.web.chat import (
     BRIEF,
@@ -25,6 +26,7 @@ from miroir.web.chat import (
     ThumbSource,
 )
 from miroir.web.chat_tools import TOOLS, ToolName, tools_for
+from miroir.web.chatlog import ChatLog
 from miroir.web.engine import SearchRequest, SearchResponse
 from miroir.web.fake import FakeGuide, LocalBackend, ScriptedModel
 from miroir.web.publishable import (
@@ -50,6 +52,7 @@ PHOTO = base64.b64encode(h.photo(90)).decode()
 EXACT = "Je cherche ce monument précis."
 SIMILAR = "Je cherche des objets semblables."
 CAPS = Limits(0.10, 2.0)
+WHY = "Le dernier résultat ne tranche pas ; je vérifie."
 
 
 def call(name: str, args: Mapping[str, JSON], cost: float = 0.001, text: str = "") -> ChatAnswer:
@@ -72,13 +75,15 @@ def calls(
 
 
 class CountingBackend:
-    """The local backend, counting the searches that reach it."""
+    """The local backend, counting the searches that reach it. A `cutoff` above 1 keeps the
+    first look from rating anything "Très proche" (no sure match)."""
 
-    def __init__(self) -> None:
-        engine, _ = h.engine(building=True)
+    def __init__(self, cutoff: float = 0.9) -> None:
+        engine, _ = h.engine(building=True, cutoff=cutoff)
         self.engine = engine
         self.local = LocalBackend(engine)
         self.counts = {"search": 0, "tool": 0}
+        self.queries: list[ToolQuery] = []
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
@@ -86,6 +91,7 @@ class CountingBackend:
 
     async def tool_search(self, query: ToolQuery) -> ToolHits:
         self.counts["tool"] += 1
+        self.queries.append(query)
         return await self.local.tool_search(query)
 
     async def warm(self) -> None:
@@ -114,9 +120,11 @@ class Rig:
         publishable: Sequence[str] = ("m1", "m2", "j1", "j2", "r1", "commons-c1"),
         limits: Limits = CAPS,
         spend: MemorySpend | None = None,
+        cutoff: float = 0.9,
+        log: ChatLog | None = None,
     ) -> None:
         self.model = ScriptedModel(answers)
-        self.backend = CountingBackend()
+        self.backend = CountingBackend(cutoff)
         self.fetches = Fetches()
         self.spend = spend or MemorySpend()
         self.service: ChatService | None = None
@@ -131,6 +139,7 @@ class Rig:
                 limits=limits,
                 index_size=(6, 3),
                 today=lambda: "2026-10-16",
+                log=log,
             )
             return self.service
 
@@ -180,6 +189,21 @@ class Rig:
             after = int(lines[-1]["after"])
 
 
+def searching(name: str, args: Mapping[str, JSON], **kw: object) -> ChatAnswer:
+    """A search or a look, with its why."""
+    return call(name, {**args, "why": WHY}, **kw)  # pyright: ignore[reportArgumentType]
+
+
+def shown(*ids: str, found: str = "close", cost: float = 0.001) -> ChatAnswer:
+    results: list[JSON] = [{"id": i, "reason": "r"} for i in ids]
+    summary = "" if found == "exact" else "Je ne trouve pas cet objet précis. Les plus proches."
+    return call("show_results", {"found": found, "summary": summary, "results": results}, cost)
+
+
+#: Looks at the first look's top results, as the model must before a search.
+LOOK = searching("view_results", {"entity_ids": ["OBJ1", "PA1"]})
+
+
 def of(events: Sequence[dict[str, JSON]], kind: str) -> list[dict[str, JSON]]:
     return [e for e in events if e["type"] == kind]
 
@@ -210,8 +234,16 @@ def test_question_then_answer_then_search_then_results() -> None:
             {"question": "Où est ce bâtiment ?", "choices": ["Dans une ville", "À la campagne"]},
             text="Une question d’abord.",
         ),
-        call("image_search", {"model": "auto", "filters": {"commune": ["Toulouse"]}}),
-        call("show_results", {"results": [{"id": "PA1", "reason": "même façade"}]}),
+        LOOK,
+        searching("image_search", {"model": "auto", "filters": {"commune": ["Toulouse"]}}),
+        call(
+            "show_results",
+            {
+                "found": "close",
+                "summary": "Je ne trouve pas ce bâtiment précis.",
+                "results": [{"id": "PA1", "reason": "même façade"}],
+            },
+        ),
     ]
     with Rig(script) as rig:
         cid = rig.start()
@@ -225,8 +257,10 @@ def test_question_then_answer_then_search_then_results() -> None:
 
         second = rig.send(cid, "answer", "À Toulouse")
         steps = [s for s in of(second, "step") if s["state"] == "done"]
-        assert "Recherche par image" in str(steps[0]["label"])
-        assert "Toulouse" in str(steps[0]["label"])
+        assert "Regarde des images" in str(steps[0]["label"])
+        assert "Recherche par image" in str(steps[1]["label"])
+        assert "Toulouse" in str(steps[1]["label"])
+        assert steps[1]["why"] == WHY
         assert card_ids(second) == ["PA1"]
         results = of(second, "results")[0]["cards"]
         assert isinstance(results, list)
@@ -243,7 +277,7 @@ def test_question_then_answer_then_search_then_results() -> None:
 
 @pytest.mark.parametrize("goal", [EXACT, SIMILAR])
 def test_the_visitors_goal_is_the_first_thing_the_model_reads(goal: str) -> None:
-    with Rig([call("show_results", {"results": [{"id": "PA1", "reason": "r"}]})]) as rig:
+    with Rig([shown("PA1")]) as rig:
         cid = rig.start()
         rig.send(cid, "goal", goal)
     messages = rig.model.bodies[0]["messages"]
@@ -261,8 +295,8 @@ def test_the_visitors_goal_is_the_first_thing_the_model_reads(goal: str) -> None
 
 def test_a_start_with_words_only_offers_no_image_tools() -> None:
     script = [
-        call("text_search", {"query": "église Saint-Pierre"}),
-        call("show_results", {"results": [{"id": "PA1", "reason": "le nom"}]}),
+        searching("text_search", {"query": "église Saint-Pierre"}),
+        shown("PA1"),
     ]
     with Rig(script) as rig:
         cid = rig.start(photo=False, words="église Saint-Pierre à Toulouse")
@@ -280,9 +314,9 @@ def test_a_start_with_words_only_offers_no_image_tools() -> None:
 
 def test_a_visitor_message_after_results_starts_a_new_search() -> None:
     script = [
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
-        call("text_search", {"query": "vase céramique"}),
-        call("show_results", {"results": [{"id": "OBJ1", "reason": "un vase"}]}),
+        shown("PA1"),
+        searching("text_search", {"query": "vase céramique"}),
+        shown("OBJ1"),
     ]
     with Rig(script) as rig:
         cid = rig.start()
@@ -295,8 +329,9 @@ def test_a_visitor_message_after_results_starts_a_new_search() -> None:
 def test_a_framed_region_comes_back_as_an_image_to_search() -> None:
     script = [
         call("ask_region", {"reason": "Quel tableau ?"}),
-        call("image_search", {"source": "region", "model": "A3"}),
-        call("show_results", {"results": [{"id": "OBJ1", "reason": "r"}]}),
+        LOOK,
+        searching("image_search", {"source": "region", "model": "A3"}),
+        shown("OBJ1"),
     ]
     with Rig(script) as rig:
         cid = rig.start()
@@ -315,38 +350,43 @@ def test_a_framed_region_comes_back_as_an_image_to_search() -> None:
 
 def test_an_unknown_filter_key_is_an_error_naming_the_valid_ones() -> None:
     script = [
-        call("image_search", {"filters": {"region": ["Bretagne"]}}),
-        call("image_search", {"filters": {"base": ["museum"]}}),
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        LOOK,
+        searching("image_search", {"filters": {"region": ["Bretagne"]}}),
+        searching("image_search", {"filters": {"base": ["museum"]}}),
+        shown("PA1"),
     ]
     with Rig(script) as rig:
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
-    first, second = tool_messages(rig.model.bodies[2])
+    _, first, second = tool_messages(rig.model.bodies[3])
     assert "unknown filter key(s): region" in first
     assert "Valid keys: base, departement, commune, domain, period, near, mode" in first
     assert "unknown base 'museum'" in second
     assert "merimee, palissy, joconde, memoire, rose-valland" in second
-    assert rig.backend.counts["tool"] == 0
+    assert rig.backend.counts["tool"] == 1  # the look only
 
 
 def test_a_repeated_search_is_not_run_and_the_model_is_told() -> None:
     script = [
-        call("text_search", {"query": "église Saint-Pierre Toulouse"}),
-        call("text_search", {"query": "Toulouse, église de Saint-Pierre"}),
-        call("text_search", {"query": "église Saint-Pierre", "filters": {"commune": "Toulouse"}}),
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        LOOK,
+        searching("text_search", {"query": "église Saint-Pierre Toulouse"}),
+        searching("text_search", {"query": "Toulouse, église de Saint-Pierre"}),
+        searching(
+            "text_search", {"query": "église Saint-Pierre", "filters": {"commune": "Toulouse"}}
+        ),
+        shown("PA1"),
     ]
     with Rig(script) as rig:
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
-    replies = tool_messages(rig.model.bodies[3])
-    assert replies[1].startswith("not run: this repeats step 2")
-    assert not replies[2].startswith("not run")  # other filters: a new search
-    assert rig.backend.counts["tool"] == 2
+    replies = tool_messages(rig.model.bodies[4])
+    assert replies[2].startswith("not run: this repeats step 3")
+    assert not replies[3].startswith("not run")  # other filters: a new search
+    assert rig.backend.counts["tool"] == 3  # the look, then two searches
 
 
-def test_searches_stop_at_the_cap_for_one_message() -> None:
+def test_searches_stop_at_the_cap_for_one_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # the tiny index has nothing new to add
     words = [
         "vase",
         "église",
@@ -359,29 +399,32 @@ def test_searches_stop_at_the_cap_for_one_message() -> None:
         "rouen",
     ]
     script = [
-        calls([("text_search", {"query": w}) for w in words]),
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        LOOK,
+        calls([("text_search", {"query": w, "why": WHY}) for w in words]),
+        shown("PA1"),
     ]
-    with Rig(script) as rig:
+    with Rig(script) as rig:  # the first look is sure: only the cap of 8 stops searches
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
-    replies = tool_messages(rig.model.bodies[1])
+    replies = tool_messages(rig.model.bodies[2])[1:]
     assert len(replies) == len(words)
     assert sum(r.startswith("not run: no search") for r in replies) == len(words) - MAX_TOOL_CALLS
-    assert rig.model.bodies[1]["tool_choice"] == "required"
+    assert rig.model.bodies[2]["tool_choice"] == "required"
 
 
 def test_ids_the_model_never_saw_are_dropped() -> None:
     script = [
-        call("text_search", {"query": "église"}),
+        searching("text_search", {"query": "église"}),
         call(
             "show_results",
             {
+                "found": "close",
+                "summary": "Les plus proches.",
                 "results": [
                     {"id": "OBJ2", "reason": "jamais vu"},
                     {"id": "PA1", "reason": "vu"},
                     {"id": "PA999", "reason": "inventé"},
-                ]
+                ],
             },
         ),
     ]
@@ -393,17 +436,16 @@ def test_ids_the_model_never_saw_are_dropped() -> None:
 
 def test_thumbnails_of_records_that_are_not_publishable_never_leave() -> None:
     script = [
-        call("image_search", {"model": "auto"}),
-        call("view_results", {"entity_ids": ["PA1", "OBJ1", "OBJ2"]}),
-        call("show_results", {"results": [{"id": "OBJ1", "reason": "r"}]}),
+        searching("view_results", {"entity_ids": ["PA1", "OBJ1", "OBJ2"]}),
+        shown("OBJ1"),
     ]
     with Rig(script, publishable=("j2",)) as rig:  # only OBJ1's back may go out
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
     assert rig.fetches.urls == ["https://example.org/j2.jpg"]
-    sent = body_text(rig.model.bodies[2])
+    sent = body_text(rig.model.bodies[1])
     assert sent.count("data:image/jpeg") == 2  # the visitor's photo and j2
-    view = tool_messages(rig.model.bodies[2])[1]
+    view = tool_messages(rig.model.bodies[1])[0]
     assert "PA1 | merimee" in view
     assert "(no image may be shown)" in view
     assert rig.service is not None
@@ -425,8 +467,8 @@ def test_a_thumbnail_source_refuses_an_image_that_is_not_publishable() -> None:
 
 def test_the_conversation_cap_stops_the_model() -> None:
     script = [
-        call("text_search", {"query": "église"}, cost=0.06),
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}, cost=0.06),
+        searching("text_search", {"query": "église"}, cost=0.06),
+        shown("PA1", cost=0.06),
     ]
     with Rig(script, limits=Limits(0.10, 2.0)) as rig:
         cid = rig.start()
@@ -449,7 +491,7 @@ def test_the_day_cap_stops_the_model_before_any_call() -> None:
 
 def test_spending_adds_up_per_day() -> None:
     spend = MemorySpend()
-    script = [call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}, cost=0.02)]
+    script = [shown("PA1", cost=0.02)]
     with Rig(script, spend=spend) as rig:
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
@@ -587,7 +629,7 @@ def say_only(text: str) -> ChatAnswer:
 def test_a_reply_without_a_tool_call_is_nudged_once() -> None:
     script = [
         say_only("Je relance avec une recherche par mots."),
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        shown("PA1"),
         say_only("Merci !"),
         say_only("Bonne visite."),
     ]
@@ -603,11 +645,11 @@ def test_a_reply_without_a_tool_call_is_nudged_once() -> None:
 
 
 def test_looks_at_thumbnails_have_their_own_cap() -> None:
-    views = [call("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2", "PA1")]
+    views = [searching("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2")]
     script = [
-        call("text_search", {"query": "église vase nature"}),
         *views,
-        call("show_results", {"results": [{"id": "PA1", "reason": "r"}]}),
+        searching("view_results", {"entity_ids": ["OBJ1", "PA1"]}),
+        shown("PA1"),
     ]
     with Rig(script) as rig:
         cid = rig.start()

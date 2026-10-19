@@ -69,6 +69,12 @@ class NumpyGallery:
     def a3(self, query: Floats) -> Floats:
         return self.a7_matrix @ query
 
+    def a7_row(self, row: int) -> Floats:
+        return np.asarray(self.a7_matrix[row], dtype=np.float32)
+
+    def a3_row(self, row: int) -> Floats:
+        return np.asarray(self.a7_matrix[row], dtype=np.float32)
+
 
 #: What the stand-in caption reader "reads" on any mounted print.
 FAKE_CAPTION = "BEAUNE (Côte-d'Or) Eglise Notre-Dame, façade ouest, porte centrale"
@@ -154,10 +160,11 @@ _LISTED = re.compile(r"^\d+\. ([^ |]+) \|", re.MULTILINE)
 
 
 class FakeGuide:
-    """A rule-following stand-in for the model, so the page runs on the Mac at no cost: one
-    question when there is a photo (a request to frame part of it when the goal says
-    "cadre"), an image search, a look at three thumbnails, then three results. A message from
-    the visitor gets a text search of their words."""
+    """A rule-following stand-in for the model, so the page runs on the Mac at no cost. With
+    a photo it looks at the first look's top thumbnails, then asks one question (or asks to
+    frame part of the photo when the goal says "cadre"), then runs an image search, looks at
+    three results and shows them as close. A message from the visitor gets a text search of
+    their first words. Every search and look says why."""
 
     @property
     def model(self) -> str:
@@ -170,39 +177,81 @@ class FakeGuide:
         role = last.get("role")
         content = _content_text(last)
         listed = [i for m in messages if m.get("role") == "tool" for i in _ids(_content_text(m))]
+        asked = any(
+            _dict(c.get("function")).get("name") == "ask_visitor"
+            for m in messages
+            for c in _dicts(m.get("tool_calls"))
+        )
         if role == "user" and "The visitor's goal" in content:
             if "ask_region" in tools and "cadre" in content:
                 reason = {"reason": "Encadrez la partie de la photo qui vous intéresse."}
                 return _answer("", [("ask_region", reason)])
-            if "image_search" in tools:
-                question: dict[str, JSON] = {
-                    "question": "Que montre votre photo, en quelques mots ?",
-                    "choices": ["Un bâtiment", "Un tableau", "Un objet"],
+            first = _ids(content)[:3]
+            if first:
+                look: dict[str, JSON] = {
+                    "entity_ids": list[JSON](first),
+                    "why": "Je regarde d’abord les premiers résultats de près.",
                 }
-                return _answer(
-                    "Modèle factice : une question d’abord.", [("ask_visitor", question)]
-                )
+                return _answer("", [("view_results", look)])
+            if "image_search" in tools:
+                return _answer("Modèle factice : une question d’abord.", [_QUESTION])
             words = _between(content, "typed words: «", "»") or "église"
-            return _answer("", [("text_search", {"query": words})])
+            return _answer("", [("text_search", _words_search(words))])
+        if not asked and "image_search" in tools and "Thumbnails asked for" in content:
+            return _answer("Modèle factice : une question d’abord.", [_QUESTION])
         if role == "user" and "The part the visitor framed" in content:
-            return _answer("", [("image_search", {"source": "region", "model": "auto"})])
+            search = {"source": "region", "model": "auto", "why": "Je cherche la partie encadrée."}
+            return _answer("", [("image_search", search)])
         if role == "tool" and ("The visitor answers" in content or "framed nothing" in content):
-            return _answer("", [("image_search", {"model": "auto", "top_k": 10})])
+            why = "La réponse précise la recherche ; je relance par l’image."
+            return _answer("", [("image_search", {"model": "auto", "top_k": 10, "why": why})])
         if role == "user" and "The visitor writes" in content:
             words = _between(content, "«", "»") or "église"
-            return _answer("", [("text_search", {"query": words})])
-        viewed = any("view_results" in _content_text(m) for m in messages[-3:])
-        if role == "tool" and listed and not viewed:
-            ids: list[JSON] = list(listed[-10:][:3])
-            return _answer("", [("view_results", {"entity_ids": ids})])
+            return _answer("", [("text_search", _words_search(words))])
+        looked = _looked_at(messages)
+        fresh = [i for i in dict.fromkeys(listed[-10:]) if i not in looked][:3]
+        if role == "tool" and fresh and "view_results" not in content:
+            why = "Je regarde de près les premiers résultats nouveaux."
+            ids: list[JSON] = list[JSON](fresh)
+            return _answer("", [("view_results", {"entity_ids": ids, "why": why})])
         picks: list[JSON] = [
             {"id": i, "reason": "Choix du modèle factice"}
             for i in list(dict.fromkeys(reversed(listed)))[:3]
         ]
-        return _answer(
-            "Modèle factice : voici ce qui ressemble le plus.",
-            [("show_results", {"results": picks})],
-        )
+        shown: dict[str, JSON] = {
+            "found": "close",
+            "summary": "Modèle factice : voici ce qui ressemble le plus.",
+            "results": picks,
+        }
+        return _answer("", [("show_results", shown)])
+
+
+_QUESTION: tuple[str, Mapping[str, JSON]] = (
+    "ask_visitor",
+    {
+        "question": "Que montre votre photo, en quelques mots ?",
+        "choices": ["Un bâtiment", "Un tableau", "Un objet"],
+    },
+)
+
+
+def _looked_at(messages: Sequence[Mapping[str, object]]) -> set[str]:
+    """Ids already passed to view_results."""
+    out: set[str] = set()
+    for m in messages:
+        for c in _dicts(m.get("tool_calls")):
+            function = _dict(c.get("function"))
+            if function.get("name") != "view_results":
+                continue
+            args = _dict(json.loads(str(function.get("arguments") or "{}")))
+            ids = args.get("entity_ids")
+            items: list[object] = list(ids) if isinstance(ids, list) else []  # pyright: ignore[reportUnknownArgumentType]
+            out.update(str(e) for e in items)
+    return out
+
+
+def _words_search(words: str) -> dict[str, JSON]:
+    return {"query": " ".join(words.split()[:5]), "why": "Je cherche vos mots dans les notices."}
 
 
 def _dict(value: object) -> dict[str, object]:

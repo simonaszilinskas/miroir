@@ -9,6 +9,12 @@ the visitor (a question, a region to frame) or to show results.
 What H4's 10-photo test taught is built in: filters favour by default and cut only when the
 model says "hard"; an unknown filter key or value is an error naming the valid ones; a search
 that repeats an earlier one, or nearly, is not run and the model is told so.
+
+What the first hosted test taught (a gold Roman dish, not in the index: the model never looked
+at the close first results, then drifted on long guessed text queries) is built in too: every
+search and look carries a `why` the visitor reads; a text query holds at most 5 words;
+`more_like` searches from a record already seen instead of from guessed words; `show_results`
+says whether the very thing was found (`found`), and says so plainly when it was not.
 """
 
 from __future__ import annotations
@@ -55,15 +61,37 @@ SAME_WORDS = 0.75
 STEP_THUMBS = 8
 #: Characters of a title in a result line.
 TITLE_CHARS = 90
+#: Most words in a text query (the hosted test's drifting queries ran to 10 and more).
+MAX_QUERY_WORDS = 5
+#: Characters kept of a `why`, of a summary.
+WHY_CHARS = 200
+SUMMARY_CHARS = 700
+#: What a "not found" summary starts with when the model did not say it.
+NOT_FOUND = "Je ne trouve pas cet objet précis dans les collections."
 
 
 class ToolName(StrEnum):
     IMAGE_SEARCH = "image_search"
     TEXT_SEARCH = "text_search"
     VIEW_RESULTS = "view_results"
+    MORE_LIKE = "more_like"
     ASK_VISITOR = "ask_visitor"
     ASK_REGION = "ask_region"
     SHOW_RESULTS = "show_results"
+
+
+#: The searches: each one counts towards the turn's searches.
+SEARCHES = frozenset({ToolName.IMAGE_SEARCH, ToolName.TEXT_SEARCH, ToolName.MORE_LIKE})
+
+
+class Found(StrEnum):
+    """What `show_results` says it found."""
+
+    EXACT = "exact"
+    """The very object or building: checked by eye, or rated "Très proche" by the site."""
+    CLOSE = "close"
+    """No sure match: the closest the collections hold."""
+    NONE = "none"
 
 
 class Wait(StrEnum):
@@ -125,6 +153,11 @@ class ToolOutcome:
     region_reason: str = ""
     picks: tuple[Pick, ...] | None = None
     """show_results: the entities to show, best first, only ones the model has seen."""
+    found: Found | None = None
+    summary: str = ""
+    """show_results: what the visitor reads above the cards."""
+    hit_ids: tuple[str, ...] = ()
+    """The entities a search or a look listed, in order."""
     error: bool = False
     counted: bool = True
     """It used one of the turn's tool calls (searches and views do; questions do not)."""
@@ -153,6 +186,16 @@ class ToolContext(Protocol):
         """The step number of an earlier call this one repeats, else None (and noted)."""
         ...
 
+    def viewed_image(self, entity_id: str) -> str | None:
+        """The image of the entity the model has looked at with view_results, if any."""
+        ...
+
+    def checked(self, entity_id: str) -> bool:
+        """The model has looked at its thumbnail, or the site rated it "Très proche"."""
+        ...
+
+    def title_of(self, entity_id: str) -> str: ...
+
 
 type Handler = Callable[[ToolContext, Mapping[str, object]], Awaitable[ToolOutcome]]
 
@@ -164,6 +207,8 @@ class Tool:
     parameters: dict[str, JSON]
     handler: Handler
     needs_photo: bool = False
+    needs_why: bool = False
+    """It takes a `why`, and is refused without one (the searches and the looks)."""
 
     def schema(self) -> JSON:
         """The tool as an OpenAI-style function (OpenRouter, Mistral)."""
@@ -416,6 +461,13 @@ async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
     if not query:
         msg = "text_search needs a query, in French"
         raise ArgumentError(msg)
+    if len(query.split()) > MAX_QUERY_WORDS:
+        msg = (
+            f"a text query holds 2 to {MAX_QUERY_WORDS} words, taken from the visitor's words, "
+            "a caption you read in the photo, or titles of results you have seen. Nothing was "
+            "searched."
+        )
+        raise ArgumentError(msg)
     filters = parse_filters(args.get("filters"), ctx.position)
     signature = Signature(ToolName.TEXT_SEARCH, _filters_key(filters), frozenset(tokens(query)))
     if (step := ctx.repeats(signature)) is not None:
@@ -452,6 +504,7 @@ def _listing(
     return ToolOutcome(
         f"{head}\nid | score | base | title | place | authors | date\n{body}",
         Step(label, summary, thumbs),
+        hit_ids=tuple(h.entity_id for h in found.hits),
     )
 
 
@@ -497,7 +550,48 @@ async def view_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
         + "\n".join(lines),
         Step("Regarde des images de près", f"{n} image{'s' if n > 1 else ''}", thumbs),
         thumbnails=tuple(thumbnails),
+        hit_ids=tuple(h.entity_id for h in found.hits),
     )
+
+
+async def more_like(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
+    entity_id = str(args.get("entity_id") or args.get("id") or "").strip()
+    if not entity_id:
+        msg = "more_like needs entity_id: a record you have seen in a result"
+        raise ArgumentError(msg)
+    if not ctx.seen(entity_id):
+        msg = f"{entity_id} never came from a search: start from an id you have seen"
+        raise ArgumentError(msg)
+    model = str(args.get("model", "mix")).strip().lower()
+    if model == "mix":
+        weight = min(max(_number(args.get("a7_weight"), 0.5), 0.0), 1.0)
+    elif model in ("a7", "a3"):
+        weight = 1.0 if model == "a7" else 0.0
+    else:
+        msg = f"unknown model {model!r}: mix (the default), A7 or A3"
+        raise ArgumentError(msg)
+    filters = parse_filters(args.get("filters"), ctx.position)
+    signature = Signature(
+        ToolName.MORE_LIKE, json.dumps([entity_id, weight, _filters_key(filters)])
+    )
+    if (step := ctx.repeats(signature)) is not None:
+        return _repeated(step, "the same search by look")
+    image_id = ctx.viewed_image(entity_id)
+    found = await ctx.search(
+        ToolQuery(
+            SearchKind.LIKE,
+            entity_ids=(entity_id,),
+            image_id=image_id,
+            a7_weight=weight,
+            filters=filters,
+            top_k=_top_k(args),
+        )
+    )
+    title = ctx.title_of(entity_id) or entity_id
+    label = f"Ce qui ressemble à « {title[:50]} »"
+    start = "the image you looked at" if image_id else "its cover image"
+    head = f"more_like {entity_id} (from {start}; A7 weight {weight:g}; itself left out)"
+    return _listing(ctx, head, label, filters, found)
 
 
 async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
@@ -529,9 +623,27 @@ async def ask_region(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcom
     return ToolOutcome("", wait=Wait.REGION, region_reason=reason, counted=False)
 
 
-async def show_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
-    raw = args.get("results")
-    if not isinstance(raw, list) or not raw:
+async def show_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:  # noqa: PLR0912 (one check per rule)
+    try:
+        found = Found(str(args.get("found") or "").strip().lower())
+    except ValueError:
+        msg = (
+            "show_results needs found: exact (one pick is the very thing, and you have seen "
+            "its thumbnail), close (no sure match: these are the closest) or none"
+        )
+        raise ArgumentError(msg) from None
+    summary = " ".join(str(args.get("summary") or "").split())[:SUMMARY_CHARS]
+    if found is not Found.EXACT and not summary:
+        msg = (
+            f"with found {found.value}, write summary: one or two French sentences the visitor "
+            f"reads above the cards, saying plainly what was not found and why these are the "
+            f"closest (« {NOT_FOUND} Les plus proches : …, parce que … »)"
+        )
+        raise ArgumentError(msg)
+    if found is Found.NONE and "trouve pas" not in fold(summary):
+        summary = f"{NOT_FOUND} {summary}"
+    raw: object = args.get("results") or []
+    if not isinstance(raw, list) or (not raw and found is not Found.NONE):
         msg = 'show_results needs results: [{"id": ..., "reason": ...}, ...], best first'
         raise ArgumentError(msg)
     picks: list[Pick] = []
@@ -548,20 +660,38 @@ async def show_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
             picks.append(Pick(entity_id, reason))
         else:
             dropped.append(entity_id)
-    if not picks:
+    if not picks and found is not Found.NONE:
         msg = f"none of these ids came from a search ({', '.join(dropped[:5])}); use ids you saw"
+        raise ArgumentError(msg)
+    if found is Found.EXACT and not ctx.checked(picks[0].entity_id):
+        msg = (
+            f"found exact needs a first pick you have checked by eye: call view_results on "
+            f"{picks[0].entity_id} first, or use found close"
+        )
         raise ArgumentError(msg)
     kept = picks[:MAX_RESULTS]
     text = f"shown to the visitor: {len(kept)} result(s)"
     if dropped:
         text += f"; left out, never seen in a result: {', '.join(dropped[:5])}"
         logger.info("show_results dropped %d id(s) never seen", len(dropped))
-    return ToolOutcome(text, picks=tuple(kept), counted=False)
+    return ToolOutcome(text, picks=tuple(kept), found=found, summary=summary, counted=False)
 
 
 # --- the registry ----------------------------------------------------------------------------
 
 _TOP_K: JSON = {"type": "integer", "description": f"1 to {MAX_TOP_K}, default {DEFAULT_TOP_K}"}
+_WHY: JSON = {
+    "type": "string",
+    "description": "Required. One short sentence in French, shown to the visitor: what the last "
+    "result showed, and what this call tests (« Les pièces d'or ressemblent aux médaillons du "
+    "bord ; je les regarde de près. »).",
+}
+_BEST: JSON = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "Up to 3 ids you have seen that are the closest so far, best first ([] when "
+    "none fits). Kept across steps; leave it out to keep it as it is.",
+}
 
 TOOLS: tuple[Tool, ...] = (
     Tool(
@@ -582,26 +712,34 @@ TOOLS: tuple[Tool, ...] = (
                 "a7_weight": {"type": "number", "description": "For mix: 0 to 1."},
                 "top_k": _TOP_K,
                 "filters": _FILTERS_SCHEMA,
+                "why": _WHY,
+                "best": _BEST,
             },
+            "required": ["why"],
         },
         image_search,
         needs_photo=True,
+        needs_why=True,
     ),
     Tool(
         ToolName.TEXT_SEARCH,
         "Search record text (titles, descriptions, communes, départements, periods, authors) "
-        "with BM25. French words as records write them. Best when you can read a caption, a "
-        "name or a place.",
+        f"with BM25. 2 to {MAX_QUERY_WORDS} French words as records write them, taken from the "
+        "visitor's words, a caption you read in the photo, or titles of results you have seen; "
+        "never a name or place you only guessed.",
         {
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "top_k": _TOP_K,
                 "filters": _FILTERS_SCHEMA,
+                "why": _WHY,
+                "best": _BEST,
             },
-            "required": ["query"],
+            "required": ["query", "why"],
         },
         text_search,
+        needs_why=True,
     ),
     Tool(
         ToolName.VIEW_RESULTS,
@@ -609,10 +747,42 @@ TOOLS: tuple[Tool, ...] = (
         "its image closest to the photo, to compare them with the photo by eye.",
         {
             "type": "object",
-            "properties": {"entity_ids": {"type": "array", "items": {"type": "string"}}},
-            "required": ["entity_ids"],
+            "properties": {
+                "entity_ids": {"type": "array", "items": {"type": "string"}},
+                "why": _WHY,
+                "best": _BEST,
+            },
+            "required": ["entity_ids", "why"],
         },
         view_results,
+        needs_why=True,
+    ),
+    Tool(
+        ToolName.MORE_LIKE,
+        "Search for records that look like one you have already seen in a result, by its own "
+        "stored image (the one you looked at with view_results, else its cover). Use it to "
+        "follow a close result instead of guessing words. Lists entities like image_search; "
+        "the record itself is left out.",
+        {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string"},
+                "model": {
+                    "type": "string",
+                    "enum": ["mix", "A7", "A3"],
+                    "description": "mix (the default, a7_weight 0.5): both. A7 (EmbeddingGemma "
+                    "2): the same kind of thing. A3 (MegaLoc): the same building or view.",
+                },
+                "a7_weight": {"type": "number", "description": "For mix: 0 to 1."},
+                "top_k": _TOP_K,
+                "filters": _FILTERS_SCHEMA,
+                "why": _WHY,
+                "best": _BEST,
+            },
+            "required": ["entity_id", "why"],
+        },
+        more_like,
+        needs_why=True,
     ),
     Tool(
         ToolName.ASK_VISITOR,
@@ -645,10 +815,24 @@ TOOLS: tuple[Tool, ...] = (
     Tool(
         ToolName.SHOW_RESULTS,
         f"Show the visitor your picks, best first, up to {MAX_RESULTS}, each with one short "
-        "reason in French. Only ids you have seen in results. Ends your turn.",
+        "reason in French. Only ids you have seen in results. Say honestly what you found. "
+        "Ends your turn.",
         {
             "type": "object",
             "properties": {
+                "found": {
+                    "type": "string",
+                    "enum": [f.value for f in Found],
+                    "description": "exact: the first pick is the very object or building, and "
+                    "you have seen its thumbnail. close: no sure match, these are the closest. "
+                    "none: nothing fits.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One or two French sentences the visitor reads above the "
+                    "cards. Required unless found is exact. When the visitor wants one thing "
+                    f"and it is not there: « {NOT_FOUND} Les plus proches : …, parce que … »",
+                },
                 "results": {
                     "type": "array",
                     "items": {
@@ -656,9 +840,9 @@ TOOLS: tuple[Tool, ...] = (
                         "properties": {"id": {"type": "string"}, "reason": {"type": "string"}},
                         "required": ["id", "reason"],
                     },
-                }
+                },
             },
-            "required": ["results"],
+            "required": ["found", "results"],
         },
         show_results,
     ),
@@ -686,6 +870,12 @@ async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
         return ToolOutcome("error: the arguments must be a JSON object", error=True)
     given: dict[str, object] = {str(k): v for k, v in args.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
     try:
+        if tool.needs_why and not why_of(given):
+            msg = (
+                f"{name} needs why: one short French sentence saying what the last result "
+                "showed and what this call tests. Nothing was run; call again with it."
+            )
+            raise ArgumentError(msg)
         return await tool.handler(ctx, given)
     except ArgumentError as err:
         return ToolOutcome(
@@ -693,10 +883,37 @@ async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
         )
 
 
+def arguments_of(arguments: str) -> dict[str, object]:
+    """The model's arguments as a dict; {} when they are not a JSON object."""
+    try:
+        args: object = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(args, dict):
+        return {}
+    return {str(k): v for k, v in args.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+
+
+def why_of(args: Mapping[str, object]) -> str:
+    """The call's `why`, on one line ("" when none)."""
+    return " ".join(str(args.get("why") or "").split())[:WHY_CHARS]
+
+
+def best_of(args: Mapping[str, object]) -> tuple[str, ...] | None:
+    """The call's `best`: the ids it names, or None when it left the field out."""
+    if "best" not in args:
+        return None
+    try:
+        return tuple(dict.fromkeys(_strings(args.get("best"), "best")))
+    except ArgumentError:
+        return None
+
+
 _LABELS = {
     ToolName.IMAGE_SEARCH: "Recherche par image refusée",
     ToolName.TEXT_SEARCH: "Recherche par mots refusée",
     ToolName.VIEW_RESULTS: "Vignettes refusées",
+    ToolName.MORE_LIKE: "Recherche par ressemblance refusée",
     ToolName.ASK_VISITOR: "Question mal formée",
     ToolName.ASK_REGION: "Cadrage impossible",
     ToolName.SHOW_RESULTS: "Résultats refusés",

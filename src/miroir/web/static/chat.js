@@ -8,11 +8,18 @@ import { $, api, ApiError, el, fill, grid, img } from './ui.js';
 
 /** Suggestions above the goal box. Change them here: a tap puts `text` in the box. */
 export const GOAL_CHIPS = [
-  { label: 'Cet objet précis', text: 'Je cherche cet objet ou ce monument précis.' },
-  { label: 'Des objets semblables', text: 'Je cherche des œuvres ou des objets semblables.' },
-  { label: 'Le même lieu', text: 'Je cherche ce que les collections gardent de ce lieu.' },
-  { label: 'Qui l’a fait, d’où ça vient', text: 'Je voudrais savoir qui l’a fait et d’où ça vient.' },
+  { label: 'C’est quoi ?', text: 'Je voudrais savoir ce que c’est : quel objet ou quel monument précis.' },
+  { label: 'C’est où ?', text: 'Je voudrais savoir où c’est, ou bien où cet objet est conservé.' },
+  { label: 'D’autres comme ça', text: 'Je cherche d’autres œuvres ou objets qui ressemblent à celui-ci.' },
+  { label: 'Qui l’a fait ?', text: 'Je voudrais savoir qui l’a fait, et à quelle époque.' },
 ];
+
+/** The line above the picks, by what the model says it found. */
+const FOUND_HEADS = {
+  exact: 'Ce que le modèle a trouvé :',
+  close: 'Les plus proches dans les collections :',
+  none: 'Rien ne correspond vraiment. Les moins éloignés :',
+};
 
 /** Longest side, in pixels, of the photo sent (the server shrinks it again). */
 const SEND_SIDE = 1024;
@@ -217,7 +224,7 @@ function handle(event) {
     case 'say': say('model', event.text); break;
     case 'question': question(event); break;
     case 'region': region(event); break;
-    case 'results': results(event.cards); break;
+    case 'results': results(event.cards, event.found); break;
     case 'limit': limit(event.text); break;
     case 'error': showError(event.text); break;
     case 'end':
@@ -255,6 +262,7 @@ function step(event) {
   const running = event.state === 'running';
   item.classList.toggle('is-running', running);
   item.classList.toggle('is-error', Boolean(event.error));
+  const why = event.why ? el('p', { class: 'miroir-call__why', text: `Pourquoi : ${event.why}` }) : null;
   const head = [
     el('span', { class: running ? 'miroir-spinner' : `miroir-call__icon ${event.error ? 'fr-icon-warning-line' : 'fr-icon-search-line'}`, 'aria-hidden': 'true' }),
     el('span', { class: 'miroir-call__label', text: event.label }),
@@ -262,10 +270,10 @@ function step(event) {
   ];
   const thumbs = (event.thumbs || []).slice(0, STEP_THUMBS);
   if (running || !thumbs.length) {
-    fill(item, el('p', { class: 'miroir-call__line' }, head));
+    fill(item, why, el('p', { class: 'miroir-call__line' }, head));
     return;
   }
-  fill(item, el('details', {},
+  fill(item, why, el('details', {},
     el('summary', { class: 'miroir-call__line' }, head),
     el('ul', { class: 'miroir-call__thumbs' }, thumbs.map((t) => el('li', {},
       el('a', { href: `#/fiche/${encodeURIComponent(t.entity_id)}`, title: t.title },
@@ -339,9 +347,11 @@ function region(event) {
   add(card);
 }
 
-function results(cards) {
+function results(cards, found) {
+  if (!cards.length) return;
+  const head = FOUND_HEADS[found] || (cards.length > 1 ? 'Ce que le modèle propose, du plus probable au moins probable :' : 'Ce que le modèle propose :');
   add(el('li', { class: 'miroir-picks' },
-    el('p', { class: 'fr-text--sm miroir-muted fr-mb-1w', text: cards.length > 1 ? 'Ce que le modèle propose, du plus probable au moins probable :' : 'Ce que le modèle propose :' }),
+    el('p', { class: 'fr-text--sm miroir-muted fr-mb-1w', text: head }),
     grid(cards)));
 }
 

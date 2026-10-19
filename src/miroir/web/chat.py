@@ -14,6 +14,20 @@ asked for again from where it stopped.
 Rules: only the visitor's own photo and thumbnails of publishable records go to the model
 (`miroir.web.publishable`); each conversation and each day have a spending cap
 (`Settings.chat_conversation_usd`, `chat_day_usd`); each paid call is logged with its cost.
+
+The method, enforced here and not only in the brief (the first hosted test drifted away from
+close first results on guessed words):
+
+1. Look before you move: when the first look found something, no search runs before the
+   model has looked at its top thumbnails (`view_results`).
+2. Say why: every search and look carries a French `why`, shown above its step.
+3. Pivot from evidence: `more_like` searches from a record already seen.
+4. Keep a best-so-far and stop: the model names its closest ids (`best`); after
+   `MAX_SEARCHES` searches without a sure match, or `MAX_STALE` searches in a row that add
+   nothing to the best-so-far, only `ask_visitor` and `show_results` (and `ask_region`) run.
+5. Honest end: `show_results` says `found` (exact, close, none), and the visitor reads it.
+
+Each conversation is written down as JSON lines (`miroir.web.chatlog`), without images.
 """
 
 from __future__ import annotations
@@ -25,7 +39,7 @@ import logging
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -38,14 +52,20 @@ from miroir.images.fetch import to_jpeg
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
 from miroir.web.chat_tools import (
     MAX_RESULTS,
+    SEARCHES,
     Signature,
     ToolName,
     ToolOutcome,
     Wait,
+    arguments_of,
+    best_of,
     run_tool,
     tools_for,
+    why_of,
 )
+from miroir.web.chatlog import ChatLog, NoLog, redact
 from miroir.web.engine import SearchRequest, SearchResponse
+from miroir.web.levels import Level
 from miroir.web.nearby import Position
 from miroir.web.publishable import Publishable
 from miroir.web.toolsearch import THUMB_SIDE, Hit, ToolHits, ToolQuery
@@ -58,6 +78,14 @@ MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "reasoning": {"effort": "no
 MAX_TOKENS = 800
 #: Searches per visitor message; then the model must show results or ask.
 MAX_TOOL_CALLS = 8
+#: Searches per visitor message without a sure match (a first-look card rated "Très
+#: proche"); then only a question or the results.
+MAX_SEARCHES = 3
+#: Searches in a row that bring nothing new into the best-so-far; then the same stop.
+MAX_STALE = 2
+#: First-look results the model must look at before it searches, and best-so-far's size.
+LOOK_FIRST = 4
+BEST = 5
 #: Looks at thumbnails per visitor message, apart from the searches (the smoke test with
 #: Mistral spent its 8 calls on searches and could not check its picks by eye).
 MAX_VIEWS = 3
@@ -282,6 +310,17 @@ class Conversation:
         self.steps = 0
         self.views = 0
         """Looks at thumbnails in the current turn."""
+        self.day = service.today()
+        """The day the conversation opened: its log file's folder."""
+        self.viewed: dict[str, str] = {}
+        """Entities the model has looked at, and the image it saw of each."""
+        self.sure: set[str] = set()
+        """First-look entities the site rated "Très proche"."""
+        self.must_view: tuple[str, ...] = ()
+        """First-look entities to look at before any search (empty once looked)."""
+        self.best: list[str] = []
+        """The closest ids so far, best first, as the model last named them."""
+        self.turn = _Turn()
 
     # --- ToolContext ---------------------------------------------------------------------------
 
@@ -315,8 +354,19 @@ class Conversation:
             data = await source.jpeg(image.image_id, image.url)
             if data is not None:
                 self.thumbs[image.image_id] = data
+                self.viewed[hit.entity_id] = image.image_id
                 return image.image_id
         return None
+
+    def viewed_image(self, entity_id: str) -> str | None:
+        return self.viewed.get(entity_id)
+
+    def checked(self, entity_id: str) -> bool:
+        return entity_id in self.viewed or entity_id in self.sure
+
+    def title_of(self, entity_id: str) -> str:
+        known = self.known.get(entity_id)
+        return "" if known is None else known.title
 
     def repeats(self, signature: Signature) -> int | None:
         for earlier, step in self.signatures:
@@ -332,9 +382,60 @@ class Conversation:
         done, self.changed = self.changed, asyncio.Event()
         done.set()
 
+    def log(self, line: Mapping[str, JSON]) -> None:
+        self.service.log.write(self.day, self.id, line)
+
+    # --- best so far ---------------------------------------------------------------------------
+
+    def name_best(self, named: Sequence[str]) -> None:
+        """The model's closest ids: only ones it has seen, at most `BEST`."""
+        self.best = [e for e in dict.fromkeys(named) if self.seen(e)][:BEST]
+
+    def judge_last_search(self) -> None:
+        """Did the turn's last search bring something new into the best-so-far? Judged when
+        the next search comes, so the model can look at its results first."""
+        last = self.turn.unjudged
+        if last is None:
+            return
+        listed, before = last
+        self.turn.unjudged = None
+        if set(self.best) & (set(listed) - set(before)):
+            self.turn.stale = 0
+        else:
+            self.turn.stale += 1
+
+    def best_line(self) -> str:
+        if not self.best:
+            best = "none named yet (pass best: the ids closest so far)"
+        else:
+            best = "; ".join(f"{e} ({self.title_of(e)[:50]})" for e in self.best)
+        line = f"Best so far: {best}."
+        if not self.sure:
+            line += (
+                f" Searches this message: {self.turn.searches} of {MAX_SEARCHES} without a "
+                "sure match."
+            )
+        return line
+
     @property
     def running(self) -> bool:
         return self.task is not None and not self.task.done()
+
+
+class _Turn:
+    """What one visitor message has used so far (the method's counters; they change)."""
+
+    __slots__ = ("lock", "searches", "stale", "unjudged")
+
+    def __init__(self) -> None:
+        self.searches = 0
+        """Searches that ran."""
+        self.stale = 0
+        """Searches in a row that added nothing to the best-so-far."""
+        self.unjudged: tuple[tuple[str, ...], tuple[str, ...]] | None = None
+        """The last search's listed ids and the best-so-far before it, until judged."""
+        self.lock: str | None = None
+        """Why only a question or the results may come now."""
 
 
 class ChatService:
@@ -351,6 +452,7 @@ class ChatService:
         index_size: tuple[int, int],
         clock: Callable[[], float] = time.monotonic,
         today: Callable[[], str] | None = None,
+        log: ChatLog | None = None,
     ) -> None:
         self.backend = backend
         self.model = model
@@ -362,6 +464,10 @@ class ChatService:
         self._clock = clock
         self._today = today or (lambda: datetime.now(UTC).date().isoformat())
         self._conversations: dict[str, Conversation] = {}
+        self.log: ChatLog = log or NoLog()
+
+    def today(self) -> str:
+        return self._today()
 
     # --- conversations -------------------------------------------------------------------------
 
@@ -382,6 +488,15 @@ class ChatService:
             request = SearchRequest(image=photo, text=conversation.words, position=position)
             conversation.first_look = asyncio.ensure_future(self.backend.search(request))
         self._conversations[conversation.id] = conversation
+        conversation.log(
+            {
+                "type": "open",
+                "photo": photo is not None,
+                "words": conversation.words,
+                "position": position is not None,
+                "model": self.model.model,
+            }
+        )
         logger.info(
             "chat %s opened: photo=%s words=%d", conversation.id[:8], photo is not None, len(words)
         )
@@ -439,13 +554,37 @@ class ChatService:
 
     async def _turn(self, c: Conversation, given: VisitorInput) -> None:
         waiting = "message"
+        start = time.monotonic()
+        c.log(
+            {
+                "type": "visitor",
+                "kind": given.kind.value,
+                "text": given.text.strip()[:MAX_WORDS],
+                "region": given.region is not None,
+                "position": given.position is not None,
+            }
+        )
         try:
             await self._take(c, given)
             waiting = await self._loop(c)
         except Exception:
             logger.exception("chat %s: turn failed", c.id[:8])
             c.emit({"type": "error", "text": "La conversation a rencontré une erreur."})
+            c.log({"type": "error"})
         c.emit({"type": "end", "waiting": waiting})
+        c.log(
+            {
+                "type": "end",
+                "waiting": waiting,
+                "searches": c.turn.searches,
+                "lock": c.turn.lock,
+                "best": list(c.best),
+                "spent_usd": round(c.spent_usd, 6),
+                "calls": c.calls,
+                "ms": _ms(start),
+            }
+        )
+        await self.log.flush()
 
     async def _take(self, c: Conversation, given: VisitorInput) -> None:
         """Add what the visitor sent to the messages."""
@@ -508,13 +647,27 @@ class ChatService:
         step = c.steps
         label = "Première recherche par image (la recherche habituelle)"
         c.emit({"type": "step", "id": step, "state": "running", "label": label})
+        start = time.monotonic()
         try:
             found = await asyncio.wait_for(asyncio.shield(c.first_look), FIRST_LOOK_WAIT_S)
         except (TimeoutError, ValueError, RuntimeError) as err:
             logger.warning("chat %s: first look failed: %s", c.id[:8], err)
             c.emit(_step_event(step, label, "pas de résultat", (), error=True))
+            c.log({"type": "first_look", "error": True, "ms": _ms(start)})
             return "First look: the usual search did not answer. Search with the tools."
         cards = found.cards[:FIRST_LOOK]
+        c.sure = {k.entity_id for k in cards if k.level is Level.VERY_CLOSE}
+        c.must_view = tuple(k.entity_id for k in cards[:LOOK_FIRST])
+        c.best = [k.entity_id for k in cards[:3]]
+        c.log(
+            {
+                "type": "first_look",
+                "hits": [k.entity_id for k in found.cards],
+                "levels": [k.level.value for k in cards],
+                "caption": found.caption,
+                "ms": _ms(start),
+            }
+        )
         for card in found.cards:
             c.known.setdefault(
                 card.entity_id,
@@ -545,42 +698,72 @@ class ChatService:
         head = "First look (the site's usual search for this photo; it may be wrong):"
         if found.caption:
             head += f"\nCaption the site read on the print: «{found.caption}»"
-        return head + "\n" + ("\n".join(lines) if lines else "nothing found")
+        if not lines:
+            return head + "\nnothing found"
+        sure = f" Rated very close by the site: {', '.join(sorted(c.sure))}." if c.sure else ""
+        return (
+            f"{head}\n" + "\n".join(lines) + f"\n{sure.strip()}\nLook before you search: "
+            f"call view_results on the top results ({', '.join(c.must_view)}) and compare them "
+            "with the photo; no search runs before."
+        )
 
     async def _loop(self, c: Conversation) -> str:
         """Model calls and their tools until the model shows results, asks, or stops."""
         tools = tools_for(photo=c.photo_bytes is not None)
         c.views = 0
+        c.turn = _Turn()
         schemas = [t.schema() for t in tools]
         offered = {t.name.value for t in tools}
         used = 0
         told_last = False
+        told_lock = False
         nudged = False
         for _ in range(MAX_MODEL_CALLS):
             stop = await self._over_limit(c)
             if stop is not None:
                 c.emit({"type": "limit", "text": stop})
+                c.log({"type": "limit", "text": stop})
                 return "limit"
             out_of_calls = used >= MAX_TOOL_CALLS
             if out_of_calls and not told_last:
                 c.messages.append(_user(_text(LAST_CALL)))
                 told_last = True
+            if c.turn.lock is not None and not told_lock and not told_last:
+                c.messages.append(_user(_text(LOCKED_NOTE.format(reason=c.turn.lock))))
+                told_lock = True
             body: dict[str, JSON] = {
                 "messages": self._render(c),
                 "tools": schemas,
-                "tool_choice": "required" if out_of_calls else "auto",
+                "tool_choice": "required" if out_of_calls or told_lock else "auto",
                 "max_tokens": MAX_TOKENS,
             }
             c.emit({"type": "status", "text": "Le modèle réfléchit…"})
+            start = time.monotonic()
             try:
                 answer = await self.model.complete(body)
             except OpenRouterError as err:
                 logger.warning("chat %s: model call failed: %s", c.id[:8], err)
                 c.emit({"type": "error", "text": MODEL_DOWN})
+                c.log({"type": "model", "error": str(err)[:200], "ms": _ms(start)})
                 return "message"
             await self._paid(c, answer.cost_usd)
+            c.log(
+                {
+                    "type": "model",
+                    "call": c.calls,
+                    "text": answer.text,
+                    "tool_calls": [
+                        {"name": t.name, "args": redact(arguments_of(t.arguments))}
+                        for t in answer.tool_calls
+                    ],
+                    "cost_usd": answer.cost_usd,
+                    "prompt_tokens": answer.prompt_tokens,
+                    "completion_tokens": answer.completion_tokens,
+                    "ms": _ms(start),
+                }
+            )
             said = answer.text.strip()
-            if said:
+            if said and not _summarised(answer.tool_calls):
                 c.emit({"type": "say", "text": said})
             if not answer.tool_calls:
                 c.messages.append({"role": "assistant", "content": answer.text})
@@ -618,32 +801,44 @@ class ChatService:
         waiting: str | None = None
         thumbs: list[tuple[str, str]] = []
         for call, call_id in zip(calls, ids, strict=True):
-            if waiting is not None:
-                c.messages.append(_tool(call_id, call.name, NOT_RUN_WAITING))
-                continue
-            if call.name not in offered:
-                text = f"error: {call.name} is not available here (no photo)."
-                c.messages.append(_tool(call_id, call.name, text))
+            args = arguments_of(call.arguments)
+            refused = self._refusal(
+                c, call.name, args, offered=offered, used=used, views=views, waiting=waiting
+            )
+            if refused is not None:
+                c.messages.append(_tool(call_id, call.name, refused))
+                c.log({"type": "tool", "name": call.name, "args": redact(args), "refused": refused})
+                logger.info("chat %s: %s refused: %s", c.id[:8], call.name, refused[:60])
                 continue
             counted = call.name in COUNTED
-            if counted and used >= MAX_TOOL_CALLS:
-                c.messages.append(_tool(call_id, call.name, NOT_RUN_CAP))
-                logger.info("chat %s: %s refused, no searches left", c.id[:8], call.name)
-                continue
             if call.name == ToolName.VIEW_RESULTS.value:
-                if views >= MAX_VIEWS:
-                    c.messages.append(_tool(call_id, call.name, NOT_RUN_VIEWS))
-                    continue
                 views += 1
             c.steps += 1
             step = c.steps
+            why = why_of(args)
             if counted:
-                c.emit(
-                    {"type": "step", "id": step, "state": "running", "label": RUNNING[call.name]}
-                )
+                running: Event = {
+                    "type": "step",
+                    "id": step,
+                    "state": "running",
+                    "label": RUNNING[call.name],
+                }
+                if why:
+                    running["why"] = why
+                c.emit(running)
+            best_before = tuple(c.best)
+            start = time.monotonic()
             outcome = await run_tool(c, call.name, call.arguments)
+            ran = not outcome.error
             if outcome.counted and counted:
                 used += 1
+            if ran and counted:
+                c.turn.searches += 1
+                c.turn.unjudged = (outcome.hit_ids, best_before)
+            looked = ran and call.name == ToolName.VIEW_RESULTS.value
+            if looked and set(outcome.hit_ids) & set(c.must_view):
+                c.must_view = ()
+            self._update_lock(c)
             logger.info(
                 "chat %s step %d: %s%s",
                 c.id[:8],
@@ -651,13 +846,82 @@ class ChatService:
                 call.name,
                 " (error)" if outcome.error else "",
             )
-            waiting = self._outcome(c, outcome, step, call_id, call.name)
+            c.log(
+                {
+                    "type": "tool",
+                    "step": step,
+                    "name": call.name,
+                    "args": redact(args),
+                    "why": why,
+                    "hits": list(outcome.hit_ids),
+                    "error": outcome.error,
+                    "text": outcome.text[:300] if outcome.error else "",
+                    "found": None if outcome.found is None else outcome.found.value,
+                    "summary": outcome.summary,
+                    "picks": [p.entity_id for p in outcome.picks or ()],
+                    "ms": _ms(start),
+                }
+            )
+            if ran and (counted or call.name == ToolName.VIEW_RESULTS.value):
+                outcome = _with_note(outcome, c.best_line())
+            waiting = self._outcome(c, outcome, step, call_id, call.name, why=why)
             thumbs += [(t.label, t.image_id) for t in outcome.thumbnails]
         c.views = views
         return waiting, thumbs, used
 
+    def _refusal(  # noqa: PLR0911 (one rule per return)
+        self,
+        c: Conversation,
+        name: str,
+        args: Mapping[str, object],
+        *,
+        offered: set[str],
+        used: int,
+        views: int,
+        waiting: str | None,
+    ) -> str | None:
+        """Why this call may not run now, or None. A search judges the one before it first
+        (`Conversation.judge_last_search`), with the best-so-far this call names."""
+        if waiting is not None:
+            return NOT_RUN_WAITING
+        if name not in offered:
+            return f"error: {name} is not available here (no photo)."
+        named = best_of(args)
+        if named is not None:
+            c.name_best(named)
+        search = name in COUNTED
+        if search:
+            c.judge_last_search()
+            self._update_lock(c)
+        looking = search or name == ToolName.VIEW_RESULTS.value
+        if looking and c.turn.lock is not None:
+            return NOT_RUN_LOCKED.format(reason=c.turn.lock, best=", ".join(c.best) or "—")
+        if search and c.must_view:
+            return NOT_RUN_LOOK.format(ids=", ".join(c.must_view))
+        if search and used >= MAX_TOOL_CALLS:
+            return NOT_RUN_CAP
+        if name == ToolName.VIEW_RESULTS.value and views >= MAX_VIEWS:
+            return NOT_RUN_VIEWS
+        return None
+
+    @staticmethod
+    def _update_lock(c: Conversation) -> None:
+        if c.turn.lock is not None:
+            return
+        if c.turn.stale >= MAX_STALE:
+            c.turn.lock = f"{MAX_STALE} searches in a row brought nothing new into your best so far"
+        elif not c.sure and c.turn.searches >= MAX_SEARCHES:
+            c.turn.lock = f"{MAX_SEARCHES} searches without a sure match"
+
     def _outcome(
-        self, c: Conversation, outcome: ToolOutcome, step: int, call_id: str, name: str
+        self,
+        c: Conversation,
+        outcome: ToolOutcome,
+        step: int,
+        call_id: str,
+        name: str,
+        *,
+        why: str = "",
     ) -> str | None:
         """Put one tool's outcome in the messages and the events; what to wait for, if any."""
         if outcome.wait is not None:
@@ -682,7 +946,10 @@ class ChatService:
             for pick in outcome.picks[:MAX_RESULTS]:
                 known = c.known[pick.entity_id]
                 cards.append(_card_json(known, pick.reason))
-            c.emit({"type": "results", "cards": cards})
+            if outcome.summary:
+                c.emit({"type": "say", "text": outcome.summary})
+            found = None if outcome.found is None else outcome.found.value
+            c.emit({"type": "results", "cards": cards, "found": found})
             return "message"
         if outcome.step is not None:
             s = outcome.step
@@ -690,7 +957,10 @@ class ChatService:
                 {"entity_id": t.entity_id, "title": t.title, "image_url": t.image_url}
                 for t in s.thumbs
             ]
-            c.emit(_step_event(step, s.label, s.summary, thumbs, error=s.error))
+            event = _step_event(step, s.label, s.summary, thumbs, error=s.error)
+            if why:
+                event["why"] = why
+            c.emit(event)
         return None
 
     # --- money ---------------------------------------------------------------------------------
@@ -731,6 +1001,8 @@ class ChatService:
             entities=f"{entities:,}",
             calls=MAX_TOOL_CALLS,
             views=MAX_VIEWS,
+            searches=MAX_SEARCHES,
+            stale=MAX_STALE,
         )
 
     def _render(self, c: Conversation) -> list[JSON]:
@@ -770,10 +1042,11 @@ class ChatService:
         return out
 
 
-COUNTED = {ToolName.IMAGE_SEARCH.value, ToolName.TEXT_SEARCH.value}
+COUNTED = {t.value for t in SEARCHES}
 RUNNING = {
     ToolName.IMAGE_SEARCH.value: "Recherche par image…",
     ToolName.TEXT_SEARCH.value: "Recherche par mots…",
+    ToolName.MORE_LIKE.value: "Recherche par ressemblance…",
     ToolName.VIEW_RESULTS.value: "Regarde des images de près…",
 }
 
@@ -791,6 +1064,19 @@ NUDGE = (
     "only meant to answer the visitor, write nothing more."
 )
 NOT_RUN_WAITING = "not run: you are waiting for the visitor. Call it again after their answer."
+NOT_RUN_LOOK = (
+    "not run: look before you search. Call view_results on the first look's top results "
+    "({ids}) with why, compare them with the photo, then decide."
+)
+NOT_RUN_LOCKED = (
+    "not run: {reason}. Only ask_visitor or show_results work now: ask the visitor one "
+    "question, or show your best so far ({best}) with found close or none."
+)
+LOCKED_NOTE = (
+    "(Not from the visitor.) Stop searching: {reason}. Ask the visitor one question that "
+    "would settle it (ask_visitor), or call show_results with your best so far, saying "
+    "plainly with found and summary whether you found the very thing."
+)
 MODEL_DOWN = (
     "Le modèle ne répond pas pour le moment. Réessayez dans un instant, ou utilisez la "
     "recherche habituelle."
@@ -809,8 +1095,8 @@ DAY_CAP = (
 )
 
 BRIEF = """You help a visitor find French heritage records (the POP database) from a photo, \
-words, or both. You lead the search: ask a short question when it helps, call the search \
-tools, look at what comes back, try again, then show your picks.
+words, or both. You lead the search: look at what you have, ask a short question when it \
+helps, search, look again, then show your picks honestly.
 
 The index holds {images} images of {entities} buildings and objects. Each has an id, a base \
 and images:
@@ -822,28 +1108,52 @@ same archive.
 - joconde: museum objects, often several views of one object.
 - rose-valland: works looted during the war (MNR), and Jeu de Paume room photos.
 - memoire: archive photos tied to no building or object.
+Many objects are not in the index at all (most museums' collections are not). Not finding \
+one is a fair answer.
 
-The visitor says first what they want to find, in their words. Let it set how you search:
-- One exact building or object: find that one record. Show 1 to 5 results, only ones that \
-could be it, the best first.
-- Similar things: the look counts more than the place. Show up to 10 that share the kind, \
-style or subject.
-- The same place: find where the photo was taken, then what the index holds there \
-(commune filter, near).
-- Who made it, where it comes from: find the record, then say in one or two sentences what \
+The visitor says first what they want, in their words. Let it set how you search:
+- One exact building or object ("C'est quoi ?"): find that one record. Show 1 to 5 \
+results, only ones that could be it, the best first.
+- Where it is ("C'est où ?"): find the record, then say in one sentence where the records \
+place it (commune, building, museum); a commune filter or near helps.
+- Similar things ("D'autres comme ça"): the look counts more than the place. Show up to \
+10 that share the kind, style or subject; more_like on a close result finds more.
+- Who made it ("Qui l'a fait ?"): find the record, then say in one or two sentences what \
 the records give (author, date, place), and show it.
 - Anything else: do what they ask.
 
+Method. Follow it step by step; the tools enforce it.
+1. Look before you move. When the first look lists results, call view_results on its top \
+ones first and compare them with the photo by eye: the same thing? the same kind? which \
+detail matches? No search runs before you have looked.
+2. Say why. Every search and every look takes why: one short French sentence the visitor \
+reads, saying what the last result showed and what this call tests (« Les pièces d'or \
+ressemblent aux médaillons du bord ; je les regarde de près. »).
+3. Pivot from evidence, not from guesses. When a result you have looked at is close, or \
+when the visitor wants more like one, call more_like on it: it finds what looks like it, \
+better than new words. A text query is 2 to 5 words taken from the visitor's words, \
+from a caption or label you read in the photo, or from titles and descriptions of results \
+you have seen. Never search a name, a place, a god, a maker or an attribution you only \
+guessed; ask the visitor instead.
+4. Keep a best-so-far and stop. Pass best on each search and look: the ids closest so far, \
+best first. Each tool result repeats it. After {searches} searches without a sure match, or \
+{stale} searches in a row that add nothing to your best so far, only ask_visitor and \
+show_results run: ask one question that would settle it, or show what you have.
+5. End honestly with show_results. found exact only when the first pick is the very \
+object or building and you have seen its thumbnail (or the site rated it very close). \
+Otherwise found close with a summary that says it plainly: « Je ne trouve pas cet objet \
+précis dans les collections. Les plus proches : …, parce que … ». found none when nothing \
+fits.
+
 Questions. Ask only what would narrow the search for this photo, and only when the photo, \
-its words and the first look leave you unsure. When the first look and one more search have \
-not settled it, ask before you guess: one answer from the visitor beats many searches, and \
-never search a name you only guessed. One question at a time, at most 3 in a conversation. \
-Fit the question to the subject: a building, a painting, an object, an archive \
-print each call for different things (the town or the street; the museum or the room; what \
-the object is or where it is kept; the caption you cannot read). Give 2 to 4 short suggested \
-answers; the visitor can also write their own or say they do not know. Set offer_position \
-only when where the visitor stands now would help. When the photo shows several things (a \
-wall of paintings, a room), ask_region lets the visitor frame the one they mean.
+its words and the first look leave you unsure. One answer from the visitor beats many \
+searches. One question at a time, at most 3 in a conversation. Fit the question to the \
+subject: a building, a painting, an object, an archive print each call for different things \
+(the town or the street; the museum or the room; what the object is or where it is kept; \
+the caption you cannot read). Give 2 to 4 short suggested answers; the visitor can also \
+write their own or say they do not know. Set offer_position only when where the visitor \
+stands now would help. When the photo shows several things (a wall of paintings, a room), \
+ask_region lets the visitor frame the one they mean.
 
 Searching:
 - The first look is the site's usual search for the photo. It may already be right.
@@ -855,17 +1165,13 @@ name). This works very well on archive prints.
 - Filters favour matching records by default (boost). Use mode hard only when you are sure (the \
 visitor said so, or a caption names the commune): a hard filter on a wrong guess hides the \
 right answer.
-- Do not run a search again with reworded words: it will be refused. If two searches fail, \
-change approach: another image model, a filter, view_results to compare by eye, a question, \
-or show what you have.
+- Do not run a search again with reworded words: it will be refused.
 - At most {calls} searches and {views} looks at thumbnails per visitor message.
-- Before you show picks for an exact match, check them by eye with view_results. Do not say \
-a pick looks like the photo unless you have seen its thumbnail.
+- Do not say a pick looks like the photo unless you have seen its thumbnail.
 
-End each turn with show_results: ids you have seen in results, best first, each with one short \
-reason in French ("même portail roman, même commune"). If nothing fits, say so in one short \
-sentence and show the closest anyway, or ask one question. The visitor may write again \
-("pas celle-ci, l'église est plus ancienne"): search again with what they say.
+Each pick in show_results takes one short reason in French ("même portail roman, même \
+commune"), and only ids you have seen in results. The visitor may write again ("pas \
+celle-ci, l'église est plus ancienne"): search again with what they say.
 
 Everything you write outside a tool call is shown to the visitor: write it in French, in one \
 or two short plain sentences, without database words (no "base", "entité", "score", "id"), \
@@ -967,6 +1273,24 @@ def _card_json(card: CardView, reason: str) -> JSON:
         "level_label": card.level_label,
         "reason": reason,
     }
+
+
+def _summarised(calls: Sequence[ToolCall]) -> bool:
+    """The reply shows results with a summary: the visitor reads that, not the same thing
+    twice (Mistral tends to write both)."""
+    return any(
+        call.name == ToolName.SHOW_RESULTS.value
+        and str(arguments_of(call.arguments).get("summary") or "").strip()
+        for call in calls
+    )
+
+
+def _with_note(outcome: ToolOutcome, note: str) -> ToolOutcome:
+    return replace(outcome, text=f"{outcome.text}\n{note}")
+
+
+def _ms(start: float) -> float:
+    return round(1000 * (time.monotonic() - start), 1)
 
 
 def _dollars(usd: float) -> str:

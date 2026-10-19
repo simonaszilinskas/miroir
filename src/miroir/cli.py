@@ -1463,6 +1463,16 @@ def web_chat_secret() -> None:
     typer.echo(f"key written to the {CHAT_SECRET_NAME} Modal secret (not shown)")
 
 
+@web_app.command("chat-logs")
+def web_chat_logs() -> None:
+    """Copy the deployed conversation page's logs (JSON lines, no images) to the Mac."""
+    from miroir.web.ops import pull_chat_logs  # noqa: PLC0415
+
+    settings = get_settings()
+    written = pull_chat_logs(settings)
+    typer.echo(f"{len(written)} log file(s) new or grown in {settings.chat_logs_dir / 'hosted'}")
+
+
 def main() -> None:
     app()
 

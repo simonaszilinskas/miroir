@@ -57,6 +57,8 @@ MODAL_IMAGES_MOUNT = "/images"
 
 #: Volume path, in the search app's containers, of the web index bundles (`miroir web upload`).
 MODAL_WEB_INDEX_MOUNT = "/web-index"
+#: Folder, on that same volume, of the conversation page's logs (`miroir web chat-logs`).
+MODAL_CHAT_LOGS = "chat-logs"
 
 #: The index the prototype serves (`miroir web`): a bundle name from `miroir.web.bundle.INDEXES`.
 #: Switching index is this one line, then `miroir web build-index`, `upload` and `deploy`.
@@ -310,6 +312,12 @@ class Settings(BaseSettings):
     def chat_spend_path(self) -> Path:
         """Dollars the conversation page spent per day when run on the Mac (`miroir web dev`)."""
         return self.data_root / "spend" / "chat-days.json"
+
+    @property
+    def chat_logs_dir(self) -> Path:
+        """The conversation page's logs (`miroir.web.chatlog`): the Mac's own under it, the
+        deployed site's copied into `hosted/` by `miroir web chat-logs`."""
+        return self.data_root / "chat-logs"
 
     def web_index_dir(self, name: str) -> Path:
         """One web index bundle, built on the Mac before it is uploaded to Modal."""

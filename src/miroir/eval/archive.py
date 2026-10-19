@@ -287,6 +287,12 @@ class _NumpyGallery:
     def a3(self, query: Floats) -> Floats:
         return self._cosines("a3", self._a3, query)
 
+    def a7_row(self, row: int) -> Floats:
+        return np.asarray(self._a7[row], dtype=np.float32)
+
+    def a3_row(self, row: int) -> Floats:
+        return np.asarray(self._a3[row], dtype=np.float32)
+
 
 def _batch_cosines(matrix: NDArray[np.float16], queries: Floats) -> NDArray[np.float16]:
     out = np.empty((len(queries), matrix.shape[0]), dtype=np.float16)
