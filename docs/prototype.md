@@ -109,7 +109,7 @@ Both first searches met a sleeping engine and took over a minute.
 **Caption reader.** It loads in a thread after the search models and resets torch's default dtype afterwards; loading it beside EmbeddingGemma 2 without that reset left the default at bfloat16 and broke every photo search ("expected mat1 and mat2 to have the same dtype").
 
 ```sh
-uv sync --extra api
+uv sync
 uv run miroir web build-index   # NumPy on the Mac, about 3 minutes for the full index: writes ~/miroir-data/web/<index>/
 uv run miroir web upload        # copies the bundle to the miroir-web-index volume
 uv run miroir web secret        # once: password in .env and in the miroir-app secret (--rotate for a new one)
