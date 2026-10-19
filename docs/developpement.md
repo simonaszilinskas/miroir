@@ -9,8 +9,7 @@ How to set up the repository, run the checks and use the `miroir` command. Rules
 Requirements: Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv sync                  # base + dev tools (fast; no torch)
-uv sync --extra api      # add fastapi, uvicorn (the prototype website)
+uv sync                  # base, dev tools and the api, modal, openrouter extras (no torch)
 cp .env.example .env     # then set the two directories below
 make check               # ruff format check, ruff lint, pyright strict, pytest
 ```
@@ -32,7 +31,7 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal, unless `~/.modal.toml` exists (`modal token new`) |
 | `MIROIR_OPENROUTER_BUDGET_USD` | Spending cap for paid model runs (OpenRouter and Modal together) |
 | `MIROIR_APP_PASSWORD`, `MIROIR_SESSION_SECRET` | The prototype website's shared password and cookie key (`miroir web secret`) |
-| `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the conversation page, per conversation and per day (defaults 0.10 and 2) |
+| `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the agentic search, per conversation and per day in dollars (defaults 0.10 and 2) |
 
 Data and images are never stored in the repository. Secrets are never committed.
 
@@ -53,6 +52,7 @@ uv run miroir eval stack ...     # fuse models (G1, G2), expand queries (E5), sc
 uv run miroir eval summary       # rebuild the results table in docs/results.md
 uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir web dev            # the website at http://localhost:8000 with fake models
+uv run miroir web deploy         # put the website on Modal (steps: prototype.md, "Run and deploy")
 ```
 
 Paid runs (`embed`, `rerank`, `vlm ask`, `words ask`) start with a probe and stop at a cost

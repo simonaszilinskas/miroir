@@ -13,9 +13,14 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 - `src/miroir/remote/`: model code that runs only inside Modal containers. The one place torch may
   be imported.
 - `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
+- `src/miroir/jobs/`: paid model work: OpenRouter calls, the Modal app, spend and privacy checks.
+- `src/miroir/commons/`, `src/miroir/geo/`, `src/miroir/index/`: Wikimedia Commons photos,
+  positions, and the type guess and vector upload.
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to
   `eval/results/`.
-- `src/miroir/web/`: the prototype website (FastAPI on Modal).
+- `src/miroir/web/`: the prototype website (FastAPI on Modal): ranking, card levels, the agentic
+  search (`chat.py`, `chat_tools.py`) and the page in `static/`.
+- `scripts/pop_full_export.py`: builds the full POP export from public sources.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
 
 ## Data
