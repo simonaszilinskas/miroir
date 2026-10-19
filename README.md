@@ -11,7 +11,9 @@ Sur 680 photos de test, cherchées parmi 147 000 images, la bonne notice arrive 
 
 Pour l'instant, un grand point faible : sans la position du téléphone, un bâtiment n'est dans les 10 premières réponses qu'une fois sur trois (37 % ; 43 % dans les 50 premières). Le site ne couvre encore que 5 % de POP (101 000 notices sur 2,1 millions). La prochaine étape est d'indexer tout POP, pour environ 140 € de calcul, puis de le tester avec de vrais visiteurs.
 
-![Page d'accueil de MIROIR sur ordinateur et sur téléphone](docs/images/miroir-1-accueil.jpg)
+![La recherche simple de MIROIR sur ordinateur et sur téléphone](docs/images/miroir-1-accueil.jpg)
+
+*La recherche simple, capture du 13 octobre 2026. Depuis le 19 octobre, la page d'accueil propose d'abord de choisir entre la recherche simple et la recherche agentique.*
 
 ## Sommaire
 
@@ -24,6 +26,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 - [Limites et risques](#limites-et-risques)
 - [Prochaines étapes](#prochaines-étapes)
 - [Annexe : ce que d'autres ont fait](#annexe--ce-que-dautres-ont-fait)
+- [Lancer, tester, déployer](#lancer-tester-déployer)
 - [Documentation technique](#documentation-technique)
 
 ## Le besoin
@@ -36,7 +39,14 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 ## Ce que fait le prototype
 
-Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.modal.run>**, mot de passe `zhax-386e-rpjd`. Une recherche prend moins d'une seconde ; la première après 10 minutes sans usage prend 1 à 2 minutes, le temps que le serveur et sa carte graphique (GPU) démarrent.
+Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.modal.run>**. Il demande un mot de passe partagé, que le responsable du projet donne sur demande ; il n'est écrit nulle part dans ce dépôt. Une recherche prend moins d'une seconde ; la première après 10 minutes sans usage prend 1 à 2 minutes, le temps que le serveur et sa carte graphique (GPU) démarrent.
+
+La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
+
+- **Recherche simple** (`#/simple`) : une photo ou quelques mots, et la liste des notices les plus proches en quelques secondes. Elle couvre les quatre cas ci-dessous.
+- **Recherche agentique** (`#/agentique`, expérimentale) : le visiteur dit ce qu'il cherche (« C'est quoi ? », « C'est où ? », « D'autres comme ça », « Qui l'a fait ? »). Un modèle ouvert, Mistral Large 4, mène la recherche avec les mêmes outils, regarde les images, pose une question si besoin et explique chaque notice retenue. Une conversation prend environ une minute. La photo du visiteur part chez OpenRouter, qui sert ce modèle ; la page le dit. Les dépenses sont plafonnées par conversation et par jour.
+
+Dans la recherche simple :
 
 1. **Photo d'un bâtiment.** Le site devine qu'il s'agit d'un bâtiment et cherche parmi les photos de POP et 10 221 photos de Wikimedia Commons rattachées à 2 726 monuments. Pourquoi Commons : les photos de POP sont souvent anciennes, en noir et blanc, prises sous un seul angle ; celles de Commons, sous licence libre, sont récentes, en couleur et prises de partout, comme celles d'un visiteur. Elles ont fait passer les bâtiments trouvés sans position de 27 % à 37 %. Elles servent seulement de repère : le visiteur ne voit que des notices et des images de POP. Si la photo porte sa position, ou si le visiteur active « Utiliser ma position », les monuments proches passent en tête. La position sert à cette recherche seulement et n'est pas gardée.
 2. **Photo d'une salle de musée.** Le site entoure jusqu'à 20 œuvres, les plus grandes et les plus centrales d'abord. Le visiteur touche celle qui l'intéresse.
@@ -116,7 +126,7 @@ sequenceDiagram
     S-->>V: 7. Notices classées, chacune avec son niveau et son lien vers POP
 ```
 
-En haut, ce que fait le visiteur ; sur la ligne du serveur, ce qui se passe en coulisses. Les étapes 2 et 3 ne servent que pour une photo qui montre plusieurs œuvres, comme une salle de musée. Pour une recherche par mots, le serveur passe directement à l'étape 5. Tout tourne sur des modèles ouverts, sur des serveurs que je loue.
+En haut, ce que fait le visiteur ; sur la ligne du serveur, ce qui se passe en coulisses. Les étapes 2 et 3 ne servent que pour une photo qui montre plusieurs œuvres, comme une salle de musée. Pour une recherche par mots, le serveur passe directement à l'étape 5. La recherche simple tourne sur des modèles ouverts, sur des serveurs que je loue. La recherche agentique y ajoute Mistral Large 4, un modèle ouvert servi par OpenRouter.
 
 ## Ce que j'ai essayé
 
@@ -171,7 +181,7 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 **Hébergement.** Tout POP tient sur le même type de serveur qu'aujourd'hui, en rangeant les données autrement : un premier tri rapide garde 2 000 candidats, puis seuls ceux-là sont comparés en détail. La qualité baisse d'un point au plus sur mes tests. Le serveur coûterait environ 1,25 € par heure d'usage, contre 1,10 € aujourd'hui, et s'éteint seul après 10 minutes sans recherche.
 
-**Ce que le projet a coûté.** Environ 26 € de calcul pour tous les essais (29 $ : 22,40 $ chez Modal, 6,50 $ chez OpenRouter), plus les heures de serveur du site en ligne, qui ne sont pas comptées dans ce total.
+**Ce que le projet a coûté.** Environ 27 € de calcul pour tous les essais au 19 octobre 2026 (29,70 $ : 22,40 $ chez Modal, 7,30 $ chez OpenRouter), plus les heures de serveur du site en ligne, qui ne sont pas comptées dans ce total.
 
 **Des prix indicatifs.** L'installation actuelle sert aux tests : ses prix ne valent pas devis pour un service en production. Le serveur loue une carte graphique à l'heure et s'éteint après 10 minutes sans recherche. Un démarrage à froid coûte peu (1 à 2 minutes de serveur, quelques centimes) ; son vrai défaut est l'attente du premier visiteur. Garder le serveur allumé en permanence coûterait environ 900 € par mois (1,25 € × 720 heures). Avec beaucoup d'usage, ce coût s'amortit vite : une recherche occupe la carte graphique environ 0,2 seconde, donc un serveur peut traiter des milliers de recherches par heure, pour moins d'un centime chacune. L'hébergement d'un vrai service (disponibilité, hébergeur, plusieurs serveurs) reste à chiffrer.
 
@@ -179,7 +189,7 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 - **Aucun vrai visiteur ne l'a encore utilisé.** Les chiffres viennent de photos de test ; il faut des essais avec de vrais utilisateurs.
 - **Sans la position du téléphone, un bâtiment n'est trouvé qu'une fois sur trois.** Ajouter des photos Commons à tous les bâtiments (2 726 sur 3 924 en ont aujourd'hui) est la prochaine piste.
-- **Droits des images.** Aucune image n'est envoyée à un service d'IA tiers : tout tourne sur des modèles ouverts que j'héberge. Les photos Commons servent seulement à la recherche ; le site n'affiche que des images de POP.
+- **Droits des images.** La recherche simple n'envoie aucune image à un service d'IA tiers : tout tourne sur des modèles ouverts que j'héberge. La recherche agentique envoie à OpenRouter la photo du visiteur et des vignettes des seules images de POP publiables. Les photos Commons servent seulement à la recherche ; le site n'affiche que des images de POP.
 
 ## Prochaines étapes
 
@@ -195,13 +205,36 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 - **[GallicaPix](https://www.erudit.org/en/journals/documentation/2019-v65-n2-documentation04848/1063786ar/)** (BnF, vers 2019). Classe les illustrations de Gallica par genre (photo, dessin, carte) grâce à l'apprentissage profond. *Même terrain, le patrimoine français ; mais la recherche part de mots et de catégories, pas d'une photo.*
 - **[Replica](https://www.epfl.ch/labs/dhlab/projects/replica/)** (EPFL et Fondation Giorgio Cini, 2015-2019). Moteur de recherche visuelle sur environ 730 000 photographies d'œuvres d'art : on part d'une image pour trouver les œuvres qui lui ressemblent.
 
+## Lancer, tester, déployer
+
+Il faut Python 3.12 et [uv](https://docs.astral.sh/uv/). Aucun modèle ne tourne sur la machine de développement : ils tournent chez Modal ou OpenRouter.
+
+```sh
+uv sync                    # installe le projet et les outils de développement
+cp .env.example .env       # puis indiquez où sont les exports POP et les données
+make check                 # format, lint, types, tests : doit passer avant chaque commit
+uv run miroir web dev      # le site sur http://localhost:8000, avec de faux modèles
+```
+
+Pour mettre en ligne (compte Modal requis) :
+
+```sh
+uv run miroir web build-index   # prépare l'index sur la machine, environ 3 minutes
+uv run miroir web deploy        # déploie d'abord le code
+uv run miroir web upload        # puis envoie l'index
+```
+
+Le détail, avec le mot de passe partagé et la recherche agentique : [docs/prototype.md](docs/prototype.md#run-and-deploy).
+
 ## Documentation technique
 
-- [Prototype](docs/prototype.md) : ce qui est en ligne et comment le déployer
+- [Prototype](docs/prototype.md) : ce qui est en ligne, ses scores, comment le déployer
+- [Développement](docs/developpement.md) : installer, réglages, la commande `miroir`
+- [Règles de contribution](CLAUDE.md) et [règles de code](CODING_STANDARDS.md)
 - [Spécification fonctionnelle](docs/functional-spec.md) : pour qui, quoi, comment on juge
 - [Spécification technique](docs/technical-spec.md) : données, modèles, index, API, évaluation
-- [Expériences](docs/experiments.md) et [résultats détaillés](docs/results.md)
-- [Développement](docs/developpement.md) : installer, lancer les tests, contribuer
+- [Expériences](docs/experiments.md) et [résultats détaillés](docs/results.md), le carnet de bord des essais
+- [Guide T6](docs/t6-guide.md) : écrire à la main les 50 recherches par mots
 
 Les données et les images ne sont pas dans ce dépôt : elles viennent des exports ouverts de POP.
 
