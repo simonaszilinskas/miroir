@@ -39,7 +39,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 ## Ce que fait le prototype
 
-Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.modal.run>**. Il demande un mot de passe partagé, que le responsable du projet donne sur demande ; il n'est écrit nulle part dans ce dépôt. Une recherche prend moins d'une seconde ; la première après 10 minutes sans usage prend 1 à 2 minutes, le temps que le serveur et sa carte graphique (GPU) démarrent.
+Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.modal.run>**. Mot de passe : **zhax-386e-rpjd** Une recherche prend moins d'une seconde ; la première après 10 minutes sans usage prend 1 à 2 minutes, le temps que le serveur et sa carte graphique (GPU) démarrent.
 
 La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
 
