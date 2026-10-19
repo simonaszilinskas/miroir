@@ -47,18 +47,52 @@ main { min-height: 60vh; }
 /* --- home ---------------------------------------------------------------------------- */
 
 .miroir-hero {
+  position: relative; overflow: hidden; isolation: isolate;
   background:
-    radial-gradient(60rem 30rem at 110% -10%, var(--background-contrast-blue-france) 0, transparent 60%),
+    radial-gradient(50rem 26rem at 50% 0%, var(--background-contrast-blue-france) 0, transparent 70%),
     var(--background-alt-blue-france);
-  padding: 2.5rem 0 2.5rem;
+  padding: 2rem 0 3rem;
 }
-@media (min-width: 62em) { .miroir-hero { padding: 4.5rem 0; } }
+@media (min-width: 62em) { .miroir-hero { padding: 5rem 0 5.5rem; } }
+.miroir-hero__inner { position: relative; z-index: 1; max-width: 50rem; text-align: center; }
 .miroir-hero__title {
   font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; letter-spacing: -0.02em;
-  color: var(--text-title-blue-france); margin-bottom: 1rem;
+  color: var(--text-title-blue-france); margin-bottom: 1rem; text-wrap: balance;
 }
+.miroir-hero__lead { max-width: 40rem; margin: 0 auto 2.5rem; text-wrap: balance; }
+.miroir-hero__tiles { text-align: left; }
 
-.miroir-hero__lead { max-width: 36rem; margin-bottom: 2rem; }
+/* Photos from the examples, floating around the centre on wide screens, fanned above it on phones. */
+.miroir-float { display: flex; justify-content: center; margin: 0 0 1.75rem; }
+.miroir-float img {
+  width: 4.5rem; height: 4.5rem; object-fit: cover; border-radius: 0.625rem;
+  border: 3px solid var(--background-default-grey);
+  box-shadow: var(--miroir-shadow); background: var(--background-contrast-grey);
+  margin: 0 -0.5rem;
+}
+.miroir-float img:nth-child(odd) { transform: rotate(-6deg); }
+.miroir-float img:nth-child(even) { transform: rotate(5deg) translateY(0.5rem); }
+@media (max-width: 30em) { .miroir-float img:nth-child(n+6) { display: none; } }
+@media (min-width: 78em) {
+  .miroir-float { position: absolute; inset: 0; margin: 0; display: block; pointer-events: none; }
+  .miroir-float img {
+    position: absolute; margin: 0; border-width: 4px;
+    width: var(--s); height: var(--s); transform: rotate(var(--r));
+    animation: miroir-drift 9s ease-in-out infinite alternate;
+  }
+  .miroir-float img:nth-child(1) { --s: 10rem; --r: -7deg; top: 9%;  left: 5%; }
+  .miroir-float img:nth-child(2) { --s: 7rem;  --r: 5deg;  top: 46%; left: 10%; animation-delay: -3s; }
+  .miroir-float img:nth-child(3) { --s: 8.5rem; --r: -3deg; bottom: 7%; left: 4%; animation-delay: -6s; }
+  .miroir-float img:nth-child(4) { --s: 8rem;  --r: 6deg;  top: 7%;  right: 6%; animation-delay: -2s; }
+  .miroir-float img:nth-child(5) { --s: 10.5rem; --r: -5deg; top: 38%; right: 1%; animation-delay: -5s; }
+  .miroir-float img:nth-child(6) { --s: 7rem;  --r: 8deg;  bottom: 8%; right: 11%; animation-delay: -7s; }
+  .miroir-float img:nth-child(n+7) { display: none; }
+}
+@keyframes miroir-drift {
+  from { transform: translateY(-0.5rem) rotate(var(--r)); }
+  to   { transform: translateY(0.5rem) rotate(calc(var(--r) * -0.4)); }
+}
+@media (prefers-reduced-motion: reduce) { .miroir-float img { animation: none; } }
 .miroir-tile { height: 100%; }
 .miroir-tile .fr-tile__detail { color: var(--text-mention-grey); }
 
@@ -79,17 +113,6 @@ main { min-height: 60vh; }
   .miroir-actions .fr-btn { width: 100%; max-width: none; min-height: 3.5rem; }
 }
 .miroir-describe { max-width: 40rem; }
-
-.miroir-mosaic {
-  display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 7.5rem; gap: 0.625rem;
-  transform: rotate(-2deg);
-}
-.miroir-mosaic img {
-  width: 100%; height: 100%; object-fit: cover; border-radius: 0.625rem;
-  box-shadow: var(--miroir-shadow); background: var(--background-contrast-grey);
-}
-.miroir-mosaic img:nth-child(1) { grid-row: span 2; }
-.miroir-mosaic img:nth-child(5) { grid-column: span 2; }
 
 .miroir-examples {
   list-style: none; padding: 0; margin: 0;

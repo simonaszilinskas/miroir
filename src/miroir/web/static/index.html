@@ -94,13 +94,12 @@
     <!-- 1. Accueil : deux recherches -->
     <section class="view" data-view="home" hidden>
       <div class="miroir-hero">
-        <div class="fr-container">
-          <div class="fr-grid-row fr-grid-row--gutters fr-grid-row--middle">
-            <div class="fr-col-12 fr-col-lg-7">
+        <div class="miroir-float" id="hero-mosaic" aria-hidden="true"></div>
+        <div class="fr-container miroir-hero__inner">
               <h1 class="miroir-hero__title">Qu’avez-vous sous les yeux&nbsp;?</h1>
               <p class="fr-text--lead miroir-hero__lead">Photographiez un tableau, un objet ou un monument&nbsp;: Miroir cherche sa notice dans les collections patrimoniales nationales.</p>
-              <h2 class="fr-text--md fr-text--bold fr-mb-2w">Choisissez une recherche</h2>
-              <div class="fr-grid-row fr-grid-row--gutters">
+              <h2 class="fr-text--md fr-text--bold fr-mb-2w miroir-hero__choose">Choisissez une recherche</h2>
+              <div class="fr-grid-row fr-grid-row--gutters miroir-hero__tiles">
                 <div class="fr-col-12 fr-col-sm-6">
                   <div class="fr-tile fr-enlarge-link miroir-tile">
                     <div class="fr-tile__body">
@@ -144,11 +143,6 @@
                   </div>
                 </div>
               </div>
-            </div>
-            <div class="fr-col-12 fr-col-lg-5 fr-hidden fr-unhidden-lg">
-              <div class="miroir-mosaic" id="hero-mosaic" aria-hidden="true"></div>
-            </div>
-          </div>
         </div>
       </div>
     </section>
