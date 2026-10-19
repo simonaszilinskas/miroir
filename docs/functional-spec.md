@@ -71,7 +71,7 @@ Any search can be narrowed by:
 
 Filters apply before ranking, so a filtered search still returns a full page of results.
 
-*Status:* built for collection, region, département, domain and period. There is no author filter; words typed with the photo reach the author.
+*Status:* built for collection, region, département, domain and period. There is no author filter; an author's name typed in the word box is matched against the records instead.
 
 ### F4. Several objects in one photo
 
