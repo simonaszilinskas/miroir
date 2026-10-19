@@ -1,6 +1,6 @@
 # MIROIR: experiments
 
-Status: plan for weeks 1–2, with later rounds running into week 3. Last updated 2026-10-12.
+Status: the plan for weeks 1–2, with later rounds running into week 3. Status notes added 2026-10-19: R0 to R2 are done, R3 is done but for step D, R4 has not started (§5). [results.md](results.md) holds every run.
 
 Finding the right heritage record from a photo is a research problem before it is a product problem. We don't pick models by reputation. We split search into steps (A–H), list every serious option for each step, and score them all with the same harness on the same test sets ([technical-spec.md §7](technical-spec.md#7-evaluation)).
 
@@ -21,7 +21,7 @@ Finding the right heritage record from a photo is a research problem before it i
 |---|---|---|---|---|
 | A1 | DINOv2 ViT-L/14 and ViT-g/14 | yes | Modal | The current default. Everything else is measured against it |
 | A2 | DINOv3 ViT-L and ViT-H+ (the largest distilled size); the 7B teacher | yes (custom licence, gated) | Modal (L, H+; 7B for R0 only), once Meta approves access | The paper's clear gains over DINOv2 on Met and AmsterTime are for the 7B only (AmsterTime mAP 56.5 vs 48.9). For distilled ViT-L it reports only Oxford-H. The 7B does not fit on a 16 GB machine |
-| A3 | MegaLoc (DINOv2 + SALAD) | yes | hosted (TBD) | Built to recognise places from any angle |
+| A3 | MegaLoc (DINOv2 + SALAD) | yes | Modal | Built to recognise places from any angle |
 | A4 | SigLIP 2 so400m and giant | yes | Modal | Text and image in one space |
 | A5 | Meta Perception Encoder, PE-Core L and G | yes | Modal | A strong rival to SigLIP 2 |
 | A6 | MetaCLIP 2 | weights open, CC-BY-NC 4.0 | hosted (TBD) | Trained on many languages. Non-commercial licence: a point of comparison only, unless the Ministry's lawyers clear it |
@@ -34,6 +34,8 @@ Finding the right heritage record from a photo is a research problem before it i
 
 Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU (`miroir embed modal`, technical spec §4); only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
 
+**Status (2026-10-19).** Run: A1, A2, A3, A4 (so400m), A5 (PE-Core L), A7, A8 (2B), A9, A10 (Voyage). Not run: A6, A8b, A10 Nemotron, A11. Kept: A7 and A3.
+
 For A1–A3, also compare three ways to turn an image into one vector: the class token, GeM pooling over patch tokens, and VLAD over patch tokens (as in AnyLoc).
 
 ### B. Words → records (F2)
@@ -45,6 +47,8 @@ For A1–A3, also compare three ways to turn an image into one vector: the class
 | B3 | Caption first: a vision model writes a French description of every collection image. We search those with BM25 plus a text embedder (EmbeddingGemma 2 text or Qwen3-Embedding). Captioners to compare: Qwen3-VL 8B and 30B-A3B through OpenRouter (Qwen3-VL-32B is not on OpenRouter), and one closed model through OpenRouter |
 | B4 | BM25 on POP text fields only (the floor) |
 | B5 | An AI model rewrites the query into filters and search terms before B1–B4 |
+
+**Status (2026-10-19).** Run on T7: B2 (A7's text vector), B4 (BM25) and their mix; the site keeps the mix at A7 0.9. Not run: B1, B3, B5. T6 is not written yet.
 
 ### C. Finding objects in the query photo (F4)
 
@@ -60,6 +64,8 @@ For A1–A3, also compare three ways to turn an image into one vector: the class
 
 Scored on: box recall against the 231 paintings in the room photos, then the T3 search score.
 
+**Status (2026-10-19).** Run: C1 (OWLv2 base, large), C2 (Grounding DINO tiny, base). C4 (Qwen3-VL 8B) was stopped as too slow. Not run: C3, C5, C6, C+. The site uses Grounding DINO tiny.
+
 ### D. Detail → whole (F5)
 
 | ID | Option |
@@ -71,6 +77,8 @@ Scored on: box recall against the 231 paintings in the room photos, then the T3 
 | D5 | Embed the crop alone against whole-image vectors (the floor) |
 
 Scored on: T4, plus index size and search time. Run on Rose Valland first. Extend to everything only if the winner fits in memory.
+
+**Status (2026-10-19).** Not run; T4 is not built. The site lets the visitor draw a box around a detail and searches it as D5 would.
 
 ### E. Re-ranking the top 50
 
@@ -84,6 +92,8 @@ Scored on: T4, plus index size and search time. Run on Rose Valland first. Exten
 
 Scored on: T1, T2, T3, T5, plus time added per search.
 
+**Status (2026-10-19).** Run: E1 (ALIKED + LightGlue; not on the site, it adds 3 s a search) and E5. Not run: E2, E3, E4.
+
 ### F. Phone photos against the black-and-white archive
 
 | ID | Option |
@@ -95,6 +105,8 @@ Scored on: T1, T2, T3, T5, plus time added per search.
 | F5 | Start from a checkpoint already tuned on old-vs-new pairs, if a usable one exists |
 
 Scored on: T2. T1 must not drop by more than its error bar.
+
+**Status (2026-10-19).** Run: F1 (no gain) and F2 (kept: 10,221 Commons photos in the site's index). Not run: F3, F4, F5.
 
 ### G. Combining scores and deciding "not found"
 
@@ -108,6 +120,8 @@ Scored on: T2. T1 must not drop by more than its error bar.
 
 Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident rate at a fixed match rate).
 
+**Status (2026-10-19).** Run: G1, G2, G4, G5; the site uses G5. G3 did not run; card levels (prototype.md, "Card levels") replaced the "not found" cut-off.
+
 ### H. Different approaches altogether
 
 | ID | Option |
@@ -116,7 +130,7 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 | H2 | Use the photo's GPS position to keep only records within 2 km. Tested on T2 photos that carry GPS. Needs coordinates for records (POP coordinates where present, else the commune centre) |
 | H3 | H1 or H2 as one more signal into G3 |
 | H4 | A vision model leads the search: it sees the photo, calls image search, text search and filters as tools, looks at the results and picks the top 10. Mistral Large 4 (open, on OpenRouter), four ways: one plan (S1), plan then review (S2), free loop (S3), ask the visitor up to 3 questions then search (S4). Technical spec §7.4 |
-| H5 | H4 on the website, with real visitors: the conversation page (`/chat`). The visitor gives a photo or words and says what they want (this exact thing, similar things, the same place, who made it); the site's usual search starts at once and Mistral Large 4 gets its first results, asks questions that fit the subject, searches the live index with the tools (soft filters, a refused repeat, a cap of 8 searches a message) and shows its picks as result cards. After the first hosted test (a gold Roman dish not in the index: the model ignored close first results and drifted on long guessed queries), the code enforces a method: look at the first results before searching, say why at each step, follow a seen record with `more_like` instead of guessed words, stop after 3 searches without a sure match, and say plainly when the thing is not there. Each conversation is logged without images. Technical spec §8.1 |
+| H5 | H4 on the website, with real visitors: the agentic search (`#/agentique` on the site; `/chat` leads there). The visitor gives a photo or words and says what they want (this exact thing, similar things, the same place, who made it); the site's usual search starts at once and Mistral Large 4 gets its first results, asks questions that fit the subject, searches the live index with the tools (soft filters, a refused repeat, a cap of 8 searches a message) and shows its picks as result cards. After the first hosted test (a gold Roman dish not in the index: the model ignored close first results and drifted on long guessed queries), the code enforces a method: look at the first results before searching, say why at each step, follow a seen record with `more_like` instead of guessed words, stop after 3 searches without a sure match, and say plainly when the thing is not there. Each conversation is logged without images. Technical spec §8.1 |
 
 ## 3. Test sets
 
@@ -143,6 +157,8 @@ As a guide to what counts as a real difference, an interval on 231 queries spans
 | R2 | Week 2 | E and F on top of the R1 winners | Best re-ranker; best phone-gap fix |
 | R3 | Week 2–3 | C, D, G and H on the R2 winners | The full stack for the website and the full POP index |
 | R4 | Week 6 | The chosen stack and the two runners-up on the sealed halves, once | Final scores for the decision meeting |
+
+Status (2026-10-19): R0, R1 and R2 done. R3 done for C, G and H (H1 to H5); D not run. R4 not started: the sealed halves are still closed.
 
 **Screening first.** Every A option is scored on the screening gallery (`screening-20k`: every image a query needs, plus seeded random distractors up to 20,000; technical spec §7). Only the top 3 embed the full collection. A screening run costs about a seventh of a full one. Closed models search `screening-20k-publishable` only, and are compared with open ones on the queries both can answer.
 
