@@ -7,6 +7,7 @@ import {
   $, $$, api, COLLECTION_NAMES, el, fill, grid, img, levelBadge,
 } from './ui.js';
 import { setupChat } from './chat.js';
+import { floatPhotos } from './hero.js';
 
 /** Longest side, in pixels, of a photo sent to the server (it shrinks to 512 px again). */
 const SEND_SIDE = 1024;
@@ -115,6 +116,7 @@ function loadAfterLogin() {
   if (loadedAfterLogin) return;
   loadedAfterLogin = true;
   renderExamples();
+  floatPhotos($('#hero-mosaic'));
   loadFacets();
   api('stats').then((s) => {
     $('#index-size').textContent = `${s.images.toLocaleString('fr-FR')}`;
@@ -196,12 +198,10 @@ function alertHome(message) {
 
 async function renderExamples() {
   const list = $('#examples');
-  const mosaic = $('#hero-mosaic');
   let examples = [];
   try { examples = await api('examples'); } catch { return; }
   list.replaceChildren(...exampleTiles(examples, (e) => (e.frame ? 'ouvrir la photo pour encadrer une œuvre' : 'lancer la recherche'), useExample));
   $('#chat-examples').replaceChildren(...exampleTiles(examples, () => 'ouvrir la conversation', chatExample));
-  mosaic.replaceChildren(...examples.slice(0, 6).map((e) => img(e.image_url, null)));
 }
 
 function exampleTiles(examples, action, onPick) {
