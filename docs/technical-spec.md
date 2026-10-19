@@ -1,8 +1,10 @@
 # MIROIR: technical specification
 
-Status: draft for the PoC. Last updated 2026-10-12. Read [functional-spec.md](functional-spec.md) first.
+Status: PoC. Written as the plan, updated 2026-10-19. Sections 1, 2, 5, 6, 8 and 10 still hold the first plan; a note at the head of each says what was built instead. What runs today: [prototype.md](prototype.md). Read [functional-spec.md](functional-spec.md) first.
 
 ## 1. Overview
+
+> **Built (2026-10-19): not as drawn below.** Modal GPUs embed every image with EmbeddingGemma 2 (A7) and MegaLoc (A3); the vectors come back as NumPy files (§7.1, §7.3). `miroir web build-index` packs them, the records and the routing weights into a bundle on a Modal volume. The search runs on one Modal L4 (§8): it embeds the query, scores every image exactly with NumPy, and mixes in a BM25 word score. There is no OpenSearch, no tile index, no Docker and no caption of collection images. Grounding DINO tiny draws the outlines; Qwen3-VL 4B reads an archive print's caption at search time. Each result card shows a level instead of a "not found" flag.
 
 ```mermaid
 flowchart LR
@@ -31,15 +33,15 @@ Everything runs in Docker so the stack can move to the Ministry's cloud unchange
 
 ## 2. Stack
 
-| Part | Choice |
-|---|---|
-| Language | Python 3.12 for pipeline, API and evaluation |
-| API | FastAPI |
-| Models | PyTorch with Hugging Face `transformers` |
-| Search | OpenSearch with the k-NN plugin (Faiss HNSW) and a hybrid search pipeline |
-| Website | SvelteKit with Tailwind, phone-first |
-| Captions | A vision model through OpenRouter, picked in week 1 on cost and French quality |
-| Deployment | Docker Compose: `opensearch`, `api`, `web`, `worker`. A GPU machine runs the indexing jobs |
+| Part | Choice | Built (2026-10-19) |
+|---|---|---|
+| Language | Python 3.12 for pipeline, API and evaluation | As planned |
+| API | FastAPI | As planned (`miroir.web.app`) |
+| Models | PyTorch with Hugging Face `transformers` | As planned, only inside Modal containers (`src/miroir/remote/`) |
+| Search | OpenSearch with the k-NN plugin (Faiss HNSW) and a hybrid search pipeline | Dropped: exact cosine search over the vectors on the GPU, ranking and BM25 in NumPy (`miroir.web.engine`, `miroir.eval.bm25`) |
+| Website | SvelteKit with Tailwind, phone-first | Dropped: one static page in plain JavaScript with the State design system (DSFR 1.15.4), served by FastAPI (`src/miroir/web/static/`) |
+| Captions | A vision model through OpenRouter, picked in week 1 on cost and French quality | Dropped for collection images (option B3 never ran). Qwen3-VL 4B on Modal reads archive print captions at search time |
+| Deployment | Docker Compose: `opensearch`, `api`, `web`, `worker`. A GPU machine runs the indexing jobs | Dropped: Modal (`miroir web deploy`), a GPU class for search and a CPU container for the page, both asleep when idle. Indexing jobs also run on Modal |
 
 ## 3. Data
 
@@ -136,6 +138,8 @@ The script stops when the output folder passes 8 GB (`--max-gb`). Lookups go thr
 
 ## 4. Models
 
+> **Chosen (2026-10-19).** Image search: EmbeddingGemma 2 (A7) and MegaLoc (A3), weighted per photo (G5). Words: A7's text vector with BM25. Outlines: Grounding DINO tiny. Archive print captions: Qwen3-VL 4B. The agentic search: Mistral Large 4 through OpenRouter (§8.1). Every run is in [results.md](results.md).
+
 The models below are the starting point only. [experiments.md](experiments.md) compares them with every serious alternative: Qwen3-VL-Embedding, EmbeddingGemma 2, DINOv3, MegaLoc, SAM 3, geometric re-ranking and others. The winners replace them. Open models are preferred. A closed model enters the stack only if it wins by more than the error bar.
 
 | Job | Starting point | Also try | Why |
@@ -160,6 +164,8 @@ Cost is counted on the Mac: each call's wall time times Modal's published price 
 Captions are written only for records where `publishable` is true. During experiments, test queries come from the collections and Commons, so they can go to closed models. Testers' photos go to a closed model only if one wins a place in the stack and the testers agreed in writing.
 
 ## 5. Indexes
+
+> **Not built.** No OpenSearch index exists. The site reads a bundle of files that `miroir web build-index` writes to `~/miroir-data/web/<index>/` and `miroir web upload` copies to the `miroir-web-index` Modal volume: `a7.npy` and `a3.npy` (vectors), `ids.txt`, `catalog.json.gz` (records), `guess.npz` (building or object), `routing.json` (weights per bucket, G5), `levels.json` (card levels), `places.npz` (positions, H2), `publishable.txt.gz` (images that may go to an outside model), `report.json` (scores). `WEB_INDEX` in `src/miroir/config.py` names the bundle served (`full-f2`). Tiles (5.2) were never built: step D did not run. The fixed weights of 5.3 became G5's weights per bucket.
 
 ### 5.1 `images`: one document per image
 
@@ -216,6 +222,8 @@ PUT /_search/pipeline/miroir-hybrid
 The weights apply to `[text, dino, siglip]`. We tune them on the test sets, and the API drops the subqueries a search doesn't need (no text query, no photo).
 
 ## 6. Search API
+
+> **Built differently (2026-10-19).** Every route sits behind the shared password, under `/api`: `POST /login`, `/logout`, `/warm` (wakes the GPU), `/search`, `/detect`, `/chat/open`, `/chat/send`, `/chat/events`; `GET /me`, `/stats`, `/facets` (filter values, not counts), `/examples`, `/examples/{id}/image`, `/entity/{entity_id}` (a building or object with its POP images), `/chat/status`. `/search` follows 6.2 without tiles: it embeds the photo, picks the weights for its bucket, scores every image, groups by entity, and adds BM25 for words, the position prior (H2) and the caption of an archive print. 6.3's single cut-off became card levels (§8). A warm search takes about 0.9 s from a browser on an L4.
 
 ### 6.1 Endpoints
 
@@ -356,7 +364,7 @@ Each option's result file, `eval/results/<round>/<step>-<option>.json`, holds th
 
 ### 7.3 Full-sample index
 
-The prototype website searches every image of the working sample (`full.txt`, 137,775 images) with the two R2 models, routed per photo by G4 (results.md). Built 2026-10-12.
+The prototype website searches every image of the working sample (`full.txt`, 137,775 images) with the two R2 models, routed per photo by G4 (results.md). Built 2026-10-12. Since 2026-10-13 the site serves `full-f2` instead: the same images plus 10,221 Commons photos (F2), routed by G5 (prototype.md).
 
 | What | Where | Size |
 |---|---|---|
@@ -438,14 +446,16 @@ uv run miroir vlm h4 --all --max-usd <usd>        # every tune query; writes the
 
 ## 8. Website
 
+> **Built (2026-10-19).** One static page (`src/miroir/web/static/`: `index.html`, `app.js`, `chat.js`, `hero.js`, DSFR 1.15.4), not SvelteKit. The home page (`#/`) offers two tiles: "Recherche simple" (`#/simple`) and "Recherche agentique" (`#/agentique`, §8.1); photos of POP works float around the title (`hero.js`). Login is one shared password set by `miroir web secret`, not accounts. The rest of this list holds as written. What the visitor sees: [prototype.md](prototype.md).
+
 - **Stack.** SvelteKit with Tailwind, built phone-first. The camera opens through `<input type="file" accept="image/*" capture="environment">`.
 - **Photo view.** After upload, the site calls `/detect` and draws the boxes. Tapping a box, or drawing a new one, calls `/search` with that box.
 - **Results.** One card per group, listed by closeness: its best-matching POP image (a Commons photo of the entity helps the search but is never shown; the card then shows its best POP image), title, place, collection, a link to POP, and a confidence level: "Très proche", "Proche" or "Ressemblance" (`miroir.web.levels`, thresholds per route in the bundle's `levels.json`, set by `miroir web levels` on the tune halves: "Très proche" right at least 80% of the time, on at most 10% of T8 and T8c searches; prototype.md). A "matched on: back of canvas" tag appears when the shown image isn't `main`. Record pages list POP images only.
-- **Login.** Accounts created by an admin and stored hashed in the API's database. No sign-up page.
+- **Login.** Accounts created by an admin and stored hashed in the API's database. No sign-up page. *Changed: one shared password, a session cookie that lasts a week.*
 
 ### 8.1 The conversation page (step H5)
 
-An experiment beside the usual search, at `/chat` (the view `#/agentique`; the old `#/conversation` still works). The home page offers two searches as DSFR tiles, "Recherche simple" (`#/simple`) and "Recherche agentique" (`#/agentique`), each with a line on what it does and how long it takes. Each opens its own page: a title, the photo and words inputs, examples and three steps. On the agentic page an example opens a conversation with that photo. Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
+An experiment beside the usual search, at `#/agentique` (`/chat` and the old `#/conversation` lead there). The home page offers two searches as DSFR tiles, "Recherche simple" (`#/simple`) and "Recherche agentique" (`#/agentique`), each with a line on what it does and how long it takes. Each opens its own page: a title, the photo and words inputs, examples and three steps. On the agentic page an example opens a conversation with that photo. Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
 
 **Flow.**
 
@@ -494,34 +504,35 @@ Filters (base, département, commune, domain, period, `near`) favour by default:
 
 - **What we log:** each search's query (image hash, box, text, filters), returned refs and timing. Query images are stored only for logged-in testers who agreed in writing.
 - **Deletion:** test photos and logs are deleted at the end of the PoC.
-- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own Modal account embed every image for the full-sample index (§7.3, `--all-images`), publishable or not; approved by the project owner on 2026-10-13. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies.
+- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own Modal account embed every image for the full-sample index (§7.3, `--all-images`), publishable or not; approved by the project owner on 2026-10-13. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies. *Exception: the agentic search (§8.1) sends the visitor's photo, and thumbnails of publishable images, to Mistral Large 4 through OpenRouter; the page says so before the visitor starts.*
 
 ## 10. Repository layout
 
+As it stands on 2026-10-19. The plan also had `api/`, a SvelteKit `web/` and `docker-compose.yml`; all three were dropped (§2).
+
 ```
 miroir/
-  pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only) and `api` (FastAPI)
+  pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only), `api` (FastAPI), `openrouter`, `modal`
   Makefile         `make check` (ruff, pyright strict, pytest), `make fmt`
   LICENSE          Licence Ouverte 2.0 (Etalab)
   CLAUDE.md        contributor rules; CODING_STANDARDS.md
-  docs/            functional-spec.md, technical-spec.md, experiments.md, results.md, prototype.md, developpement.md
+  docs/            functional-spec.md, technical-spec.md, experiments.md, results.md, prototype.md, developpement.md, t6-guide.md
+  scripts/         pop_full_export.py, the full POP export (§3.4)
   src/miroir/
-    config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR)
+    config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR, WEB_INDEX)
     cli.py         the `miroir` command; every entry point is a subcommand
-    records/       record model, mappers per base, Parquet store  (`miroir records build`)
-    images/        image helpers (URLs, tiles); no local image store
+    records/       record model, mappers per base, Parquet store  (`miroir records build`, `build-full`)
+    images/        image helpers (fetch, colour, perceptual hash, finding a print on its card); no local image store
+    commons/       Wikimedia Commons photos for T2, T2b, T8c and the F2 gallery
+    geo/           positions of records and photos (H2)
     jobs/          remote model work: OpenRouter calls, the Modal app and its runner, spend and privacy checks
     remote/        model code run inside Modal containers only; the one place torch may be imported
-    index/         OpenSearch mappings and loading
-    eval/          test set builders, scoring
-    api/           FastAPI app (needs the `api` extra)
+    index/         the type guess, PCA test, vector upload (no OpenSearch)
+    eval/          test set builders, scoring, every step's experiment code
+    web/           the website: FastAPI app, ranking, card levels, agentic search, Modal app, static/ page
   tests/           unit tests; fixtures/ holds real export lines
   eval/            results/ (committed). Test sets live in MIROIR_DATA_DIR
-  web/             SvelteKit app
-  docker-compose.yml
-```
-
-`records/`, `images/` and `eval/` exist today; the others are created when their work starts. Data and images live outside the repository, in `MIROIR_DATA_DIR` (default `~/miroir-data`). The exports are read from `MIROIR_EXPORTS_DIR` and never written to.
+``` Data and images live outside the repository, in `MIROIR_DATA_DIR` (default `~/miroir-data`). The exports are read from `MIROIR_EXPORTS_DIR` and never written to.
 
 ## 11. Sizing
 
@@ -530,7 +541,7 @@ miroir/
 | Records with an image | 101,386 | 2,119,202 |
 | Images | about 138,000 | 2,138,564 distinct files |
 | Image vectors | 2 × 138,000 | 2 × 2.14 million |
-| Tile vectors | about 240,000 for Rose Valland, about 1.9 million for all | about 14 × images |
+| Tile vectors (not built) | about 240,000 for Rose Valland, about 1.9 million for all | about 14 × images |
 | Embedding | $7.54 and about 40 minutes per model on Modal | $124 and about 14 hours (11.1, option a) |
 
 ### 11.1 Full POP: what it holds and what indexing it costs
@@ -625,4 +636,4 @@ The $7.54 of §7.3 covered 137,775 images, but 21,785 of them reused earlier vec
 
 1. ~~Which POP bases does the full export contain, and how many images?~~ Answered in 11.1: six bases with images, 2,119,202 records, 2,138,564 distinct image files.
 2. ~~Is the POP asset bucket fast enough to download millions of images, or do we need a bulk copy from the POP team?~~ Answered in 11.1: fast enough, about 4 hours for everything at 128 requests at once.
-3. Does fp16 or byte encoding of tile vectors cost too much accuracy on T4?
+3. Does fp16 or byte encoding of tile vectors cost too much accuracy on T4? *Moot: tiles were not built. For whole-image vectors, int8 loses nothing (results.md, "Storage for all of POP").*
