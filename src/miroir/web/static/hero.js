@@ -24,19 +24,20 @@ const PHOTOS = [
   'mnr/MCSR0036/mcsr36n.jpg', // MCSR0036
 ].map((path) => BASE + path);
 
-// Where each photo sits on wide screens, and how near it looks: near photos are larger,
-// sharper and opaque; far ones are small, faint and slightly blurred.
+// Where each photo sits on wide screens: which side, how far from the page edge (0) towards
+// the content (1), how far down, and how near it looks. Near photos are larger and clearer;
+// all stay faint and keep clear of the content (app.css).
 const SLOTS = [
-  { x: '3%', y: '7%', near: 1 },
-  { x: '14%', y: '30%', near: 0.35 },
-  { x: '7%', y: '47%', near: 0.7 },
-  { x: '14%', y: '73%', near: 0.45 },
-  { x: '2%', y: '76%', near: 0.85 },
-  { x: '81%', y: '4%', near: 0.75 },
-  { x: '79%', y: '33%', near: 0.3 },
-  { x: '86%', y: '36%', near: 1 },
-  { x: '80%', y: '66%', near: 0.5 },
-  { x: '88%', y: '75%', near: 0.8 },
+  { side: 'left', x: 0.1, y: '8%', near: 1 },
+  { side: 'left', x: 0.9, y: '26%', near: 0.3 },
+  { side: 'left', x: 0.35, y: '45%', near: 0.7 },
+  { side: 'left', x: 0.95, y: '68%', near: 0.45 },
+  { side: 'left', x: 0, y: '80%', near: 0.85 },
+  { side: 'right', x: 0.4, y: '5%', near: 0.75 },
+  { side: 'right', x: 0.95, y: '30%', near: 0.3 },
+  { side: 'right', x: 0.05, y: '40%', near: 1 },
+  { side: 'right', x: 0.85, y: '64%', near: 0.5 },
+  { side: 'right', x: 0.15, y: '80%', near: 0.8 },
 ];
 
 const SWAP_EVERY_MS = 4000;
@@ -57,9 +58,9 @@ function photo(src, slot, index) {
   image.decoding = 'async';
   const { near } = slot;
   image.style.cssText = [
-    `--x:${slot.x}`, `--y:${slot.y}`,
-    `--s:${(4.5 + near * 6).toFixed(2)}rem`,
-    `--o:${(0.25 + near * 0.75).toFixed(2)}`,
+    `${slot.side}:calc((50% - 27rem - var(--s)) * ${slot.x})`, `top:${slot.y}`,
+    `--s:${(3.5 + near * 3).toFixed(2)}rem`,
+    `--o:${(0.15 + near * 0.35).toFixed(2)}`,
     `--b:${((1 - near) * 2.5).toFixed(1)}px`,
     `--r:${(index % 2 ? 1 : -1) * (3 + ((index * 7) % 6))}deg`,
     `--t:${(7 + (1 - near) * 8 + (index % 3)).toFixed(1)}s`,
