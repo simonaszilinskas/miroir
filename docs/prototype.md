@@ -84,6 +84,17 @@ Visitor check of phone photos of buildings (2026-10-13, on the deploy of `ccb414
 
 Timings: outlines take 0.27 s on the GPU once warm and about 0.7 s from the Mac (upload included); a warm search takes about 200 ms on the GPU and about 0.9 s from a browser (upload included); words alone 0.5 s. An archive print adds its caption reading: 1.4 s median on the GPU (2.1 s at the 95th percentile), so about 2.3 s from a browser; other photos add 6 ms. A cold start takes 50–110 s (container start, models about 25 s, gallery 2.5 GB to the GPU, BM25 over 101,000 records).
 
+### Photos from outside, tried on the live site
+
+Two photos that are in neither the index nor any test set (neither is among the 12,094 Commons files of `commons.parquet` and `commons-gallery-full.parquet`), loaded through each page's upload box on 2026-10-19:
+
+| Photo | Simple search | Agentique search |
+|---|---|---|
+| West front of Notre-Dame-la-Grande, Poitiers ([Benjism89, 2025, CC BY-SA 4.0](https://commons.wikimedia.org/wiki/File:Poitiers_-_%C3%89glise_Notre-Dame_la_Grande_-_02.jpg)) | PA00105596 first, "Très proche"; then 23 Romanesque churches of the region as "Ressemblance" | Same record, alone, in about 30 s after looking at 4 thumbnails; names the church and the 12th century, but calls the carved mandorla an oval rose window |
+| Detail of Corot's *Château de Wagnonville* (gatehouse and bridge, about a quarter of the canvas, no frame), cut from a museum visitor's photo ([Edelseider, CC BY-SA 2.0](https://commons.wikimedia.org/wiki/File:Douai_(Nord)_-_Mus%C3%A9e_de_la_Chartreuse_-_%22Le_ch%C3%A2teau_de_Wagnonville%22_(Jean-Baptiste_Camille_Corot,_1796-1875).jpg)) | Joconde 06190026809 first, "Très proche"; then Douai and Saint-Omer landscapes | Same record, alone, after 3 searches (image, "more like this", words); answers Corot, third quarter of the 19th century, musée de la Chartreuse |
+
+Both first searches met a sleeping engine and took over a minute.
+
 ## Run and deploy
 
 **Order when code and bundle change together.** Deploy first, then upload: `miroir web deploy`, then `miroir web upload`. New code reads older bundles (a bundle without `levels.json` falls back on the older sure rule; a `routing.json` without `caption_a7` and `caption_bm25` takes the caption weights from `miroir.web.routing`, 0.3 / 0.7), but older code refuses a `routing.json` that holds the caption weights. After a deploy, check one photo search on the site. The first wake-up after a deploy that adds a model downloads its weights into the weights volume once (Qwen3-VL 4B: about 9 GB).
