@@ -67,6 +67,10 @@ function warm() {
 /** The agentic search's view; `/chat` and the old `#/conversation` lead there too. */
 const AGENT_HASH = '#/agentique';
 
+/** "Comment ça marche": open without the password; it holds nothing secret. */
+const DOCS_HASH = '#/comment-ca-marche';
+const DOCS_TITLE = 'Comment ça marche · Miroir';
+
 function go(hash) {
   if (location.hash === hash) route(); else location.hash = hash;
 }
@@ -80,6 +84,7 @@ async function route() {
   const hash = location.hash || '#/';
   if (state.pick && hash !== '#/photo') endPick(null);
   if (hash === '#/connexion') { show('login'); $('#password').focus(); return; }
+  if (hash === DOCS_HASH) { show('docs'); document.title = DOCS_TITLE; peekSession(); return; }
   if (!(await loggedIn())) { go('#/connexion'); return; }
   if (hash === '#/simple') { show('simple'); return; }
   if (hash === AGENT_HASH || hash === '#/conversation') { show('conversation'); chat.enter(); return; }
@@ -109,6 +114,16 @@ async function loggedIn() {
     loadAfterLogin();
     return true;
   } catch { return false; }
+}
+
+/** Show the logged-in header without sending a visitor who is not logged in to the login
+ * view (`api` does that on a 401). */
+async function peekSession() {
+  if (sessionChecked) return;
+  try {
+    const response = await fetch('/api/me', { credentials: 'same-origin' });
+    if (response.ok) await loggedIn();
+  } catch { /* offline: the page still reads */ }
 }
 
 let loadedAfterLogin = false;

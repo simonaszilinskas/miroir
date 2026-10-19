@@ -48,6 +48,16 @@ def test_the_page_loads_without_login(client: TestClient) -> None:
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_how_it_works_reads_without_login(client: TestClient) -> None:
+    """The "Comment ça marche" view is in the page itself, linked from the header, the home
+    and login views, and its route comes before the login check."""
+    page = client.get("/").text
+    assert 'data-view="docs"' in page
+    assert page.count('href="#/comment-ca-marche"') >= 3
+    script = client.get("/static/app.js").text
+    assert script.index("hash === DOCS_HASH") < script.index("await loggedIn()")
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     [
