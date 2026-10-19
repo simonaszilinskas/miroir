@@ -63,6 +63,9 @@ function warm() {
 
 // --- routing ---------------------------------------------------------------------------------
 
+/** The agentic search's view; `/chat` and the old `#/conversation` lead there too. */
+const AGENT_HASH = '#/agentique';
+
 function go(hash) {
   if (location.hash === hash) route(); else location.hash = hash;
 }
@@ -77,7 +80,8 @@ async function route() {
   if (state.pick && hash !== '#/photo') endPick(null);
   if (hash === '#/connexion') { show('login'); $('#password').focus(); return; }
   if (!(await loggedIn())) { go('#/connexion'); return; }
-  if (hash === '#/conversation') { show('conversation'); chat.enter(); return; }
+  if (hash === '#/simple') { show('simple'); return; }
+  if (hash === AGENT_HASH || hash === '#/conversation') { show('conversation'); chat.enter(); return; }
   if (hash === '#/photo') {
     if (!state.photo) { go('#/'); return; }
     show('photo'); drawBox(); drawOutlines(); warm(); return;
@@ -112,7 +116,6 @@ function loadAfterLogin() {
   loadedAfterLogin = true;
   renderExamples();
   loadFacets();
-  checkAgent();
   api('stats').then((s) => {
     $('#index-size').textContent = `${s.images.toLocaleString('fr-FR')}`;
   }).catch(() => {});
@@ -145,8 +148,8 @@ document.addEventListener('click', async (event) => {
     sessionChecked = false;
     $$('[data-when="logged-in"]').forEach((n) => { n.hidden = true; });
     go('#/connexion');
-  } else if (action === 'home') {
-    go('#/');
+  } else if (action === 'photo-back') {
+    go(state.pick ? AGENT_HASH : '#/simple');
   } else if (action === 'edit-box') {
     if (state.photo) go('#/photo');
   }
@@ -159,7 +162,6 @@ for (const input of [$('#camera-input'), $('#upload-input')]) {
     const file = input.files && input.files[0];
     input.value = '';
     if (!file) return;
-    if (mode() === 'agent') { chat.startPhoto(file); return; }
     try {
       await usePhoto(file, await exifPosition(file));
       go('#/photo');
@@ -174,7 +176,6 @@ $('#describe-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = $('#describe-input').value.trim();
   if (!text) { $('#describe-input').focus(); return; }
-  if (mode() === 'agent') { chat.startWords(text); return; }
   state.photo = null; state.box = null; state.queryUrl = null;
   $('#refine-input').value = text;
   runSearch({ text });
@@ -185,45 +186,6 @@ for (const chip of document.querySelectorAll('#describe-chips button')) {
     $('#describe-input').value = chip.textContent;
     $('#describe-form').requestSubmit();
   });
-}
-
-// --- home: simple or agentic search ----------------------------------------------------------
-
-const MODE_KEY = 'miroir.mode';
-const STEP_COMPARE = {
-  simple: 'Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.',
-  agent: 'Un modèle lance des recherches dans ces notices, regarde les images trouvées et garde celles qui répondent à votre question.',
-};
-
-function mode() {
-  return $('#modes input[name="mode"]:checked')?.value || 'simple';
-}
-
-function setMode(value) {
-  const input = $(`#modes input[value="${value}"]`);
-  if (!input || input.disabled) return;
-  input.checked = true;
-  $('#step-compare').textContent = STEP_COMPARE[value];
-}
-
-for (const input of $$('#modes input[name="mode"]')) {
-  input.addEventListener('change', () => {
-    setMode(input.value);
-    try { localStorage.setItem(MODE_KEY, input.value); } catch { /* storage refused */ }
-  });
-}
-try { setMode(localStorage.getItem(MODE_KEY) || 'simple'); } catch { /* storage refused */ }
-
-/** Without the conversation service, only the simple search can be chosen. */
-async function checkAgent() {
-  let enabled = false;
-  try { enabled = (await api('chat/status')).enabled; } catch { /* off */ }
-  if (enabled) return;
-  const input = $('#mode-agent input');
-  input.disabled = true;
-  $('#mode-agent').setAttribute('aria-disabled', 'true');
-  $('#mode-agent .miroir-mode__cost').textContent = 'Pas activée sur ce site.';
-  setMode('simple');
 }
 
 function alertHome(message) {
@@ -237,27 +199,40 @@ async function renderExamples() {
   const mosaic = $('#hero-mosaic');
   let examples = [];
   try { examples = await api('examples'); } catch { return; }
-  list.replaceChildren(...examples.map((example) => el('li', {},
+  list.replaceChildren(...exampleTiles(examples, (e) => (e.frame ? 'ouvrir la photo pour encadrer une œuvre' : 'lancer la recherche'), useExample));
+  $('#chat-examples').replaceChildren(...exampleTiles(examples, () => 'ouvrir la conversation', chatExample));
+  mosaic.replaceChildren(...examples.slice(0, 6).map((e) => img(e.image_url, null)));
+}
+
+function exampleTiles(examples, action, onPick) {
+  return examples.map((example) => el('li', {},
     el('button', {
       class: 'miroir-example', type: 'button',
-      'aria-label': `${example.label} : ${example.frame ? 'ouvrir la photo pour encadrer une œuvre' : 'lancer la recherche'}`,
-      onclick: () => useExample(example),
+      'aria-label': `${example.label} : ${action(example)}`,
+      onclick: () => onPick(example),
     },
     img(example.image_url, null, { class: 'miroir-example__img' }),
     el('div', { class: 'miroir-example__body' },
       el('div', { class: 'miroir-example__kind', text: example.kind }),
       el('div', { class: 'miroir-example__label', text: example.label }),
-      el('div', { class: 'miroir-example__credit', text: `Photo : ${example.credit}` }))))));
-  mosaic.replaceChildren(...examples.slice(0, 6).map((e) => img(e.image_url, null)));
+      el('div', { class: 'miroir-example__credit', text: `Photo : ${example.credit}` })))));
+}
+
+async function exampleBlob(example) {
+  const response = await fetch(example.image_url, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error('example');
+  return response.blob();
+}
+
+async function chatExample(example) {
+  let blob;
+  try { blob = await exampleBlob(example); } catch { return; }
+  chat.startPhoto(blob);
 }
 
 async function useExample(example) {
   try {
-    const response = await fetch(example.image_url, { credentials: 'same-origin' });
-    if (!response.ok) throw new Error('example');
-    const blob = await response.blob();
-    if (mode() === 'agent') { chat.startPhoto(blob); return; }
-    await usePhoto(blob);
+    await usePhoto(await exampleBlob(example));
   } catch {
     alertHome('Cet exemple n’a pas pu être chargé.');
     return;
@@ -972,7 +947,7 @@ function endPick(dataUrl) {
   $('#change-photo').hidden = false;
   showPhotoPosition();
   if (resolve) resolve(dataUrl);
-  if (dataUrl !== null && location.hash === '#/photo') go('#/conversation');
+  if (dataUrl !== null && location.hash === '#/photo') go(AGENT_HASH);
 }
 
 /** The usual search, from the conversation view (when its spending cap is reached). */

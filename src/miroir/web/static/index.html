@@ -91,7 +91,7 @@
       </div>
     </section>
 
-    <!-- 1. Accueil -->
+    <!-- 1. Accueil : deux recherches -->
     <section class="view" data-view="home" hidden>
       <div class="miroir-hero">
         <div class="fr-container">
@@ -99,46 +99,96 @@
             <div class="fr-col-12 fr-col-lg-7">
               <h1 class="miroir-hero__title">Qu’avez-vous sous les yeux&nbsp;?</h1>
               <p class="fr-text--lead miroir-hero__lead">Photographiez un tableau, un objet ou un monument&nbsp;: Miroir cherche sa notice dans les collections patrimoniales nationales.</p>
-              <fieldset class="miroir-modes" id="modes">
-                <legend class="fr-text--sm fr-text--bold fr-mb-1w">Choisissez une recherche</legend>
-                <label class="miroir-mode">
-                  <input type="radio" name="mode" value="simple" checked>
-                  <span class="miroir-mode__name">Recherche simple</span>
-                  <span class="miroir-mode__pros">Des résultats en quelques secondes. Vous précisez et filtrez vous-même. Votre photo reste chez Miroir.</span>
-                </label>
-                <label class="miroir-mode" id="mode-agent">
-                  <input type="radio" name="mode" value="agent">
-                  <span class="miroir-mode__name">Recherche agentique <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></span>
-                  <span class="miroir-mode__pros">Un modèle cherche pour vous, vérifie les images et explique ses choix. Il vous pose une question si besoin.</span>
-                  <span class="miroir-mode__cost">Environ une minute. Votre photo est envoyée à Mistral Large 4, par OpenRouter.</span>
-                </label>
-              </fieldset>
-              <div class="miroir-actions">
-                <label class="fr-btn fr-btn--lg fr-btn--icon-left fr-icon-camera-line miroir-actions__main" for="camera-input">Prendre une photo</label>
-                <input type="file" id="camera-input" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
-                <label class="fr-btn fr-btn--lg fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="upload-input">Importer une image</label>
-                <input type="file" id="upload-input" accept="image/*" class="fr-sr-only" tabindex="-1">
-              </div>
-              <form class="miroir-describe" id="describe-form" role="search">
-                <label class="fr-label" for="describe-input">Décrivez ce que vous voyez
-                  <span class="fr-hint-text">Ce que vous voyez, un lieu ou un artiste, en français ou dans une autre langue</span>
-                </label>
-                <div class="fr-search-bar fr-search-bar--lg fr-mt-1w">
-                  <input class="fr-input" type="search" id="describe-input" name="q" placeholder="Décrivez ce que vous voyez" maxlength="300" autocomplete="off">
-                  <button class="fr-btn" type="submit" title="Rechercher">Rechercher</button>
+              <h2 class="fr-text--md fr-text--bold fr-mb-2w">Choisissez une recherche</h2>
+              <div class="fr-grid-row fr-grid-row--gutters">
+                <div class="fr-col-12 fr-col-sm-6">
+                  <div class="fr-tile fr-enlarge-link miroir-tile">
+                    <div class="fr-tile__body">
+                      <div class="fr-tile__content">
+                        <h3 class="fr-tile__title"><a href="#/simple">Recherche simple</a></h3>
+                        <p class="fr-tile__desc">Miroir compare votre photo aux images des notices. Vous affinez avec des mots et des filtres.</p>
+                        <p class="fr-tile__detail fr-icon-time-line">Quelques secondes</p>
+                        <div class="fr-tile__start"><p class="fr-badge fr-badge--sm fr-badge--success">Stable</p></div>
+                      </div>
+                    </div>
+                    <div class="fr-tile__header">
+                      <div class="fr-tile__pictogram">
+                        <svg aria-hidden="true" class="fr-artwork" viewBox="0 0 80 80" width="80px" height="80px">
+                          <use class="fr-artwork-decorative" href="/static/pictograms/search.svg#artwork-decorative"></use>
+                          <use class="fr-artwork-minor" href="/static/pictograms/search.svg#artwork-minor"></use>
+                          <use class="fr-artwork-major" href="/static/pictograms/search.svg#artwork-major"></use>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <ul class="fr-tags-group fr-mt-1w" id="describe-chips" aria-label="Exemples de recherche">
-                  <li><button class="fr-tag" type="button">moulin à vent</button></li>
-                  <li><button class="fr-tag" type="button">nature morte au lièvre</button></li>
-                  <li><button class="fr-tag" type="button">Pont du Gard</button></li>
-                  <li><button class="fr-tag" type="button">cathedral rose window</button></li>
-                </ul>
-              </form>
+                <div class="fr-col-12 fr-col-sm-6">
+                  <div class="fr-tile fr-enlarge-link miroir-tile">
+                    <div class="fr-tile__body">
+                      <div class="fr-tile__content">
+                        <h3 class="fr-tile__title"><a href="#/agentique">Recherche agentique</a></h3>
+                        <p class="fr-tile__desc">Vous dites ce que vous cherchez. Un modèle mène la recherche, vérifie les images et explique ses choix.</p>
+                        <p class="fr-tile__detail fr-icon-time-line">Environ une minute</p>
+                        <div class="fr-tile__start"><p class="fr-badge fr-badge--sm fr-badge--new">Expérimental</p></div>
+                      </div>
+                    </div>
+                    <div class="fr-tile__header">
+                      <div class="fr-tile__pictogram">
+                        <svg aria-hidden="true" class="fr-artwork" viewBox="0 0 80 80" width="80px" height="80px">
+                          <use class="fr-artwork-decorative" href="/static/pictograms/innovation.svg#artwork-decorative"></use>
+                          <use class="fr-artwork-minor" href="/static/pictograms/innovation.svg#artwork-minor"></use>
+                          <use class="fr-artwork-major" href="/static/pictograms/innovation.svg#artwork-major"></use>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="fr-col-12 fr-col-lg-5 fr-hidden fr-unhidden-lg">
               <div class="miroir-mosaic" id="hero-mosaic" aria-hidden="true"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1 bis. Recherche simple -->
+    <section class="view" data-view="simple" hidden>
+      <div class="miroir-band">
+        <div class="fr-container">
+          <nav role="navigation" class="fr-breadcrumb fr-mt-0 fr-mb-3w" aria-label="vous êtes ici :">
+            <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="breadcrumb-simple">Voir le fil d’Ariane</button>
+            <div class="fr-collapse" id="breadcrumb-simple">
+              <ol class="fr-breadcrumb__list">
+                <li><a class="fr-breadcrumb__link" href="#/">Accueil</a></li>
+                <li><a class="fr-breadcrumb__link" aria-current="page">Recherche simple</a></li>
+              </ol>
+            </div>
+          </nav>
+          <h1 class="miroir-band__title">Recherche simple</h1>
+          <p class="fr-text--lead miroir-band__lead">Une photo ou quelques mots. Miroir vous montre les notices les plus proches.</p>
+          <div class="miroir-actions">
+            <label class="fr-btn fr-btn--lg fr-btn--icon-left fr-icon-camera-line" for="camera-input">Prendre une photo</label>
+            <input type="file" id="camera-input" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
+            <label class="fr-btn fr-btn--lg fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="upload-input">Importer une image</label>
+            <input type="file" id="upload-input" accept="image/*" class="fr-sr-only" tabindex="-1">
+          </div>
+          <form class="miroir-describe" id="describe-form" role="search">
+            <label class="fr-label" for="describe-input">Ou décrivez ce que vous voyez
+              <span class="fr-hint-text">Ce que vous voyez, un lieu ou un artiste, en français ou dans une autre langue</span>
+            </label>
+            <div class="fr-search-bar fr-search-bar--lg fr-mt-1w">
+              <input class="fr-input" type="search" id="describe-input" name="q" placeholder="Décrivez ce que vous voyez" maxlength="300" autocomplete="off">
+              <button class="fr-btn" type="submit" title="Rechercher">Rechercher</button>
+            </div>
+            <ul class="fr-tags-group fr-mt-1w" id="describe-chips" aria-label="Exemples de recherche">
+              <li><button class="fr-tag" type="button">moulin à vent</button></li>
+              <li><button class="fr-tag" type="button">nature morte au lièvre</button></li>
+              <li><button class="fr-tag" type="button">Pont du Gard</button></li>
+              <li><button class="fr-tag" type="button">cathedral rose window</button></li>
+            </ul>
+          </form>
         </div>
       </div>
 
@@ -156,7 +206,7 @@
           <div class="miroir-step">
             <span class="fr-icon-search-line miroir-step__icon" aria-hidden="true"></span>
             <h3 class="fr-h6 fr-mb-1v">2. Une comparaison</h3>
-            <p class="fr-text--sm fr-mb-0" id="step-compare">Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.</p>
+            <p class="fr-text--sm fr-mb-0">Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.</p>
           </div>
           <div class="miroir-step">
             <span class="fr-icon-file-text-line miroir-step__icon" aria-hidden="true"></span>
@@ -170,7 +220,7 @@
     <!-- 2. Photo -->
     <section class="view" data-view="photo" hidden>
       <div class="fr-container fr-py-4w">
-        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="home">Accueil</button>
+        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="photo-back">Retour</button>
         <div class="fr-grid-row fr-grid-row--gutters">
           <div class="fr-col-12 fr-col-md-8">
             <div class="miroir-stage" id="stage">
@@ -265,35 +315,70 @@
 
     <!-- Recherche agentique (H5) -->
     <section class="view" data-view="conversation" hidden>
-      <div class="fr-container fr-py-4w miroir-chat">
-        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="home">Accueil</button>
-        <h1 class="fr-h3 fr-mb-1w">Recherche agentique <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></h1>
-        <p class="fr-text--sm miroir-muted fr-mb-1w">Un modèle ouvert, Mistral Large 4, mène la recherche&nbsp;: il vous pose des questions, cherche, regarde les images, puis vous propose des notices.</p>
-        <p class="fr-text--xs fr-icon-information-line miroir-chat__notice">Votre photo est envoyée à ce modèle, par le service OpenRouter, le temps de la conversation.</p>
-
-        <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-3w" id="chat-off" hidden>
-          <p>La recherche agentique n’est pas activée ici. <a href="#/">Utilisez la recherche simple.</a></p>
-        </div>
-
-        <div class="miroir-panel fr-p-3w fr-mb-3w" id="chat-start" hidden>
-          <h2 class="fr-h6 fr-mb-2w">Une photo, des mots, ou les deux</h2>
-          <div class="miroir-actions">
-            <label class="fr-btn fr-btn--icon-left fr-icon-camera-line" for="chat-camera">Prendre une photo</label>
-            <input type="file" id="chat-camera" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
-            <label class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="chat-upload">Importer une image</label>
-            <input type="file" id="chat-upload" accept="image/*" class="fr-sr-only" tabindex="-1">
-          </div>
-          <form id="chat-words-form" class="fr-mt-2w">
-            <label class="fr-label" for="chat-words">Ou décrivez ce que vous cherchez
-              <span class="fr-hint-text">Un lieu, un nom, ce que vous voyez</span>
-            </label>
-            <div class="miroir-chat__row fr-mt-1w">
-              <input class="fr-input" type="text" id="chat-words" maxlength="300" autocomplete="off">
-              <button class="fr-btn fr-btn--secondary" type="submit">Continuer</button>
+      <div class="miroir-band">
+        <div class="fr-container">
+          <nav role="navigation" class="fr-breadcrumb fr-mt-0 fr-mb-3w" aria-label="vous êtes ici :">
+            <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="breadcrumb-agent">Voir le fil d’Ariane</button>
+            <div class="fr-collapse" id="breadcrumb-agent">
+              <ol class="fr-breadcrumb__list">
+                <li><a class="fr-breadcrumb__link" href="#/">Accueil</a></li>
+                <li><a class="fr-breadcrumb__link" aria-current="page">Recherche agentique</a></li>
+              </ol>
             </div>
-          </form>
-        </div>
+          </nav>
+          <h1 class="miroir-band__title">Recherche agentique <span class="fr-badge fr-badge--new">Expérimental</span></h1>
+          <p class="fr-text--lead miroir-band__lead">Dites ce que vous cherchez. Un modèle ouvert, Mistral Large 4, mène la recherche, regarde les images et explique ses choix.</p>
+          <p class="fr-text--xs fr-icon-information-line miroir-chat__notice">Votre photo est envoyée à ce modèle, par le service OpenRouter, le temps de la conversation.</p>
 
+          <div class="fr-alert fr-alert--info fr-alert--sm fr-mt-3w" id="chat-off" hidden>
+            <p>La recherche agentique n’est pas activée ici. <a href="#/simple">Utilisez la recherche simple.</a></p>
+          </div>
+
+          <div id="chat-start" hidden>
+            <div class="miroir-actions">
+              <label class="fr-btn fr-btn--lg fr-btn--icon-left fr-icon-camera-line" for="chat-camera">Prendre une photo</label>
+              <input type="file" id="chat-camera" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
+              <label class="fr-btn fr-btn--lg fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="chat-upload">Importer une image</label>
+              <input type="file" id="chat-upload" accept="image/*" class="fr-sr-only" tabindex="-1">
+            </div>
+            <form class="miroir-describe" id="chat-words-form">
+              <label class="fr-label" for="chat-words">Ou décrivez ce que vous cherchez
+                <span class="fr-hint-text">Un lieu, un nom, ce que vous voyez</span>
+              </label>
+              <div class="fr-search-bar fr-search-bar--lg fr-mt-1w">
+                <input class="fr-input" type="search" id="chat-words" placeholder="Décrivez ce que vous cherchez" maxlength="300" autocomplete="off">
+                <button class="fr-btn" type="submit" title="Continuer">Continuer</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="fr-container fr-py-6w" id="chat-intro" hidden>
+        <h2 class="fr-h4 fr-mb-1w">Essayer avec un exemple</h2>
+        <p class="fr-text--sm miroir-muted fr-mb-3w">Un toucher ouvre la conversation avec cette photo.</p>
+        <ul class="miroir-examples" id="chat-examples"></ul>
+
+        <div class="miroir-steps fr-mt-6w">
+          <div class="miroir-step">
+            <span class="fr-icon-camera-line miroir-step__icon" aria-hidden="true"></span>
+            <h3 class="fr-h6 fr-mb-1v">1. Une photo ou des mots</h3>
+            <p class="fr-text--sm fr-mb-0">D’un bâtiment, d’un tableau, d’un objet de musée.</p>
+          </div>
+          <div class="miroir-step">
+            <span class="fr-icon-question-line miroir-step__icon" aria-hidden="true"></span>
+            <h3 class="fr-h6 fr-mb-1v">2. Votre question</h3>
+            <p class="fr-text--sm fr-mb-0">C’est quoi&nbsp;? C’est où&nbsp;? Qui l’a fait&nbsp;? Ou d’autres œuvres qui lui ressemblent.</p>
+          </div>
+          <div class="miroir-step">
+            <span class="fr-icon-chat-3-line miroir-step__icon" aria-hidden="true"></span>
+            <h3 class="fr-h6 fr-mb-1v">3. La conversation</h3>
+            <p class="fr-text--sm fr-mb-0">Le modèle cherche, regarde les images et vous montre les notices retenues, chacune avec sa raison. Il peut vous poser une question.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="fr-container fr-py-4w miroir-chat" id="chat-body">
         <ol class="miroir-thread" id="chat-thread" aria-live="polite"></ol>
 
         <form class="miroir-panel fr-p-3w fr-mb-3w" id="chat-goal" hidden>

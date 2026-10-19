@@ -272,7 +272,7 @@ async def _index() -> FileResponse:
 
 async def _chat_page() -> RedirectResponse:
     """The conversation page is a view of the one page."""
-    return RedirectResponse("/#/conversation", status_code=307)
+    return RedirectResponse("/#/agentique", status_code=307)
 
 
 @api.post("/login")

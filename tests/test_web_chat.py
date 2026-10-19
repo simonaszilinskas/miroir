@@ -505,7 +505,7 @@ def test_the_chat_address_opens_the_conversation_view() -> None:
     with Rig([]) as rig:
         response = rig.client.get("/chat", follow_redirects=False)
         assert response.status_code == 307
-        assert response.headers["location"] == "/#/conversation"
+        assert response.headers["location"] == "/#/agentique"
         assert rig.client.get("/api/chat/status").json() == {"enabled": True}
         rig.client.cookies.clear()
         assert rig.client.post("/api/chat/open", json={"text": "x"}).status_code == 401
@@ -664,7 +664,9 @@ def test_the_home_page_offers_both_searches() -> None:
         assert 'data-view="conversation"' in page
         assert "Recherche simple" in page
         assert "Recherche agentique" in page
-        assert 'name="mode" value="agent"' in page
+        assert 'href="#/simple"' in page
+        assert 'href="#/agentique"' in page
+        assert rig.client.get("/static/pictograms/innovation.svg").status_code == 200
         assert "Votre photo est envoyée à ce modèle" in page
         script = rig.client.get("/static/chat.js")
         assert script.status_code == 200

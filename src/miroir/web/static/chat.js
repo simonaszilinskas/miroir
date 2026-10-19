@@ -106,11 +106,11 @@ async function startWords(words) {
 
 /** Leave any finished conversation and show the view; false while a turn is running. */
 function begin() {
-  if (chat.busy) { hooks.go('#/conversation'); return false; }
+  if (chat.busy) { hooks.go('#/agentique'); return false; }
   restart();
   chat.starting = true;
-  $('#chat-start').hidden = true;
-  hooks.go('#/conversation');
+  showStart(false);
+  hooks.go('#/agentique');
   return true;
 }
 
@@ -122,7 +122,13 @@ async function enter() {
     chat.enabled = (await api('chat/status')).enabled;
   } catch { chat.enabled = false; }
   $('#chat-off').hidden = chat.enabled;
-  $('#chat-start').hidden = !chat.enabled || Boolean(chat.id) || chat.starting;
+  showStart(chat.enabled && !chat.id && !chat.starting);
+}
+
+/** The way in (photo, words, examples) shows until a conversation opens. */
+function showStart(on) {
+  $('#chat-start').hidden = !on;
+  $('#chat-intro').hidden = !on;
 }
 
 function restart() {
@@ -135,7 +141,7 @@ function restart() {
   $('#chat-composer').hidden = true;
   $('#chat-goal-input').value = '';
   $('#chat-words').value = '';
-  $('#chat-start').hidden = !chat.enabled;
+  showStart(chat.enabled);
   $('#chat-restart').hidden = true;
   setStatus('');
 }
@@ -147,7 +153,7 @@ async function choosePhoto(file) {
   try {
     blob = await shrink(file, KEEP_SIDE);
   } catch {
-    $('#chat-start').hidden = !chat.enabled;
+    showStart(chat.enabled);
     alertIn($('#chat-start'), 'Cette image n’a pas pu être ouverte. Essayez une photo JPEG ou PNG.');
     return;
   }
@@ -167,11 +173,11 @@ async function open(blob, words) {
   try {
     chat.id = (await api('chat/open', { method: 'POST', body })).conversation_id;
   } catch (err) {
-    $('#chat-start').hidden = !chat.enabled;
+    showStart(chat.enabled);
     alertIn($('#chat-start'), err.message);
     return;
   }
-  $('#chat-start').hidden = true;
+  showStart(false);
   $('#chat-restart').hidden = false;
   $('#chat-goal-photo').replaceChildren(...(chat.photoUrl
     ? [img(chat.photoUrl, null, { alt: 'Votre photo', class: 'miroir-chat__goal-photo' })]
