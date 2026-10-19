@@ -39,6 +39,7 @@ const chat = {
   steps: new Map(),  // step id -> its <li>
   checked: false,
   enabled: true,
+  starting: false,   // true while the home page opens a conversation
 };
 
 let hooks = null;
@@ -87,7 +88,30 @@ export function setupChat(given) {
     send('message', { text });
   });
   $('#chat-restart').addEventListener('click', restart);
-  return { enter };
+  return { enter, startPhoto, startWords };
+}
+
+/** Start a new conversation from the home page, with a photo (a File or Blob) or words. */
+async function startPhoto(blob) {
+  if (!begin()) return;
+  await choosePhoto(blob);
+  chat.starting = false;
+}
+
+async function startWords(words) {
+  if (!begin()) return;
+  await open(null, words);
+  chat.starting = false;
+}
+
+/** Leave any finished conversation and show the view; false while a turn is running. */
+function begin() {
+  if (chat.busy) { hooks.go('#/conversation'); return false; }
+  restart();
+  chat.starting = true;
+  $('#chat-start').hidden = true;
+  hooks.go('#/conversation');
+  return true;
 }
 
 async function enter() {
@@ -98,7 +122,7 @@ async function enter() {
     chat.enabled = (await api('chat/status')).enabled;
   } catch { chat.enabled = false; }
   $('#chat-off').hidden = chat.enabled;
-  $('#chat-start').hidden = !chat.enabled || Boolean(chat.id);
+  $('#chat-start').hidden = !chat.enabled || Boolean(chat.id) || chat.starting;
 }
 
 function restart() {
@@ -123,6 +147,7 @@ async function choosePhoto(file) {
   try {
     blob = await shrink(file, KEEP_SIDE);
   } catch {
+    $('#chat-start').hidden = !chat.enabled;
     alertIn($('#chat-start'), 'Cette image n’a pas pu être ouverte. Essayez une photo JPEG ou PNG.');
     return;
   }
@@ -142,6 +167,7 @@ async function open(blob, words) {
   try {
     chat.id = (await api('chat/open', { method: 'POST', body })).conversation_id;
   } catch (err) {
+    $('#chat-start').hidden = !chat.enabled;
     alertIn($('#chat-start'), err.message);
     return;
   }

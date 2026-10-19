@@ -112,6 +112,7 @@ function loadAfterLogin() {
   loadedAfterLogin = true;
   renderExamples();
   loadFacets();
+  checkAgent();
   api('stats').then((s) => {
     $('#index-size').textContent = `${s.images.toLocaleString('fr-FR')}`;
   }).catch(() => {});
@@ -158,6 +159,7 @@ for (const input of [$('#camera-input'), $('#upload-input')]) {
     const file = input.files && input.files[0];
     input.value = '';
     if (!file) return;
+    if (mode() === 'agent') { chat.startPhoto(file); return; }
     try {
       await usePhoto(file, await exifPosition(file));
       go('#/photo');
@@ -172,6 +174,7 @@ $('#describe-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = $('#describe-input').value.trim();
   if (!text) { $('#describe-input').focus(); return; }
+  if (mode() === 'agent') { chat.startWords(text); return; }
   state.photo = null; state.box = null; state.queryUrl = null;
   $('#refine-input').value = text;
   runSearch({ text });
@@ -182,6 +185,45 @@ for (const chip of document.querySelectorAll('#describe-chips button')) {
     $('#describe-input').value = chip.textContent;
     $('#describe-form').requestSubmit();
   });
+}
+
+// --- home: simple or agentic search ----------------------------------------------------------
+
+const MODE_KEY = 'miroir.mode';
+const STEP_COMPARE = {
+  simple: 'Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.',
+  agent: 'Un modèle lance des recherches dans ces notices, regarde les images trouvées et garde celles qui répondent à votre question.',
+};
+
+function mode() {
+  return $('#modes input[name="mode"]:checked')?.value || 'simple';
+}
+
+function setMode(value) {
+  const input = $(`#modes input[value="${value}"]`);
+  if (!input || input.disabled) return;
+  input.checked = true;
+  $('#step-compare').textContent = STEP_COMPARE[value];
+}
+
+for (const input of $$('#modes input[name="mode"]')) {
+  input.addEventListener('change', () => {
+    setMode(input.value);
+    try { localStorage.setItem(MODE_KEY, input.value); } catch { /* storage refused */ }
+  });
+}
+try { setMode(localStorage.getItem(MODE_KEY) || 'simple'); } catch { /* storage refused */ }
+
+/** Without the conversation service, only the simple search can be chosen. */
+async function checkAgent() {
+  let enabled = false;
+  try { enabled = (await api('chat/status')).enabled; } catch { /* off */ }
+  if (enabled) return;
+  const input = $('#mode-agent input');
+  input.disabled = true;
+  $('#mode-agent').setAttribute('aria-disabled', 'true');
+  $('#mode-agent .miroir-mode__cost').textContent = 'Pas activée sur ce site.';
+  setMode('simple');
 }
 
 function alertHome(message) {
@@ -213,7 +255,9 @@ async function useExample(example) {
   try {
     const response = await fetch(example.image_url, { credentials: 'same-origin' });
     if (!response.ok) throw new Error('example');
-    await usePhoto(await response.blob());
+    const blob = await response.blob();
+    if (mode() === 'agent') { chat.startPhoto(blob); return; }
+    await usePhoto(blob);
   } catch {
     alertHome('Cet exemple n’a pas pu être chargé.');
     return;

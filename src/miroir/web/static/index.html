@@ -99,13 +99,26 @@
             <div class="fr-col-12 fr-col-lg-7">
               <h1 class="miroir-hero__title">Qu’avez-vous sous les yeux&nbsp;?</h1>
               <p class="fr-text--lead miroir-hero__lead">Photographiez un tableau, un objet ou un monument&nbsp;: Miroir cherche sa notice dans les collections patrimoniales nationales.</p>
+              <fieldset class="miroir-modes" id="modes">
+                <legend class="fr-text--sm fr-text--bold fr-mb-1w">Choisissez une recherche</legend>
+                <label class="miroir-mode">
+                  <input type="radio" name="mode" value="simple" checked>
+                  <span class="miroir-mode__name">Recherche simple</span>
+                  <span class="miroir-mode__pros">Des résultats en quelques secondes. Vous précisez et filtrez vous-même. Votre photo reste chez Miroir.</span>
+                </label>
+                <label class="miroir-mode" id="mode-agent">
+                  <input type="radio" name="mode" value="agent">
+                  <span class="miroir-mode__name">Recherche agentique <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></span>
+                  <span class="miroir-mode__pros">Un modèle cherche pour vous, vérifie les images et explique ses choix. Il vous pose une question si besoin.</span>
+                  <span class="miroir-mode__cost">Environ une minute. Votre photo est envoyée à Mistral Large 4, par OpenRouter.</span>
+                </label>
+              </fieldset>
               <div class="miroir-actions">
                 <label class="fr-btn fr-btn--lg fr-btn--icon-left fr-icon-camera-line miroir-actions__main" for="camera-input">Prendre une photo</label>
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="fr-sr-only" tabindex="-1">
                 <label class="fr-btn fr-btn--lg fr-btn--secondary fr-btn--icon-left fr-icon-upload-2-line" for="upload-input">Importer une image</label>
                 <input type="file" id="upload-input" accept="image/*" class="fr-sr-only" tabindex="-1">
               </div>
-              <p class="fr-mt-2w fr-mb-0"><a class="fr-link fr-icon-chat-3-line fr-link--icon-left" href="#/conversation">Essai : recherche en conversation (expérimental)</a></p>
               <form class="miroir-describe" id="describe-form" role="search">
                 <label class="fr-label" for="describe-input">Décrivez ce que vous voyez
                   <span class="fr-hint-text">Ce que vous voyez, un lieu ou un artiste, en français ou dans une autre langue</span>
@@ -143,7 +156,7 @@
           <div class="miroir-step">
             <span class="fr-icon-search-line miroir-step__icon" aria-hidden="true"></span>
             <h3 class="fr-h6 fr-mb-1v">2. Une comparaison</h3>
-            <p class="fr-text--sm fr-mb-0">Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.</p>
+            <p class="fr-text--sm fr-mb-0" id="step-compare">Miroir compare votre image aux photographies des notices Joconde, Mémoire et Rose Valland.</p>
           </div>
           <div class="miroir-step">
             <span class="fr-icon-file-text-line miroir-step__icon" aria-hidden="true"></span>
@@ -250,16 +263,16 @@
       </div>
     </section>
 
-    <!-- Essai : recherche en conversation (H5) -->
+    <!-- Recherche agentique (H5) -->
     <section class="view" data-view="conversation" hidden>
       <div class="fr-container fr-py-4w miroir-chat">
-        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="home">Recherche habituelle</button>
-        <h1 class="fr-h3 fr-mb-1w">Recherche en conversation <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></h1>
+        <button class="fr-link fr-icon-arrow-left-line fr-link--icon-left fr-mb-2w" data-action="home">Accueil</button>
+        <h1 class="fr-h3 fr-mb-1w">Recherche agentique <span class="fr-badge fr-badge--sm fr-badge--new fr-badge--no-icon">Expérimental</span></h1>
         <p class="fr-text--sm miroir-muted fr-mb-1w">Un modèle ouvert, Mistral Large 4, mène la recherche&nbsp;: il vous pose des questions, cherche, regarde les images, puis vous propose des notices.</p>
         <p class="fr-text--xs fr-icon-information-line miroir-chat__notice">Votre photo est envoyée à ce modèle, par le service OpenRouter, le temps de la conversation.</p>
 
         <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-3w" id="chat-off" hidden>
-          <p>La recherche en conversation n’est pas activée ici. <a href="#/">Utilisez la recherche habituelle.</a></p>
+          <p>La recherche agentique n’est pas activée ici. <a href="#/">Utilisez la recherche simple.</a></p>
         </div>
 
         <div class="miroir-panel fr-p-3w fr-mb-3w" id="chat-start" hidden>

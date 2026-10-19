@@ -658,11 +658,13 @@ def test_looks_at_thumbnails_have_their_own_cap() -> None:
     assert last[-1].startswith(f"not run: {MAX_VIEWS} looks at thumbnails")
 
 
-def test_the_page_links_to_the_conversation_view() -> None:
+def test_the_home_page_offers_both_searches() -> None:
     with Rig([]) as rig:
         page = rig.client.get("/").text
         assert 'data-view="conversation"' in page
-        assert "Essai : recherche en conversation (expérimental)" in page
+        assert "Recherche simple" in page
+        assert "Recherche agentique" in page
+        assert 'name="mode" value="agent"' in page
         assert "Votre photo est envoyée à ce modèle" in page
         script = rig.client.get("/static/chat.js")
         assert script.status_code == 200

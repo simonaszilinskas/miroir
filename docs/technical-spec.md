@@ -445,7 +445,7 @@ uv run miroir vlm h4 --all --max-usd <usd>        # every tune query; writes the
 
 ### 8.1 The conversation page (step H5)
 
-An experiment beside the usual search, at `/chat` (the view `#/conversation`; the home page links to it as "Essai : recherche en conversation (expérimental)"). Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
+An experiment beside the usual search, at `/chat` (the view `#/conversation`). The home page offers it as one of two searches, "Recherche simple" and "Recherche agentique", each with a line on what it does well; the photo, words and example buttons then go to the chosen one, and the browser remembers the choice. Without the service, only the simple search can be chosen. Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
 
 **Flow.**
 
