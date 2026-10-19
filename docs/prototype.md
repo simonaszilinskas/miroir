@@ -114,6 +114,12 @@ uv run miroir web chat-secret            # copies OPENROUTER_API_KEY from .env i
 uv run miroir web deploy
 ```
 
+Each conversation is logged as JSON lines with no images (technical spec §8.1). To read the deployed site's logs on the Mac:
+
+```sh
+uv run miroir web chat-logs   # copies chat-logs/ from the miroir-web-index volume to ~/miroir-data/chat-logs/hosted/
+```
+
 The deploy fails until the `miroir-openrouter` secret exists. Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment; to change them on Modal, add them to the `miroir-openrouter` secret. Locally, `miroir web dev` runs the page with Mistral when `OPENROUTER_API_KEY` is in `.env` (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
 
 ## Cost
