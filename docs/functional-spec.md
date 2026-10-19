@@ -1,6 +1,6 @@
 # MIROIR: functional specification
 
-Status: draft for the proof of concept (PoC). Last updated 2026-10-12.
+Status: the plan for the proof of concept (PoC), written before the work. Status notes added 2026-10-19 say what was built, changed or dropped; the text they follow is left as planned. What runs today: [prototype.md](prototype.md).
 
 ## 1. Purpose
 
@@ -30,6 +30,13 @@ We fixed these numbers before seeing any score. The decision meeting at the end 
 | One painting picked out of a photo of a room full of paintings | The right record is in the top 5 | ≥ 70% |
 | User tests | Testers who found at least one thing they photographed and would use MIROIR again | ≥ 4 of 5 |
 
+**Where it stands (2026-10-19), on the tune halves of the site's index (`full-f2`; [prototype.md](prototype.md)).** These are not the final scores: the sealed halves are still closed.
+
+- Archive photo of a building: 89.1% in the top 10 once the site reads the print's caption (45.7% from the image alone). Met.
+- Phone photo of a building: 36.8% without the phone's position; with the photo's GPS position, 97% ([results.md](results.md), H2). Met only with the position.
+- Painting in a room photo: 77.8% in the top 5 with the 20 outlines shown first, 86.9% with every outline. Met.
+- User tests: not run yet.
+
 [technical-spec.md](technical-spec.md#7-evaluation) describes how each test set is built. [experiments.md](experiments.md) describes how we compare solutions on them. The final scores come from a sealed half of each set, opened once in week 6.
 
 ## 4. Features
@@ -42,11 +49,15 @@ A photo of a building, object or painting finds its record even when the photo w
 
 *Done when:* the archive-photo and phone-photo targets in section 3 are met.
 
+*Status:* built. Archive target met; phone target met only with the photo's position (section 3).
+
 ### F2. Search by words
 
 A person types what they see, in French or another language ("portail roman avec un tympan sculpté", "a still life with a dead hare"), and gets matching records. Words can also refine a photo search ("same, but in Toulouse").
 
 *Done when:* we have scores on two sets: 50 French descriptions written by hand, and 1,000 descriptions written by an AI model for hidden images. We report these scores but set no pass bar for them.
+
+*Status:* built. The AI-written set (T7) finds the right record in the top 10 for 17.6% of descriptions; names such as "Pont du Gard" come first. The hand-written set (T6) is not written yet ([t6-guide.md](t6-guide.md)).
 
 ### F3. Filters with image search
 
@@ -60,11 +71,15 @@ Any search can be narrowed by:
 
 Filters apply before ranking, so a filtered search still returns a full page of results.
 
+*Status:* built for collection, region, département, domain and period. There is no author filter; words typed with the photo reach the author.
+
 ### F4. Several objects in one photo
 
 When a photo contains several artworks (a wall of paintings, a shop window, a room), MIROIR outlines each one it finds. The person taps an outline to search that object alone.
 
 *Done when:* the room-photo target in section 3 is met.
+
+*Status:* built (Grounding DINO tiny); target met.
 
 ### F5. The whole from a detail
 
@@ -72,11 +87,14 @@ A photo of a detail (a carved capital, a signature, a stamp on the back of a can
 
 *Done when:* the Rose Valland detail images (section 9) find their own record. We report the score with no pass bar.
 
+*Status:* not built as planned. The person can draw a box around a detail and search it, but no tile index exists and the detail set (T4) was never scored.
+
 ## 5. Screens and flow
 
 MIROIR is a website built for phones first. It also works on desktop. There is no native app.
 
 1. **Home.** A large "Take a photo" button, an "Upload" button and a text box.
+   *Changed (2026-10-19):* the home page first offers two searches. "Recherche simple" holds the buttons and text box above, and leads to steps 2 to 4. "Recherche agentique" (an experiment) lets the person say what they want; an AI model then leads the search, asks questions and explains its picks.
 2. **Photo view.** The photo with an outline around each object MIROIR found. The person can:
    - tap an outline to search that object
    - draw a box by hand to search any area, which also covers details (F5)
@@ -104,20 +122,24 @@ Each card shows:
 
 Below a set score, MIROIR shows **"Not found in the collections"**, then **"Looks similar to:"** with the closest cards. A wrong answer given with confidence does more harm than an honest "not found". We choose the cut-off from the test scores in week 3.
 
+*Changed:* the first card carries a level instead: "Très proche" (right about 8 times in 10), "Proche" (check it) or "Ressemblance" (looks alike). Every other card is "Ressemblance". So a search with no good match shows only "Ressemblance" cards. The agentic search does say "Je ne trouve pas cet objet précis dans les collections." when it finds nothing.
+
 ## 7. Rose Valland images
 
-Rose Valland records have a median of 4 images and up to 52. Many are not the front of the work: details, backs, inscriptions, labels and stamps. MIROIR indexes all of them and tags each by type. Results always show the front view, and the matching image is marked ("matched on: back of canvas"). A stamp or label photographed on its own can then lead to its record.
+Rose Valland records have a median of 4 images and up to 52. Many are not the front of the work: details, backs, inscriptions, labels and stamps. MIROIR indexes all of them and tags each by type. Results always show the front view, and the matching image is marked ("matched on: back of canvas"). *Changed:* the card shows the image that matches best, marked "Correspond : revers" (or "détail" and so on) when it is not the front view. A stamp or label photographed on its own can then lead to its record.
 
 ## 8. Access
 
 The PoC sits behind a login. Ministry staff get accounts, and so do the five public testers for their session. We can then show every image, including those not cleared for publication, and leave image rights to a later public launch.
+
+*Changed:* one shared password instead of accounts. The agentic search sends the person's photo to an outside AI service; the page says so.
 
 ## 9. Data
 
 | Phase | Records | Images to index |
 |---|---|---|
 | Weeks 1–3 | The current exports: Mémoire 66,000, Joconde 33,000, Rose Valland 2,400 | About 138,000 |
-| Weeks 4–6 | Every POP record with an image, from a full export | Not yet known |
+| Weeks 4–6 | Every POP record with an image, from a full export | 2,138,564 distinct files (2,119,202 records). Exported and mapped; not indexed yet (technical spec §11.1) |
 
 What the current data holds:
 
@@ -128,6 +150,8 @@ What the current data holds:
 The three collections do not link to each other.
 
 ## 10. User tests
+
+*Status (2026-10-19): not run yet.*
 
 - **Who:** five people recruited by the project lead. At least two must not work in heritage.
 - **When:** week 5, on the full POP index.
@@ -154,6 +178,8 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 | 4 | Full POP export loaded and indexed with the winning stack, detail search (F5) | Full index live |
 | 5 | User tests, fixes between sessions | Test notes |
 | 6 | Final scores on the sealed halves (R4), report, decision meeting | Decision |
+
+*Where it stands (2026-10-19):* weeks 1 to 3 are done, with a search API, a website on Modal, outlines, drawn boxes and card levels in place of the cut-off. The full POP export is mapped but not indexed; detail search (F5), user tests and R4 have not started. An agentic search (step H5) was added.
 
 ## 12. Out of scope for the PoC
 
@@ -185,10 +211,10 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 | Models | Chosen by experiment, not reputation. Open preferred, closed allowed when clearly better |
 | Time and people | 6 weeks, 1–2 people, decision meeting at the end |
 | One result is… | A building or object, with its photos grouped |
-| Access | Login only |
+| Access | Login only (one shared password) |
 | Rose Valland images | All indexed, each tagged by type |
-| Coverage | All of POP before the user tests |
-| No match | "Not found" plus "looks similar to" |
+| Coverage | All of POP before the user tests (not indexed yet) |
+| No match | "Not found" plus "looks similar to" (changed: a level on the first card) |
 | Interface | Website built for phones first |
 | Testers | Five, recruited by the project lead |
 | Spec | Markdown in this repository, in English |
