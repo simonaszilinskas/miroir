@@ -1083,6 +1083,12 @@ Each cell: value in %, then the 95% bootstrap interval (1,000 resamples over que
 | R3 | T1 | tune | full | T1archive-whole-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 34.1 [26.8, 41.3] | 42.8 [34.8, 50.7] | 45.7 [38.4, 54.3] | 37.5 [30.3, 44.9] |
 | R3 | T1 | tune | full | T1archive-crop+place-qwen3-vl-2b | A7+A3, captions Qwen/Qwen3-VL-2B-Instruct | 512 | site | 138 | 31.2 [23.9, 39.1] | 34.8 [26.8, 43.5] | 39.9 [31.9, 47.8] | 33.9 [26.7, 41.7] |
 | R3 | T1 | tune | full | T1archive-crop-qwen3-vl-2b | A7+A3, captions Qwen/Qwen3-VL-2B-Instruct | 512 | site | 138 | 11.6 [6.5, 17.4] | 18.1 [11.6, 24.6] | 21.0 [15.2, 27.5] | 14.6 [9.7, 20.3] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-caption0.1-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 72.5 [65.2, 79.7] | 84.8 [78.3, 90.6] | 88.4 [82.6, 93.5] | 78.2 [72.1, 84.2] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-caption0.3-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 71.0 [63.8, 77.6] | 84.1 [78.3, 89.9] | 89.1 [84.1, 94.2] | 77.6 [71.4, 83.3] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-caption0-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 70.3 [63.0, 77.6] | 84.8 [79.0, 90.6] | 88.4 [82.6, 93.5] | 76.9 [71.0, 83.1] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-caption0.5-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 71.0 [63.8, 77.5] | 82.6 [76.1, 88.4] | 89.1 [83.3, 94.2] | 76.7 [70.5, 82.3] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-caption0.9-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 62.3 [54.3, 69.6] | 76.8 [70.3, 83.3] | 79.7 [73.2, 85.5] | 68.4 [62.1, 74.7] |
+| R3 | T1 | tune | full-f2 | T1archive-words-1-qwen3-vl-4b | A7+A3, captions Qwen/Qwen3-VL-4B-Instruct | 512 | site | 138 | 62.3 [54.3, 69.6] | 76.8 [70.3, 83.3] | 79.7 [73.2, 85.5] | 68.4 [62.1, 74.7] |
 | R3 | T3 | tune | web-full | C-C0-located-all | located crops (ALIKED + LightGlue) | 1024 | boxes | 99 | 74.7 [65.7, 82.8] | 88.9 [82.8, 94.9] | 93.9 [88.9, 98.0] | 81.6 [75.0, 87.7] |
 | R3 | T3 | tune | web-full | C-C2-gdino-tiny-all | IDEA-Research/grounding-dino-tiny | 1024 | boxes | 99 | 74.7 [66.7, 83.8] | 86.9 [79.8, 92.9] | 89.9 [83.8, 94.9] | 80.5 [74.0, 87.3] |
 | R3 | T3 | tune | web-full | C-C2-gdino-base-all | IDEA-Research/grounding-dino-base | 1024 | boxes | 99 | 73.7 [65.7, 82.8] | 84.8 [77.8, 91.9] | 87.9 [80.8, 93.9] | 79.1 [72.1, 86.2] |
