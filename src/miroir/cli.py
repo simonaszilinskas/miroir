@@ -83,6 +83,20 @@ def records_build() -> None:
         typer.echo(f"{len(mismatches)} count(s) differ from the spec: see warnings.", err=True)
 
 
+@records_app.command("add")
+def records_add(
+    entity: Annotated[
+        list[str], typer.Option(help="Entity id to copy, e.g. PM95000723; repeat it.")
+    ],
+) -> None:
+    """Copy entities from the whole download (full-pop/) into extra/, for the site's index."""
+    from miroir.records.extra import add_entities  # noqa: PLC0415
+
+    settings = get_settings()
+    held = add_entities(settings, entity)
+    typer.echo(f"{settings.extra_records_parquet}: {held} records")
+
+
 @records_app.command("build-full")
 def records_build_full(
     *,
@@ -797,6 +811,27 @@ def embed_modal_f2(
     with open_gallery_photos(settings, gallery) as photos, open_modal(settings) as calls:
         runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, f"F2-{gallery}", ids, photos, max_usd=max_usd)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@embed_app.command("modal-extra")
+def embed_modal_extra(
+    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+    max_usd: Annotated[
+        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
+    ] = None,
+) -> None:
+    """Embed the images of the records in extra/ (`miroir records add`), sent from the Mac."""
+    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.supplied import open_extra_images  # noqa: PLC0415
+    from miroir.records.extra import read_extra_images  # noqa: PLC0415
+
+    settings = get_settings()
+    ids = [i.image_id for i in read_extra_images(settings)]
+    with open_extra_images(settings) as images, open_modal(settings) as calls:
+        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        done = runner.embed_supplied(option, "X", ids, images, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 

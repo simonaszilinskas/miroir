@@ -37,8 +37,9 @@ from miroir.eval import router
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.jobs.privacy import PublishableImages
+from miroir.records.extra import read_site_records
 from miroir.records.model import Record
-from miroir.records.store import read_commons, read_places, read_records
+from miroir.records.store import read_commons, read_places
 from miroir.web import ranking
 from miroir.web.catalog import (
     CATALOG_FILE,
@@ -164,6 +165,17 @@ INDEXES: dict[str, IndexSpec] = {
         saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
         a3_shortlist_dims=1024,
     ),
+    # full-f2 plus the records copied from the whole download (`miroir records add`), so an
+    # outside benchmark can find them: the Vétheuil Passion altarpiece (PM95000723) and its
+    # 42 Mémoire photos, for the auction photos of its stolen panels.
+    "full-f2-x": IndexSpec(
+        name="full-f2-x",
+        a7_run="A7-embeddinggemma-2-512-full+F2+X",
+        a3_run="A3-megaloc-322-full+F2+X",
+        a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
+        a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+        saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
+    ),
 }
 
 
@@ -198,7 +210,7 @@ def build_index(settings: Settings, name: str) -> Path:
             settings.vectors_path(spec.a3_run) / spec.a3_projection, out / A3_PROJECTION_FILE
         )
 
-    records = read_records(settings.records_parquet, settings.images_parquet)
+    records = read_site_records(settings)
     data = catalog_data(records, _commons(settings, ids), ids)
     write_catalog(out / CATALOG_FILE, data)
     catalog = Catalog(data)

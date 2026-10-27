@@ -20,6 +20,7 @@ from miroir.config import Settings
 from miroir.eval.sets import load_queries, read_gallery
 from miroir.images.colour import already_grey, greyscale
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
+from miroir.records.extra import read_extra_images
 from miroir.records.model import Image
 from miroir.records.store import read_commons, read_images
 
@@ -84,6 +85,26 @@ def grey_candidates(settings: Settings, gallery: str, set_ids: Sequence[str]) ->
     ids = list(read_gallery(settings, gallery))
     ids.extend(q.query_image_id for s in set_ids for q in load_queries(settings, s, "tune"))
     return list(dict.fromkeys(ids))
+
+
+class PopImages:
+    """POP images fetched on the Mac (image cache, else the bucket), for records the Modal
+    image volume does not hold: those copied from the whole download (`records/extra`)."""
+
+    def __init__(self, pop: ImageFetcher, images: Mapping[str, Image]) -> None:
+        self._pop = pop
+        self._images = images
+
+    def fetch_all(self, image_ids: Iterable[str]) -> Iterator[Fetched]:
+        yield from self._pop.fetch_all(self._images[i] for i in image_ids)
+
+
+@contextmanager
+def open_extra_images(settings: Settings) -> Generator[PopImages]:
+    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1_000_000)
+    images = {i.image_id: i for i in read_extra_images(settings)}
+    with httpx.Client(timeout=60.0) as pop:
+        yield PopImages(ImageFetcher(pop, cache), images)
 
 
 @contextmanager

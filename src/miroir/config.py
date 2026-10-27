@@ -184,6 +184,20 @@ class Settings(BaseSettings):
         return self.full_pop_dir / "images.parquet"
 
     @property
+    def extra_dir(self) -> Path:
+        """Records copied from the whole download into the site's index, one entity at a time
+        (`miroir records add`). Kept apart from the July tables, which stay as they are."""
+        return self.data_root / "extra"
+
+    @property
+    def extra_records_parquet(self) -> Path:
+        return self.extra_dir / "records.parquet"
+
+    @property
+    def extra_images_parquet(self) -> Path:
+        return self.extra_dir / "images.parquet"
+
+    @property
     def full_report_json(self) -> Path:
         """Counts of the full build: per base, unique images, buildings and objects."""
         return self.full_pop_dir / "report.json"

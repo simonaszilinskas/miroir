@@ -12,8 +12,9 @@ from collections.abc import Sequence
 
 from miroir.commons.images import commons_photos
 from miroir.config import Settings
+from miroir.records.extra import read_site_records
 from miroir.records.model import Image
-from miroir.records.store import read_commons, read_records
+from miroir.records.store import read_commons
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class PublishableImages:
 
     @classmethod
     def load(cls, settings: Settings) -> PublishableImages:
-        records = read_records(settings.records_parquet, settings.images_parquet)
+        records = read_site_records(settings)
         images = {i.image_id: i for r in records for i in r.images}
         publishable = frozenset(i.image_id for r in records if r.publishable for i in r.images)
         commons = set(commons_photos(settings))
