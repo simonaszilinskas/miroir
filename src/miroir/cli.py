@@ -1481,8 +1481,8 @@ def web_dev(
 ) -> None:
     """Run the website on this Mac with fake models (no model is loaded here).
 
-    The conversation page (/chat) calls Mistral Large 4 through OpenRouter when
-    OPENROUTER_API_KEY is set, within the same spending caps as the deployed site."""
+    The conversation page (/chat) calls Mistral Large 4 on Mistral's API when MISTRAL_API_KEY
+    is set, else through OpenRouter, within the same spending caps as the deployed site."""
     from miroir.web.ops import serve_locally  # noqa: PLC0415
 
     serve_locally(get_settings(), name=index, port=port, real=real, fake_llm=fake_llm)
@@ -1490,7 +1490,7 @@ def web_dev(
 
 @web_app.command("chat-secret")
 def web_chat_secret() -> None:
-    """Copy OPENROUTER_API_KEY from .env into the Modal secret the conversation page reads."""
+    """Copy MISTRAL_API_KEY and OPENROUTER_API_KEY from .env into the conversation's secret."""
     from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
     from miroir.web.ops import set_chat_secret  # noqa: PLC0415
 

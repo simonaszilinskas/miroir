@@ -138,6 +138,7 @@ class Rig:
                 spend=self.spend,
                 limits=limits,
                 index_size=(6, 3),
+                catalog=self.backend.engine.catalog,
                 today=lambda: "2026-10-16",
                 log=log,
             )
@@ -324,6 +325,19 @@ def test_a_visitor_message_after_results_starts_a_new_search() -> None:
         events = rig.send(cid, "message", "Pas celui-ci, c’est un vase")
     assert card_ids(events) == ["OBJ1"]
     assert "The visitor writes: «Pas celui-ci, c’est un vase»" in body_text(rig.model.bodies[1])
+
+
+def test_read_record_gives_full_records_of_seen_entities_without_using_a_search() -> None:
+    script = [call("read_record", {"entity_ids": ["OBJ1", "NEVER"]}), shown("OBJ1")]
+    with Rig(script) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    read = tool_messages(rig.model.bodies[1])[-1]
+    assert read.startswith("OBJ1: 1 record")
+    assert "title: " in read
+    assert "left out, never seen in a result: NEVER" in read
+    assert rig.backend.counts["tool"] == 0
+    assert card_ids(events) == ["OBJ1"]
 
 
 def test_a_framed_region_comes_back_as_an_image_to_search() -> None:

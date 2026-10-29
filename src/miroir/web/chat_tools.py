@@ -32,6 +32,7 @@ from typing import Protocol
 from miroir.eval.bm25 import fold, tokens
 from miroir.jobs.openrouter import JSON
 from miroir.records.bases import Base
+from miroir.web.catalog import CatalogRecord
 from miroir.web.nearby import Position
 from miroir.web.toolsearch import (
     DEFAULT_TOP_K,
@@ -51,6 +52,10 @@ NEAR_KM = 2.0
 MAX_NEAR_KM = 50.0
 #: Most entities one view shows the model, and most results it may show the visitor.
 MAX_VIEW = 8
+#: Entities one read_record call reads; records shown of each; characters of a description.
+MAX_READ = 3
+RECORDS_SHOWN = 3
+DESCRIPTION_CHARS = 600
 MAX_RESULTS = 10
 #: Suggested answers to a question.
 MIN_CHOICES = 2
@@ -74,6 +79,7 @@ class ToolName(StrEnum):
     IMAGE_SEARCH = "image_search"
     TEXT_SEARCH = "text_search"
     VIEW_RESULTS = "view_results"
+    READ_RECORD = "read_record"
     MORE_LIKE = "more_like"
     ASK_VISITOR = "ask_visitor"
     ASK_REGION = "ask_region"
@@ -195,6 +201,9 @@ class ToolContext(Protocol):
         ...
 
     def title_of(self, entity_id: str) -> str: ...
+    def records(self, entity_id: str) -> Sequence[CatalogRecord]:
+        """The entity's records in the index (several for a building and its photos)."""
+        ...
 
 
 type Handler = Callable[[ToolContext, Mapping[str, object]], Awaitable[ToolOutcome]]
@@ -554,6 +563,51 @@ async def view_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     )
 
 
+async def read_record(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
+    asked = list(dict.fromkeys(_strings(args.get("entity_ids"), "entity_ids")))
+    if not asked:
+        msg = "read_record needs entity_ids from earlier results"
+        raise ArgumentError(msg)
+    unseen = [e for e in asked if not ctx.seen(e)]
+    wanted = [e for e in asked if ctx.seen(e)][:MAX_READ]
+    if not wanted:
+        msg = f"none of these ids came from a search: {', '.join(unseen[:5])}"
+        raise ArgumentError(msg)
+    blocks = [_record_text(e, ctx.records(e)) for e in wanted]
+    if unseen:
+        blocks.append(f"left out, never seen in a result: {', '.join(unseen[:5])}")
+    if len(asked) - len(unseen) > MAX_READ:
+        blocks.append(f"only the first {MAX_READ} are shown")
+    n = len(wanted)
+    return ToolOutcome(
+        "\n\n".join(blocks),
+        Step("Lit les notices", f"{n} notice{'s' if n > 1 else ''}", ()),
+        counted=False,
+    )
+
+
+def _record_text(entity_id: str, records: Sequence[CatalogRecord]) -> str:
+    if not records:
+        return f"{entity_id}: no record text in the index"
+    head = f"{entity_id}: {len(records)} record{'s' if len(records) > 1 else ''}"
+    lines = [head]
+    for r in records[:RECORDS_SHOWN]:
+        place = ", ".join(p for p in (r.commune, r.departement, r.region) if p)
+        fields = [
+            ("ref", f"{r.ref} ({r.collection})"),
+            ("title", r.display_title),
+            ("kind", "; ".join((*r.denomination, *r.domain))),
+            ("authors", "; ".join(r.authors)),
+            ("date", "; ".join(r.period)),
+            ("place", place),
+            ("description", r.description.strip()[:DESCRIPTION_CHARS]),
+        ]
+        lines.append("- " + "\n  ".join(f"{k}: {v}" for k, v in fields if v))
+    if len(records) > RECORDS_SHOWN:
+        lines.append(f"({len(records) - RECORDS_SHOWN} more records not shown)")
+    return "\n".join(lines)
+
+
 async def more_like(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
     entity_id = str(args.get("entity_id") or args.get("id") or "").strip()
     if not entity_id:
@@ -756,6 +810,19 @@ TOOLS: tuple[Tool, ...] = (
         },
         view_results,
         needs_why=True,
+    ),
+    Tool(
+        ToolName.READ_RECORD,
+        f"Read the full records of up to {MAX_READ} entities from earlier results: title, "
+        "kind, authors, dates, place and description. Use it to check a candidate against the "
+        "photo and the visitor's words before you show it, and to take exact words for "
+        "text_search. Not a search: it does not use up searches.",
+        {
+            "type": "object",
+            "properties": {"entity_ids": {"type": "array", "items": {"type": "string"}}},
+            "required": ["entity_ids"],
+        },
+        read_record,
     ),
     Tool(
         ToolName.MORE_LIKE,

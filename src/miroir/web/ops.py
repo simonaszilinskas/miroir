@@ -95,20 +95,27 @@ def write_env_password(env_file: Path, password: str) -> None:
 
 
 def set_chat_secret(settings: Settings) -> None:
-    """Copy OPENROUTER_API_KEY from `.env` into the Modal secret the conversation page reads.
-    The key is never printed or logged."""
+    """Copy MISTRAL_API_KEY and OPENROUTER_API_KEY, whichever `.env` holds, into the Modal
+    secret the conversation page reads (Mistral wins when both are there). The keys are never
+    printed or logged."""
     import modal  # noqa: PLC0415
 
     from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
 
-    if settings.openrouter_api_key is None:
-        msg = "no OPENROUTER_API_KEY in .env or the environment"
+    keys = {
+        name: key.get_secret_value()
+        for name, key in (
+            ("MISTRAL_API_KEY", settings.mistral_api_key),
+            ("OPENROUTER_API_KEY", settings.openrouter_api_key),
+        )
+        if key is not None
+    }
+    if not keys:
+        msg = "no MISTRAL_API_KEY or OPENROUTER_API_KEY in .env or the environment"
         raise RuntimeError(msg)
     modal.Secret.objects.delete(CHAT_SECRET_NAME, allow_missing=True)
-    modal.Secret.objects.create(
-        CHAT_SECRET_NAME, {"OPENROUTER_API_KEY": settings.openrouter_api_key.get_secret_value()}
-    )
-    logger.info("OpenRouter key written to the %s Modal secret", CHAT_SECRET_NAME)
+    modal.Secret.objects.create(CHAT_SECRET_NAME, keys)
+    logger.info("%s written to the %s Modal secret", ", ".join(keys), CHAT_SECRET_NAME)
 
 
 def deploy() -> str:
@@ -239,6 +246,7 @@ def serve_locally(
             spend=LedgerSpend(settings, model.model),
             limits=Limits(settings.chat_conversation_usd, settings.chat_day_usd),
             index_size=(len(engine.catalog.images), engine.catalog.entity_count),
+            catalog=engine.catalog,
             log=FileChatLog(settings.chat_logs_dir),
         )
 

@@ -51,6 +51,7 @@ from pydantic import SecretStr
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.mistral import MistralClient, MistralError
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
+from miroir.web.catalog import Catalog, CatalogRecord
 from miroir.web.chat_tools import (
     MAX_RESULTS,
     SEARCHES,
@@ -393,6 +394,13 @@ class Conversation:
         known = self.known.get(entity_id)
         return "" if known is None else known.title
 
+    def records(self, entity_id: str) -> Sequence[CatalogRecord]:
+        catalog = self.service.catalog
+        row = None if catalog is None else catalog.entity_row.get(entity_id)
+        if catalog is None or row is None:
+            return ()
+        return catalog.entity_records(row)
+
     def repeats(self, signature: Signature) -> int | None:
         for earlier, step in self.signatures:
             if signature.same(earlier):
@@ -475,6 +483,7 @@ class ChatService:
         spend: SpendStore,
         limits: Limits,
         index_size: tuple[int, int],
+        catalog: Catalog | None = None,
         clock: Callable[[], float] = time.monotonic,
         today: Callable[[], str] | None = None,
         log: ChatLog | None = None,
@@ -486,6 +495,8 @@ class ChatService:
         self.limits = limits
         self.index_size = index_size
         """(images, entities) the index holds, for the brief."""
+        self.catalog = catalog
+        """Record text for read_record; None reads nothing."""
         self._clock = clock
         self._today = today or (lambda: datetime.now(UTC).date().isoformat())
         self._conversations: dict[str, Conversation] = {}
@@ -1159,14 +1170,15 @@ ressemblent aux médaillons du bord ; je les regarde de près. »).
 when the visitor wants more like one, call more_like on it: it finds what looks like it, \
 better than new words. A text query is 2 to 5 words taken from the visitor's words, \
 from a caption or label you read in the photo, or from titles and descriptions of results \
-you have seen. Never search a name, a place, a god, a maker or an attribution you only \
-guessed; ask the visitor instead.
+you have seen (read_record gives a result's full record). Never search a name, a place, \
+a god, a maker or an attribution you only guessed; ask the visitor instead.
 4. Keep a best-so-far and stop. Pass best on each search and look: the ids closest so far, \
 best first. Each tool result repeats it. After {searches} searches without a sure match, or \
 {stale} searches in a row that add nothing to your best so far, only ask_visitor and \
 show_results run: ask one question that would settle it, or show what you have.
 5. End honestly with show_results. found exact only when the first pick is the very \
 object or building and you have seen its thumbnail (or the site rated it very close). \
+Before you show a pick, read_record on it checks that its kind, place and date fit. \
 Otherwise found close with a summary that says it plainly: « Je ne trouve pas cet objet \
 précis dans les collections. Les plus proches : …, parce que … ». found none when nothing \
 fits.

@@ -13,8 +13,8 @@
 Importing this module on the Mac only describes the app; `miroir web deploy` deploys it.
 Model code is imported inside the container (`miroir.remote.search`). Secrets come from the
 `miroir-app` Modal secret (APP_PASSWORD, SESSION_SECRET), written by `miroir web secret`;
-the conversation page's OpenRouter key from the `miroir-openrouter` secret
-(OPENROUTER_API_KEY), written by `miroir web chat-secret`. Its spending per day is kept in
+the conversation page's model key from the `miroir-openrouter` secret (MISTRAL_API_KEY,
+else OPENROUTER_API_KEY), written by `miroir web chat-secret`. Its spending per day is kept in
 the `miroir-chat-spend` Modal Dict, so a restarted container still knows the day's total.
 Its logs (`miroir.web.chatlog`, no images) go to `chat-logs/` on the index volume, committed
 after each turn; `miroir web chat-logs` copies them to the Mac.
@@ -44,7 +44,8 @@ APP_NAME = "miroir-web"
 #: The site's address is https://<workspace>--<label>.modal.run.
 WEB_LABEL = "miroir"
 APP_SECRET_NAME = "miroir-app"  # noqa: S105 (the name of a Modal secret, not its value)
-#: Holds OPENROUTER_API_KEY for the conversation page (`miroir web chat-secret`).
+#: Holds MISTRAL_API_KEY and/or OPENROUTER_API_KEY for the conversation page
+#: (`miroir web chat-secret`).
 CHAT_SECRET_NAME = "miroir-openrouter"  # noqa: S105 (a secret's name)
 #: Dollars the conversation page spent per UTC day.
 CHAT_SPEND_DICT = "miroir-chat-spend"
@@ -206,7 +207,14 @@ def web() -> FastAPI:
     from miroir.logs import setup  # noqa: PLC0415
     from miroir.web.app import create_app  # noqa: PLC0415
     from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
-    from miroir.web.chat import ChatService, Limits, OpenRouterModel, ThumbSource  # noqa: PLC0415
+    from miroir.web.chat import (  # noqa: PLC0415
+        ChatModel,
+        ChatService,
+        Limits,
+        MistralModel,
+        OpenRouterModel,
+        ThumbSource,
+    )
     from miroir.web.chatlog import FileChatLog  # noqa: PLC0415
     from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
@@ -218,7 +226,11 @@ def web() -> FastAPI:
     folder = Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX
     catalog = read_catalog(folder / CATALOG_FILE)
     backend = ModalBackend()
-    key = settings.openrouter_api_key
+    model: ChatModel | None = None
+    if settings.mistral_api_key is not None:
+        model = MistralModel(settings.mistral_api_key)
+    elif settings.openrouter_api_key is not None:
+        model = OpenRouterModel(settings.openrouter_api_key)
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
     limits = Limits(settings.chat_conversation_usd, settings.chat_day_usd)
 
@@ -228,14 +240,15 @@ def web() -> FastAPI:
     log = FileChatLog(Path(MODAL_WEB_INDEX_MOUNT) / MODAL_CHAT_LOGS, commit)
 
     def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:
-        assert key is not None
+        assert model is not None
         return ChatService(
             backend=backend,
-            model=OpenRouterModel(key),
+            model=model,
             thumbs=ThumbSource(publishable, fetch),
             spend=DictSpend(),
             limits=limits,
             index_size=(len(catalog.images), catalog.entity_count),
+            catalog=catalog,
             log=log,
         )
 
@@ -244,5 +257,5 @@ def web() -> FastAPI:
         backend=backend,
         password=settings.app_password.get_secret_value(),
         session_key=settings.session_secret.get_secret_value().encode(),
-        chat=None if key is None else chat,
+        chat=None if model is None else chat,
     )
