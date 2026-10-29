@@ -191,9 +191,10 @@ def serve_locally(
     """The site on http://localhost:<port>, with fake models over the local bundle, or with
     `real` the deployed GPU search (models on Modal; the page and catalog stay local).
 
-    The conversation page uses Mistral Large 4 through OpenRouter when OPENROUTER_API_KEY is
-    set (with the same caps as the deployed site; the day's spending is kept in
-    `Settings.chat_spend_path`), and a scripted stand-in otherwise or with `fake_llm`."""
+    The conversation page uses Mistral Large 4 on Mistral's API when MISTRAL_API_KEY is set,
+    else through OpenRouter when OPENROUTER_API_KEY is (with the same caps as the deployed
+    site; the day's spending is kept in `Settings.chat_spend_path`), and a scripted stand-in
+    otherwise or with `fake_llm`."""
     import uvicorn  # noqa: PLC0415
 
     from miroir.web.app import SearchBackend, create_app  # noqa: PLC0415
@@ -201,6 +202,7 @@ def serve_locally(
         ChatModel,
         ChatService,
         Limits,
+        MistralModel,
         OpenRouterModel,
         ThumbSource,
     )
@@ -220,8 +222,13 @@ def serve_locally(
         from miroir.web.modal_app import ModalBackend  # noqa: PLC0415
 
         backend = ModalBackend(deployed=True)
-    key = None if fake_llm else settings.openrouter_api_key
-    model: ChatModel = FakeGuide() if key is None else OpenRouterModel(key)
+    model: ChatModel = FakeGuide()
+    if fake_llm:
+        pass
+    elif settings.mistral_api_key is not None:
+        model = MistralModel(settings.mistral_api_key)
+    elif settings.openrouter_api_key is not None:
+        model = OpenRouterModel(settings.openrouter_api_key)
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
 
     def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:

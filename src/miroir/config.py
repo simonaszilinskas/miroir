@@ -32,6 +32,9 @@ POP_IIIF_IMAGE_HOST = "https://iiif.prd.cloud.culture.fr/iiif/3"
 #: OpenRouter REST API.
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
+#: Mistral's own REST API (the conversation page's model).
+MISTRAL_API_BASE = "https://api.mistral.ai/v1"
+
 #: Base URL of a record page on POP.
 POP_NOTICE_URL = "https://pop.culture.gouv.fr/notice"
 
@@ -97,6 +100,7 @@ class Settings(BaseSettings):
     openrouter_api_key: SecretStr | None = Field(
         default=None, validation_alias="OPENROUTER_API_KEY"
     )
+    mistral_api_key: SecretStr | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     hf_token: SecretStr | None = Field(default=None, validation_alias="HF_TOKEN")
     # Modal: these two, or a profile in ~/.modal.toml (`modal token new`).
     modal_token_id: SecretStr | None = Field(default=None, validation_alias="MODAL_TOKEN_ID")

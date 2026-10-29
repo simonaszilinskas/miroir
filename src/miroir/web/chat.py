@@ -49,6 +49,7 @@ import httpx
 from pydantic import SecretStr
 
 from miroir.images.fetch import to_jpeg
+from miroir.jobs.mistral import MistralClient, MistralError
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
 from miroir.web.chat_tools import (
     MAX_RESULTS,
@@ -134,6 +135,30 @@ class OpenRouterModel:
 
     async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
         return await asyncio.to_thread(self._client.chat, self._model, {**body, **MODEL_FIELDS})
+
+
+#: Mistral Large 4 on Mistral's own API (released 2026-10-29). It always reasons; "low" keeps
+#: a turn quick. Greedy sampling needs top_p 1.
+MISTRAL_MODEL = "mistral-large-4"
+MISTRAL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "top_p": 1.0, "reasoning_effort": "low"}
+#: Room for the thinking that comes before the answer.
+MISTRAL_MAX_TOKENS = 3000
+
+
+class MistralModel:
+    """Mistral Large 4 on Mistral's API. The key comes from `Settings`, never logged."""
+
+    def __init__(self, api_key: SecretStr, model: str = MISTRAL_MODEL) -> None:
+        self._client = MistralClient(api_key, timeout_s=90.0)
+        self._model = model
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
+        fields = {**body, **MISTRAL_FIELDS, "max_tokens": MISTRAL_MAX_TOKENS}
+        return await asyncio.to_thread(self._client.chat, self._model, fields)
 
 
 class SpendStore(Protocol):
@@ -741,7 +766,7 @@ class ChatService:
             start = time.monotonic()
             try:
                 answer = await self.model.complete(body)
-            except OpenRouterError as err:
+            except (OpenRouterError, MistralError) as err:
                 logger.warning("chat %s: model call failed: %s", c.id[:8], err)
                 c.emit({"type": "error", "text": MODEL_DOWN})
                 c.log({"type": "model", "error": str(err)[:200], "ms": _ms(start)})
@@ -752,6 +777,7 @@ class ChatService:
                     "type": "model",
                     "call": c.calls,
                     "text": answer.text,
+                    "thinking": answer.thinking,
                     "tool_calls": [
                         {"name": t.name, "args": redact(arguments_of(t.arguments))}
                         for t in answer.tool_calls

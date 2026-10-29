@@ -188,6 +188,8 @@ class ChatAnswer:
     tool_calls: tuple[ToolCall, ...] = ()
     cached_tokens: int = 0
     """Prompt tokens the provider read from its cache, at a lower price."""
+    thinking: str = ""
+    """The model's reasoning, when the provider sends it apart from the answer (Mistral)."""
 
 
 @dataclass(frozen=True, slots=True)
