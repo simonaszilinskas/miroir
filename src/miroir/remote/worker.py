@@ -100,8 +100,13 @@ class Worker:
     # --- files --------------------------------------------------------------------------
 
     def _save_weights(self, load_s: float) -> None:
-        if load_s > 0:
+        """Keep downloaded weights for the next machine. A failure only costs a download."""
+        if load_s <= 0:
+            return
+        try:
             upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(MODAL_WEIGHTS_MOUNT))
+        except Exception:
+            logger.exception("weights not saved to the bucket; the next machine downloads them")
 
     def _images_down(self, images: Sequence[Image]) -> set[str]:
         """Copy the images the bucket holds into the image folder. Returns the keys it lacks."""

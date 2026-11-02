@@ -29,6 +29,8 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `OPENROUTER_API_KEY` | Models served by OpenRouter |
 | `HF_TOKEN` | Gated model weights, read inside Modal |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal, unless `~/.modal.toml` exists (`modal token new`) |
+| `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_REGION`, `SCW_DEFAULT_ZONE` | Scaleway: GPU machines and Object Storage (the scw CLI's own names) |
+| `MIROIR_SCW_BUDGET_EUR` | Cap on all Scaleway GPU machines together, in euros (default 5); their own ledger, `~/miroir-data/scaleway/spend.jsonl` |
 | `MIROIR_OPENROUTER_BUDGET_USD` | Spending cap for paid model runs (OpenRouter and Modal together) |
 | `MIROIR_APP_PASSWORD`, `MIROIR_SESSION_SECRET` | The prototype website's shared password and cookie key (`miroir web secret`) |
 | `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the agentic search, per conversation and per day in dollars (defaults 0.10 and 2) |
@@ -62,6 +64,29 @@ Start any run longer than a minute detached and follow its log:
 ```sh
 nohup uv run miroir records build-full > build-full.log 2>&1 &
 ```
+
+## Scaleway
+
+Modal's jobs and the site's search also run on a Scaleway GPU machine (L4, Paris; Warsaw,
+then an L40S, when Paris has none). Each command starts a machine, builds the job image on it
+from `docker/Dockerfile` with this checkout's code (about 4 minutes), runs, and deletes the
+machine with its volume and IP: on success, on error and on Ctrl-C. The machine also deletes
+itself at `--max-hours`. Object Storage buckets stand in for the Modal volumes
+(`miroir-weights`, `-images`, `-benchmarks`, `-index`; `src/miroir/jobs/objects.py`).
+
+```sh
+uv run miroir scw buckets        # create the buckets (once)
+uv run miroir scw smoke          # A7 and A3 on 32 images, checked against the stored vectors
+uv run miroir embed scw --option A7-embeddinggemma-2-512 --gallery <name> --probe
+uv run miroir scw up             # a machine with the worker, until Ctrl-C
+uv run miroir scw upload-index   # the site's bundle to the index bucket, then:
+uv run miroir web dev --scw      # the local page searching on a Scaleway GPU
+uv run miroir scw ps             # machines, loose volumes and IPs left behind; money spent
+uv run miroir scw cleanup        # delete them
+```
+
+Smoke test, 2026-11-02, L4-1-24G in fr-par-2: every A7 and A3 vector matched the July Modal
+vectors (cosine 1.0000); 6 minutes of machine, €0.08.
 
 The full POP export comes from public sources with a standalone script:
 `python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps).

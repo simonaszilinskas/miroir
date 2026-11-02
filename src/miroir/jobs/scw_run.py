@@ -158,7 +158,7 @@ class Shell:
 
 
 def requirements() -> str:
-    return "\n".join((*MODEL_LIBRARIES, *MATCH_LIBRARIES, *WORKER_LIBRARIES)) + "\n"
+    return "\n".join((*MODEL_LIBRARIES, *WORKER_LIBRARIES)) + "\n"
 
 
 def build_context() -> bytes:
@@ -172,7 +172,12 @@ def build_context() -> bytes:
         for path in sorted(source.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 tar.add(path, arcname=str(path.relative_to(REPO_ROOT)))
-        for name, text in (("requirements.txt", requirements()), ("lightglue.txt", LIGHTGLUE)):
+        texts = {
+            "requirements.txt": requirements(),
+            "match.txt": "\n".join(MATCH_LIBRARIES) + "\n",
+            "lightglue.txt": LIGHTGLUE + "\n",
+        }
+        for name, text in texts.items():
             data = text.encode()
             info = tarfile.TarInfo(name)
             info.size = len(data)
@@ -194,8 +199,12 @@ def worker_env(settings: Settings) -> str:
     return "".join(f"{k}={v}\n" for k, v in settings.scaleway_worker_env().items())
 
 
-def start_worker(shell: Shell, settings: Settings, machine: GpuMachine) -> None:
-    """Send the keys and the build context, build the image, start the worker container."""
+def start_worker(
+    shell: Shell, settings: Settings, machine: GpuMachine, *, match: bool = False
+) -> None:
+    """Send the keys and the build context, build the image, start the worker container.
+
+    `match` adds the keypoint-matching libraries (steps C and E1), as Modal's match image."""
     shell.run(
         f"umask 077 && mkdir -p {REMOTE_ROOT} && cat > {REMOTE_ROOT}/env",
         stdin=worker_env(settings).encode(),
@@ -212,7 +221,8 @@ def start_worker(shell: Shell, settings: Settings, machine: GpuMachine) -> None:
     logger.info("building the job image on the machine (a few minutes)")
     shell.run(
         f"cd {REMOTE_ROOT}/build && docker build -t {IMAGE_TAG} "
-        f"--build-arg TORCH_INDEX={shlex.quote(torch_index(cuda))} . "
+        f"--build-arg TORCH_INDEX={shlex.quote(torch_index(cuda))} "
+        f"--build-arg MATCH={int(match)} . "
         f"> {REMOTE_ROOT}/build.log 2>&1 || (tail -40 {REMOTE_ROOT}/build.log; exit 1)",
         timeout=BUILD_TIMEOUT_S,
     )
@@ -374,8 +384,11 @@ def open_scaleway(
     max_hours: float,
     purpose: str,
     offers: Sequence[Offer] = OFFERS,
+    match: bool = False,
 ) -> Generator[ScalewayCalls]:
-    """Start a GPU machine with the worker on it, yield its calls, then delete the machine."""
+    """Start a GPU machine with the worker on it, yield its calls, then delete the machine.
+
+    `match` builds the image with the keypoint-matching libraries (`start_worker`)."""
     keys = settings.scaleway_dir / "keys" / f"{time.time_ns()}"
     keys.mkdir(parents=True, mode=0o700)
     key = keys / "id_ed25519"
@@ -391,7 +404,7 @@ def open_scaleway(
         ) as machine:
             shell = Shell(machine.ip, key, keys / "known_hosts")
             shell.wait()
-            start_worker(shell, settings, machine)
+            start_worker(shell, settings, machine, match=match)
             with shell.tunnel(WORKER_PORT) as port:
                 calls = ScalewayCalls(f"http://127.0.0.1:{port}", machine)
                 try:

@@ -15,7 +15,8 @@ Used on the Mac (bucket creation, index upload) and on the machine (`miroir.remo
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+import time
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 #: Parallel transfers between a folder and a bucket.
 TRANSFERS = 32
+UPLOAD_ATTEMPTS = 5
 
 
 class Bucket(StrEnum):
@@ -151,13 +153,26 @@ def upload_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -> 
 
 def upload_files(client: S3Client, bucket: str, root: Path, files: Iterable[Path]) -> None:
     """Upload these files, keyed by their path under `root`."""
-    list(
-        bounded_map(
-            lambda p: client.upload_file(str(p), bucket, _key(root, p)),
-            list(files),
-            workers=TRANSFERS,
-        )
-    )
+
+    def put(path: Path) -> None:
+        _again(lambda: client.upload_file(str(path), bucket, _key(root, path)))
+
+    list(bounded_map(put, list(files), workers=TRANSFERS))
+
+
+def _again(call: Callable[[], None]) -> None:
+    """A new bucket answers NoSuchBucket now and then for a while; boto3 does not retry that."""
+    from boto3.exceptions import S3UploadFailedError  # noqa: PLC0415
+
+    for attempt in range(UPLOAD_ATTEMPTS):
+        try:
+            call()
+            return
+        except S3UploadFailedError as err:
+            if attempt == UPLOAD_ATTEMPTS - 1:
+                raise
+            logger.warning("upload failed, trying again: %s", err)
+            time.sleep(2**attempt)
 
 
 def download_keys(client: S3Client, bucket: str, root: Path, keys: Iterable[str]) -> set[str]:
