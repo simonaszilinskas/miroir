@@ -59,6 +59,7 @@ VET_CASES = (
 
 
 def vet_queries() -> list[Query]:
+    """The three VET queries, one per photo; each expects the altarpiece."""
     return [
         Query(
             query_id=f"{VET}-{case.number}",
@@ -171,7 +172,11 @@ _SEPARATORS = " \t.,;:()-\u2013\u2014'\""
 
 def caption(record: Record) -> str:
     """A Mémoire photo's caption, lower case and tidy: its description, else its title."""
-    text = record.description or record.title
+    return _tidy(record.description or record.title)
+
+
+def _tidy(text: str) -> str:
+    """Lower case, one kind of apostrophe, single spaces."""
     text = unicodedata.normalize("NFC", text).replace("’", "'").lower()
     return " ".join(text.split())
 
@@ -281,12 +286,10 @@ def _building_part(record: Record) -> bool:
     itself ("église saint-jean, détail"), and not an object photographed without its record.
     """
     text = caption(record)
-    subject = detail_subject(text)
-    title = " ".join(unicodedata.normalize("NFC", record.title).replace("’", "'").lower().split())
     return (
         _BUILDING_DETAIL.search(text) is not None
         and not is_object(text)
-        and subject.strip(_SEPARATORS) != title.strip(_SEPARATORS)
+        and detail_subject(text) != _tidy(record.title).strip(_SEPARATORS)
     )
 
 
@@ -377,9 +380,14 @@ def _strings(value: object) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class PartsReport:
+    """What `build_parts` wrote. Counters are keyed by kind, except `rules`."""
+
     tune: Counter[str]
+    """Queries per kind in the tune half."""
     sealed: Counter[str]
+    """Queries per kind in the sealed half."""
     rules: Counter[str]
+    """Pairs per `Rule` that found their whole."""
     tried: Counter[str]
     """Entities read per kind before the kind had its pairs."""
 
@@ -441,6 +449,7 @@ def fixed_halves(settings: Settings) -> dict[str, Half]:
 
 
 def build_parts(settings: Settings, per_kind: int = PER_KIND, seed: int = SEED) -> PartsReport:
+    """Draw the pairs from the full POP tables, split them into halves and write PARTS."""
     kinds = candidate_kinds(settings.full_records_parquet)
     pairs, tried = draw_pairs(settings, kinds, per_kind, seed)
     fixed = fixed_halves(settings)

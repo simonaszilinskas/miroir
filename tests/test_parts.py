@@ -12,6 +12,7 @@ from miroir.eval.parts import (
     Kind,
     Rule,
     build_vet,
+    candidate_kinds,
     detail_subject,
     entity_pair,
     is_blind,
@@ -32,6 +33,7 @@ def _record(
     *,
     publishable: bool = True,
     types: tuple[ImageType, ...] = (ImageType.MAIN,),
+    denomination: tuple[str, ...] = (),
 ) -> Record:
     images = tuple(
         Image(
@@ -52,7 +54,7 @@ def _record(
         entity_id=entity,
         title="",
         description=description,
-        denomination=(),
+        denomination=denomination,
         domain=(),
         authors=(),
         period=(),
@@ -174,3 +176,31 @@ def test_read_records_of_some_entities_only(settings: Settings) -> None:
     some = read_records(settings.records_parquet, settings.images_parquet, {"PM1"})
     assert [r.ref for r in some] == ["A1", "A3"]
     assert all(len(r.images) == 1 for r in some)
+
+
+def test_candidates_are_publishable_detail_photos_typed_by_their_palissy_record(
+    settings: Settings,
+) -> None:
+    palissy = Collection.PALISSY
+    records = [
+        _photo("A1", "PM1", "Autel, détail"),
+        _record(palissy, "PM1", "PM1", denomination=("autel", "retable (2)", "tabernacle")),
+        _photo("A2", "PM2", "Statue, détail"),
+        _record(palissy, "PM2", "PM2", denomination=("Statue",)),
+        _photo("A3", "PM3", "Statue, détail"),  # no Palissy record: no kind
+        _photo("A4", "PM4", "Calice, détail"),
+        _record(palissy, "PM4", "PM4", denomination=("calice",)),  # no kind for a chalice
+        _photo("A5", "PM5", "Statue, détail", publishable=False),
+        _record(palissy, "PM5", "PM5", denomination=("statue",)),
+        _photo("B1", "PA1", "Portail, détail"),
+        _photo("B2", "PA2", "Portail, vue générale"),  # no detail photo
+        _photo("V1", VET_ENTITY, "Retable, détail"),
+        _record(palissy, VET_ENTITY, VET_ENTITY, denomination=("retable",)),
+    ]
+    settings.data_root.mkdir(parents=True)
+    write_records(records, settings.records_parquet, settings.images_parquet)
+    assert candidate_kinds(settings.records_parquet) == {
+        "PM1": Kind.ALTARPIECE,
+        "PM2": Kind.STATUE,
+        "PA1": Kind.BUILDING,
+    }
