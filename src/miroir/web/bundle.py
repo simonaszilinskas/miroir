@@ -124,6 +124,9 @@ class IndexSpec:
     """Store MegaLoc for all of POP (`miroir.web.store`): reduced by PCA to this many dims on
     the GPU, to shortlist images, and whole in int8 in host memory, to score the shortlist.
     None keeps every 8,448-d vector in float16 on the GPU."""
+    entity_records: bool = False
+    """Keep every record of an entity the index shows, also those with no image row of their
+    own (all of POP: an image two records share is one row, under one of them)."""
 
 
 INDEXES: dict[str, IndexSpec] = {
@@ -176,6 +179,18 @@ INDEXES: dict[str, IndexSpec] = {
         a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
         saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
     ),
+    # Every POP image (`miroir scw pop-download`, `pop-embed`, `pop-index`): the July vectors
+    # and those made on Scaleway, MegaLoc stored as a shortlist, as `full-f2-shortlist`.
+    "pop-all": IndexSpec(
+        name="pop-all",
+        a7_run="A7-embeddinggemma-2-512-pop-all",
+        a3_run="A3-megaloc-322-pop-all",
+        a7_query_run="A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
+        a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
+        saved_guess="guess-A7-embeddinggemma-2-512-full.npz",
+        a3_shortlist_dims=1024,
+        entity_records=True,
+    ),
 }
 
 
@@ -211,7 +226,7 @@ def build_index(settings: Settings, name: str) -> Path:
         )
 
     records = read_site_records(settings)
-    data = catalog_data(records, _commons(settings, ids), ids)
+    data = catalog_data(records, _commons(settings, ids), ids, entity_records=spec.entity_records)
     write_catalog(out / CATALOG_FILE, data)
     catalog = Catalog(data)
     logger.info(
@@ -285,9 +300,14 @@ def add_publishable(settings: Settings, folder: Path, ids: Sequence[str] | None 
 
 
 def catalog_data(
-    records: Sequence[Record], commons: Mapping[str, CatalogImage], ids: Sequence[str]
+    records: Sequence[Record],
+    commons: Mapping[str, CatalogImage],
+    ids: Sequence[str],
+    *,
+    entity_records: bool = False,
 ) -> CatalogData:
-    """The catalog of the images `ids` (in that order) and the records they belong to."""
+    """The catalog of the images `ids` (in that order) and the records they belong to; with
+    `entity_records`, every record of their entities."""
     image_of = {i.image_id: (r, i) for r in records for i in r.images}
     images: list[CatalogImage] = []
     kept: dict[str, Record] = {}
@@ -316,9 +336,13 @@ def catalog_data(
         msg = f"{len(missing)} vector id(s) are neither POP nor Commons images: {missing[:3]}"
         raise ValueError(msg)
     # An entity known here only by Commons photos still needs a record for its card.
-    with_commons = {i.entity_id for i in images if i.source is Source.COMMONS}
+    shown = (
+        {i.entity_id for i in images}
+        if entity_records
+        else {i.entity_id for i in images if i.source is Source.COMMONS}
+    )
     for record in records:
-        if record.entity_id in with_commons and record.ref not in kept:
+        if record.entity_id in shown and record.ref not in kept:
             kept[record.ref] = record
     return CatalogData(
         images=tuple(images),

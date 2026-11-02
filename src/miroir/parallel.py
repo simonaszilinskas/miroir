@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
 
 def bounded_map[T, R](
@@ -27,3 +27,25 @@ def bounded_map[T, R](
                 yield pending.popleft().result()
         while pending:
             yield pending.popleft().result()
+
+
+def unordered_map[T, R](
+    fn: Callable[[T], R], items: Iterable[T], *, workers: int, window: int | None = None
+) -> Iterator[R]:
+    """Like `bounded_map`, but yields each result as soon as it is ready, so one slow item
+    does not hold back the others."""
+    limit = window or 2 * workers
+    source = iter(items)
+    pending: set[Future[R]] = set()
+    with ThreadPoolExecutor(workers) as pool:
+        for item in source:
+            pending.add(pool.submit(fn, item))
+            if len(pending) < limit:
+                continue
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                yield future.result()
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                yield future.result()

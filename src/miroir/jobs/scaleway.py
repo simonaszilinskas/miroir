@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 API_URL = "https://api.scaleway.com"
 #: Ubuntu 24.04 with the NVIDIA driver, Docker and the NVIDIA container toolkit.
 IMAGE_LABEL = "ubuntu_noble_gpu_os_12"
+#: Plain Ubuntu 24.04, for machines without a GPU (`CPU_OFFERS`).
+CPU_IMAGE_LABEL = "ubuntu_noble"
 #: Root volume: the Docker image (about 15 GB) and model weights.
 ROOT_GB = 100
 TAG = "miroir"
@@ -55,6 +57,8 @@ class Offer:
     zone: str
     commercial_type: str
     eur_per_hour: float
+    image: str = IMAGE_LABEL
+    root_gb: int = ROOT_GB
 
     @property
     def eur_per_s(self) -> float:
@@ -67,8 +71,22 @@ OFFERS = (
     Offer("pl-waw-2", "L4-1-24G", 0.75),
     Offer("fr-par-2", "L40S-1-48G", 1.40),
 )
+#: Machines without a GPU, for downloading images and building index bundles: many cores
+#: (`POP2-HC`, then the older `GP1-M`), or much memory (`MEMORY_OFFERS`). Hand-entered prices,
+#: rounded up.
+CPU_OFFERS = (
+    Offer("fr-par-2", "POP2-HC-16C-32G", 0.43, CPU_IMAGE_LABEL),
+    Offer("fr-par-1", "POP2-HC-16C-32G", 0.43, CPU_IMAGE_LABEL),
+    Offer("fr-par-1", "GP1-M", 0.40, CPU_IMAGE_LABEL),
+    Offer("fr-par-2", "POP2-16C-64G", 0.60, CPU_IMAGE_LABEL),
+)
+MEMORY_OFFERS = (
+    Offer("fr-par-2", "POP2-HM-16C-128G", 1.05, CPU_IMAGE_LABEL, 300),
+    Offer("fr-par-1", "GP1-L", 0.77, CPU_IMAGE_LABEL, 300),
+    Offer("fr-par-1", "POP2-HM-16C-128G", 1.05, CPU_IMAGE_LABEL, 300),
+)
 #: Zones `leftovers` looks in: every zone an offer names.
-ZONES = tuple(dict.fromkeys(o.zone for o in OFFERS))
+ZONES = tuple(dict.fromkeys(o.zone for o in (*OFFERS, *CPU_OFFERS, *MEMORY_OFFERS)))
 #: Euros to dollars, rounded up, for the run costs written beside Modal's (`RunInfo.cost_usd`).
 EUR_TO_USD = 1.20
 
@@ -154,12 +172,14 @@ class InstanceApi:
         body: JSON = {
             "name": name,
             "commercial_type": offer.commercial_type,
-            "image": IMAGE_LABEL,
+            "image": offer.image,
             "project": self.project,
             "tags": list(tags),
             "dynamic_ip_required": True,
             "routed_ip_enabled": True,
-            "volumes": {"0": {"boot": True, "size": ROOT_GB * 10**9, "volume_type": "sbs_volume"}},
+            "volumes": {
+                "0": {"boot": True, "size": offer.root_gb * 10**9, "volume_type": "sbs_volume"}
+            },
         }
         path = f"instance/v1/zones/{offer.zone}/servers"
         return cast("JSON", self._call("POST", path, body=body)["server"])
