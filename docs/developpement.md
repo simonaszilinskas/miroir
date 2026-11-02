@@ -88,6 +88,24 @@ uv run miroir scw cleanup        # delete them
 Smoke test, 2026-11-02, L4-1-24G in fr-par-2: every A7 and A3 vector matched the July Modal
 vectors (cosine 1.0000); 6 minutes of machine, €0.08.
 
+All of POP (docs/search-levels.md, "Indexing") runs on machines that need the Mac only to
+start and watch them: each writes its progress and failures to the images bucket, and a
+rerun skips what is done (`src/miroir/jobs/bulk.py`). Start each one detached.
+
+```sh
+uv run miroir scw pop-download --shards 0,1,2,3 --of 8 --upload-list   # images, CPU machine
+uv run miroir scw pop-download --shards 4,5,6,7 --of 8                 # a second one
+uv run miroir scw pop-embed --first 0 --last 40 --check 64 --upload-list  # A7 + A3, one L4
+uv run miroir scw pop-index      # the pop-all bundle, on a machine with 128 GB of memory
+uv run miroir scw pop-coverage   # which records have vectors, and why the others do not
+```
+
+`pop-download` stores every distinct image file at most 1,024 px on its long side
+(`full/<id[:2]>/<id>.jpg`; POP serves no larger file). `pop-embed` embeds the files July did
+not, in 4,096 pieces (`--first`, `--last`), with July's preprocessing (512 px JPEG);
+`--check` embeds that many July files again to compare. Each machine also deletes itself at
+`--max-hours`.
+
 The full POP export comes from public sources with a standalone script:
 `python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps).
 

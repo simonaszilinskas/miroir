@@ -1772,6 +1772,7 @@ def scw_embed(
     a7_streams: Annotated[int, typer.Option()] = 1,
     a3_batch: Annotated[int, typer.Option()] = 64,
     check: Annotated[int, typer.Option()] = 0,
+    a7_trials: Annotated[str, typer.Option()] = "",
 ) -> None:
     """Embed pieces of the stored POP images with A7 and A3. Runs in the job image on a GPU."""
     from miroir.remote.bulk_embed import run_embed  # noqa: PLC0415 (machine only)
@@ -1784,7 +1785,14 @@ def scw_embed(
         a7_streams=a7_streams,
         a3_batch=a3_batch,
         check=check,
+        a7_trials=_trials(a7_trials),
     )
+
+
+def _trials(text: str) -> list[tuple[int, int]]:
+    """ "32:1,64:2" -> [(32, 1), (64, 2)]: A7 batch sizes and streams to time."""
+    pairs = [t.split(":") for t in text.split(",") if t]
+    return [(int(b), int(s)) for b, s in pairs]
 
 
 @scw_app.command("pop-embed")
@@ -1796,14 +1804,19 @@ def scw_pop_embed(
     a7_streams: Annotated[int, typer.Option(help="A7 batches run at once.")] = 1,
     a3_batch: Annotated[int, typer.Option(help="A3 images per batch.")] = 64,
     check: Annotated[int, typer.Option(help="July files embedded again to compare.")] = 0,
+    a7_trials: Annotated[
+        str, typer.Option(help='A7 "batch:streams" to time on the --check files, e.g. 32:1,64:2.')
+    ] = "",
     max_hours: MaxHours = 12.0,
     upload_list: Annotated[
         bool, typer.Option(help="Write the list of files July embedded to the bucket first.")
     ] = False,
+    l40s: Annotated[bool, typer.Option("--l40s", help="An L40S instead of an L4.")] = False,
 ) -> None:
     """Embed stored POP images with A7 and A3 on a GPU machine, unattended (resumable)."""
     from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
     from miroir.jobs.scw_bulk import (  # noqa: PLC0415
+        compare_check,
         embed_launch,
         run_unattended,
         upload_july_list,
@@ -1824,10 +1837,17 @@ def scw_pop_embed(
         a7_streams=a7_streams,
         a3_batch=a3_batch,
         check=check,
+        a7_trials=a7_trials,
     )
-    done = run_unattended(settings, launch, offers=OFFERS[:1], max_hours=max_hours, purpose="embed")
+    offers = [o for o in OFFERS if o.zone == "fr-par-2" and ("L40S" in o.commercial_type) == l40s]
+    done = run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="embed")
     for status in done:
         typer.echo(status.line())
+    if check:
+        for option_id, (count, low, median) in compare_check(settings, launch.job).items():
+            typer.echo(
+                f"{option_id}: {count} July files again, cosine min {low:.4f}, median {median:.4f}"
+            )
 
 
 @scw_app.command("build-pop-index", hidden=True)

@@ -164,6 +164,7 @@ def run_embed(
     a7_streams: int,
     a3_batch: int,
     check: int = 0,
+    a7_trials: Sequence[tuple[int, int]] = (),
 ) -> JobStatus:
     """Embed pieces `first` to `last` (inclusive) not yet written."""
     s3 = s3_client(settings)
@@ -183,7 +184,8 @@ def run_embed(
     upload_tree(s3, bucket_name(settings, Bucket.WEIGHTS), weights)
     logger.info("models loaded in %.0f s; %d pieces to do", models.load_s, len(todo))
     if check:
-        _check(s3, bucket, models, job, sorted(july)[:: max(1, len(july) // check)][:check])
+        picked = sorted(july)[:: max(1, len(july) // check)][:check]
+        _check(s3, bucket, models, job, picked, trials=a7_trials)
 
     def load(prefix3: str) -> tuple[str, list[str], list[PILImage.Image | str]]:
         ids = piece_ids(s3, bucket, prefix3, july)
@@ -223,12 +225,35 @@ def _july(s3, bucket: str) -> frozenset[str]:
         return frozenset(path.read_text().split())
 
 
-def _check(s3, bucket: str, models: Models, job: str, ids: list[str]) -> None:
-    """Embed a few files July embedded, for the Mac to compare with the July vectors."""
-    pairs = [(i, prepared(s3, bucket, i)) for i in ids]
-    kept = [(i, im) for i, im in pairs if not isinstance(im, str)]
-    a7, a3 = models.run([im for _, im in kept])
+def _check(
+    s3, bucket: str, models: Models, job: str, ids: list[str], *, trials: Sequence[tuple[int, int]]
+) -> None:
+    """Embed a few files July embedded, for the Mac to compare with the July vectors, then
+    time A7 on them with each (batch, streams) of `trials` and A3 alone."""
+    images = list(bounded_map(lambda i: prepared(s3, bucket, i), ids, workers=READERS))
+    kept = [(i, im) for i, im in zip(ids, images, strict=True) if not isinstance(im, str)]
+    pictures = [im for _, im in kept]
+    a7, a3 = models.run(pictures)
+    timed: list[tuple[str, int, int, float]] = []
+    start = time.monotonic()
+    np.concatenate([models.a3.encode(list(b)) for b in batched(pictures, models.a3_batch)])
+    timed.append(("A3", models.a3_batch, 1, len(pictures) / (time.monotonic() - start)))
+    base = models.a7.option
+    for batch, streams in trials:
+        models.a7.option = replace(base, batch_size=batch)
+        with ThreadPoolExecutor(streams) as pool:
+            start = time.monotonic()
+            list(pool.map(lambda b: models.a7.encode(list(b)), batched(pictures, batch)))
+            timed.append(("A7", batch, streams, len(pictures) / (time.monotonic() - start)))
+        logger.info("A7 batch %d, %d stream(s): %.1f images/s", batch, streams, timed[-1][3])
+    models.a7.option = base
     buffer = io.BytesIO()
-    np.savez(buffer, ids=np.array([i for i, _ in kept]), a7=a7, a3=a3)
+    np.savez(
+        buffer,
+        ids=np.array([i for i, _ in kept]),
+        a7=a7,
+        a3=a3,
+        timed=np.array([f"{m} {b} {s} {r:.2f}" for m, b, s, r in timed]),
+    )
     s3.put_object(Bucket=bucket, Key=check_key(job), Body=buffer.getvalue())
-    logger.info("check: %d July files embedded again", len(kept))
+    logger.info("check: %d July files embedded again; %s", len(kept), timed)

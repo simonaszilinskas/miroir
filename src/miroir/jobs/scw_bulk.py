@@ -25,7 +25,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from miroir.config import DATA_DIR_VARIABLE, Settings
-from miroir.jobs.bulk import IMAGE_LIST_KEY, JULY_LIST_KEY, JobState, JobStatus, status_key
+from miroir.jobs.bulk import (
+    IMAGE_LIST_KEY,
+    JULY_LIST_KEY,
+    JobState,
+    JobStatus,
+    check_key,
+    status_key,
+)
 from miroir.jobs.modal_spec import MODEL_LIBRARIES
 from miroir.jobs.objects import Bucket, bucket_name, s3_client
 from miroir.jobs.scaleway import InstanceApi, Machine, Offer, gpu_machine
@@ -321,6 +328,7 @@ def embed_launch(
     a7_streams: int,
     a3_batch: int,
     check: int,
+    a7_trials: str = "",
 ) -> Launch:
     """Pieces `first`..`last` of `miroir scw embed`, in the job image on a GPU machine."""
     job = f"embed-{first}-{last}"
@@ -336,6 +344,7 @@ def embed_launch(
             f"{run} --name embed --gpus all --shm-size 8g {IMAGE_TAG} scw embed "
             f"--first {first} --last {last} --a7-batch {a7_batch} --a7-streams {a7_streams} "
             f"--a3-batch {a3_batch} --check {check}"
+            + (f" --a7-trials {a7_trials}" if a7_trials else "")
         )
 
     return Launch(
@@ -373,3 +382,32 @@ def index_launch(settings: Settings) -> Launch:
         alive="pgrep -fc 'miroir scw [b]uild-pop-index' || true",
         logs=f"tail -n 40 {REMOTE_ROOT}/pop-index.log",
     )
+
+
+def compare_check(settings: Settings, job: str) -> dict[str, tuple[int, float, float]]:
+    """The July files a run embedded again (`miroir.jobs.bulk.check_key`) against their July
+    vectors: per model, how many, the lowest and the median cosine."""
+    import io  # noqa: PLC0415
+
+    import numpy as np  # noqa: PLC0415
+
+    from miroir.eval.vectors import read_vectors  # noqa: PLC0415
+    from miroir.index.pop_all import JULY_RUNS  # noqa: PLC0415
+
+    body = s3_client(settings).get_object(
+        Bucket=bucket_name(settings, Bucket.IMAGES), Key=check_key(job)
+    )["Body"]
+    out: dict[str, tuple[int, float, float]] = {}
+    with np.load(io.BytesIO(body.read()), allow_pickle=False) as data:
+        ids = [str(i) for i in data["ids"].tolist()]
+        for key, option_id in (("a7", "A7-embeddinggemma-2-512"), ("a3", "A3-megaloc-322")):
+            july = read_vectors(settings.vectors_path(JULY_RUNS[option_id]))
+            rows = july.index()
+            theirs = np.stack([np.asarray(july.vectors[rows[i]], dtype=np.float32) for i in ids])
+            mine = np.asarray(data[key], dtype=np.float32)
+            cosines = (mine * theirs).sum(axis=1)
+            out[option_id] = (len(ids), float(cosines.min()), float(np.median(cosines)))
+        if "timed" in data:
+            for line in data["timed"].tolist():
+                logger.info("timed (model, batch, streams, images/s): %s", line)
+    return out
