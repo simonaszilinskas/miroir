@@ -31,6 +31,10 @@ class Query:
     """T3 only: the Jeu de Paume room photo(s) the artwork appears in."""
     text: str = ""
     """T7 only: the words searched. `query_image_id` is then the hidden image they describe."""
+    kind: str = ""
+    """PARTS and VET: what the whole is (altarpiece, statue, building...)."""
+    why: str = ""
+    """PARTS and VET: why the query counts as a part of the expected whole, and the target photo."""
 
 
 _QUERY = TypeAdapter(Query)
@@ -48,11 +52,15 @@ def write_set(
         _write_lines(path, (json.dumps(_fields(q), ensure_ascii=False) for q in queries))
 
 
+#: Fields only some sets fill: written only when set, so other sets' files stay as they were.
+_OPTIONAL = ("text", "kind", "why")
+
+
 def _fields(query: Query) -> dict[str, object]:
-    """A query as written: `text` only where a set has one, so other sets stay as they were."""
     fields = asdict(query)
-    if not query.text:
-        del fields["text"]
+    for name in _OPTIONAL:
+        if not fields[name]:
+            del fields[name]
     return fields
 
 

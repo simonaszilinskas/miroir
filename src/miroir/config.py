@@ -362,6 +362,11 @@ class Settings(BaseSettings):
             raise PermissionError(msg)
         return self.data_root / "testsets-sealed" / f"{set_id}.sealed.jsonl"
 
+    def outside_image_path(self, image_id: str) -> Path:
+        """A query image that is in no POP record, kept as given (e.g. the VET set's photos)."""
+        _check_name(image_id)
+        return self.testsets_dir / "outside" / f"{image_id}.jpg"
+
     def gallery_path(self, name: str) -> Path:
         """A gallery: one `image_id` per line (`full`, `screening-20k`, ...)."""
         _check_name(name)

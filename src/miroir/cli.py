@@ -25,7 +25,7 @@ app.add_typer(records_app, name="records")
 eval_app = typer.Typer(no_args_is_help=True, help="Evaluation: vectors, scoring, results.")
 app.add_typer(eval_app, name="eval")
 testsets_app = typer.Typer(
-    no_args_is_help=True, help="Test sets T1, T2, T2b, T3, T5, T8 and galleries."
+    no_args_is_help=True, help="Test sets T1, T2, T2b, T3, T5, T8, VET, PARTS and galleries."
 )
 app.add_typer(testsets_app, name="testsets")
 amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R0).")
@@ -230,6 +230,41 @@ def build_commons_gallery(
         f"full sample: {len(full)} buildings, about {requests} requests, "
         f"{hours:.1f} h at Wikimedia's pace with nothing cached"
     )
+
+
+@testsets_app.command("vet")
+def testsets_vet(
+    images: Annotated[
+        list[Path],
+        typer.Argument(
+            help="The three Vétheuil photos, in order: catalogue page (Mise au tombeau), the "
+            "altarpiece today, catalogue page (Descente de croix).",
+            exists=True,
+            dir_okay=False,
+        ),
+    ],
+) -> None:
+    """VET: three photos of the Vétheuil altarpiece from outside POP (tune half only)."""
+    from miroir.eval.parts import build_vet  # noqa: PLC0415
+
+    settings = get_settings()
+    for q in build_vet(settings, images):
+        typer.echo(f"{q.query_id}: {settings.outside_image_path(q.query_image_id)}")
+
+
+@testsets_app.command("parts")
+def testsets_parts() -> None:
+    """PARTS: a detail photo as query, its whole as answer, mined from the full POP tables."""
+    from miroir.eval.parts import Kind, build_parts  # noqa: PLC0415
+
+    report = build_parts(get_settings())
+    typer.echo(f"{'kind':<14} {'tune':>5} {'sealed':>6} {'read':>6}")
+    for kind in Kind:
+        typer.echo(
+            f"{kind.value:<14} {report.tune[kind.value]:>5} {report.sealed[kind.value]:>6}"
+            f" {report.tried[kind.value]:>6}"
+        )
+    typer.echo(f"why: {dict(report.rules)}")
 
 
 def _echo_build(report: BuildReport) -> None:

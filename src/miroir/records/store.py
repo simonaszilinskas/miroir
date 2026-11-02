@@ -7,11 +7,13 @@ opening the Parquet files itself, so the schema lives in one place.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection as Many
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from miroir.commons.model import CommonsPhoto, CommonsSet, Source, View
@@ -184,8 +186,9 @@ def read_column(path: Path, name: str) -> list[object]:
     return values
 
 
-def read_images(images_path: Path) -> list[Image]:
-    rows = _read(images_path, IMAGES_SCHEMA).to_pylist()
+def read_images(images_path: Path, entity_ids: Many[str] | None = None) -> list[Image]:
+    """Every image, or only those of `entity_ids` (read with a filter, for the full tables)."""
+    rows = _read(images_path, IMAGES_SCHEMA, entity_ids).to_pylist()
     return [
         Image(
             image_id=str(row["image_id"]),
@@ -201,12 +204,14 @@ def read_images(images_path: Path) -> list[Image]:
     ]
 
 
-def read_records(records_path: Path, images_path: Path) -> list[Record]:
-    """Load every record with its images, in file order."""
+def read_records(
+    records_path: Path, images_path: Path, entity_ids: Many[str] | None = None
+) -> list[Record]:
+    """Load every record with its images, in file order; or only the records of `entity_ids`."""
     by_ref: defaultdict[str, list[Image]] = defaultdict(list)
-    for image in read_images(images_path):
+    for image in read_images(images_path, entity_ids):
         by_ref[image.ref].append(image)
-    rows = _read(records_path, RECORDS_SCHEMA).to_pylist()
+    rows = _read(records_path, RECORDS_SCHEMA, entity_ids).to_pylist()
     return [
         Record(
             ref=str(row["ref"]),
@@ -354,8 +359,11 @@ def _write(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _read(path: Path, schema: pa.Schema) -> pa.Table:
-    return pq.read_table(path, schema=schema)  # pyright: ignore[reportUnknownMemberType]
+def _read(path: Path, schema: pa.Schema, entity_ids: Many[str] | None = None) -> pa.Table:
+    if entity_ids is None:
+        return pq.read_table(path, schema=schema)  # pyright: ignore[reportUnknownMemberType]
+    wanted = pc.field("entity_id").isin(sorted(entity_ids))  # pyright: ignore[reportUnknownMemberType]
+    return pq.read_table(path, schema=schema, filters=wanted)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _strings(value: object) -> tuple[str, ...]:
