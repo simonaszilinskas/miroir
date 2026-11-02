@@ -136,6 +136,11 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 
 [technical-spec.md §7](technical-spec.md#7-evaluation) defines sets T1–T9. Every set except T9 is split 50/50 into a tuning half and a sealed half, **by building or object**, so no entity appears in both halves.
 
+Two more sets test finding the whole from a part (the plan in `docs/search-levels.md`). Their targets come from the whole POP download (`full-pop/`), so most are not in today's index.
+
+- **VET** (`miroir testsets vet <3 images>`): three photos of the Vétheuil Passion altarpiece (PM95000723) from outside POP: two sale catalogue pages, each one stolen carved group with text, and the altarpiece today in colour. Target: APMH047981, a Mémoire photo from before 1896; any record of the altarpiece is right. Tune half only. The photos are kept in `testsets/outside/`.
+- **PARTS** (`miroir testsets parts`): 360 Mémoire photos captioned as a detail ("statue : saint joseph, vue partielle", "portail sud, détail"), each answered by a photo of the same entity whose caption names the same thing without "détail". 60 per kind (altarpiece, statue, painting, furniture, stained glass, building), one per entity, publishable only, split 30/30 per kind following the other sets' halves. Every detail photo of the entity leaves the gallery, so only a whole view can answer. Each query's `why` field names the caption rule and the target photo. Checked by eye on 30 tune pairs (5 per kind): 26 show a part of what the target shows. The misses show another part of the same entity: a lunette beside the painted arch in the target, a dismounted window panel, an altar front under a cloth, a figure from a painted wall not found in the wall view.
+
 ## 4. Measures
 
 For every run:
