@@ -2,10 +2,11 @@
 
 The visitor gives a photo, words, or both, then says in their own words what they want to
 find. The site's usual search of the photo starts at once, while they type; its first
-results go to the model with the goal. The model (Mistral Large 4 through OpenRouter, as in
-H4) asks short questions, calls the tools of `miroir.web.chat_tools`, looks at thumbnails,
-tries again, then shows its picks as the site's result cards. The visitor can keep writing,
-and the model searches again.
+results go to the model with the goal. The model (Mistral Large 4, on Mistral's own API when
+its key is set, else through OpenRouter as in H4; `chat_model`) asks short questions, calls
+the tools of `miroir.web.chat_tools`, reads records, looks at thumbnails, tries again, then
+shows its picks as the site's result cards. The visitor can keep writing, and the model
+searches again.
 
 A turn runs as a task on the server and writes events (`Conversation.events`); the page
 reads them as a stream, which ends after `STREAM_S` (Modal cuts a request at 150 s) and is
@@ -48,6 +49,7 @@ from typing import Protocol
 import httpx
 from pydantic import SecretStr
 
+from miroir.config import Settings
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.mistral import MistralClient, MistralError
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
@@ -74,7 +76,8 @@ from miroir.web.toolsearch import THUMB_SIDE, Hit, ToolHits, ToolQuery
 
 logger = logging.getLogger(__name__)
 
-#: The model, as in H4: open, takes images and tools; reasoning off, temperature 0.
+#: The model through OpenRouter, as in H4: open, takes images and tools; reasoning off,
+#: temperature 0.
 MODEL = "mistralai/mistral-large-4-0"
 MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "reasoning": {"effort": "none"}}
 MAX_TOKENS = 800
@@ -160,6 +163,16 @@ class MistralModel:
     async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
         fields = {**body, **MISTRAL_FIELDS, "max_tokens": MISTRAL_MAX_TOKENS}
         return await asyncio.to_thread(self._client.chat, self._model, fields)
+
+
+def chat_model(settings: Settings) -> ChatModel | None:
+    """The conversation page's model: Mistral's own API when MISTRAL_API_KEY is set, else
+    OpenRouter when OPENROUTER_API_KEY is, else None (no key, no conversation page)."""
+    if settings.mistral_api_key is not None:
+        return MistralModel(settings.mistral_api_key)
+    if settings.openrouter_api_key is not None:
+        return OpenRouterModel(settings.openrouter_api_key)
+    return None
 
 
 class SpendStore(Protocol):
@@ -396,10 +409,10 @@ class Conversation:
 
     def records(self, entity_id: str) -> Sequence[CatalogRecord]:
         catalog = self.service.catalog
-        row = None if catalog is None else catalog.entity_row.get(entity_id)
-        if catalog is None or row is None:
+        if catalog is None:
             return ()
-        return catalog.entity_records(row)
+        row = catalog.entity_row.get(entity_id)
+        return () if row is None else catalog.entity_records(row)
 
     def repeats(self, signature: Signature) -> int | None:
         for earlier, step in self.signatures:

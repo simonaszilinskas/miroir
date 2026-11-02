@@ -216,14 +216,7 @@ def serve_locally(
     import uvicorn  # noqa: PLC0415
 
     from miroir.web.app import create_app  # noqa: PLC0415
-    from miroir.web.chat import (  # noqa: PLC0415
-        ChatModel,
-        ChatService,
-        Limits,
-        MistralModel,
-        OpenRouterModel,
-        ThumbSource,
-    )
+    from miroir.web.chat import ChatModel, ChatService, Limits, ThumbSource, chat_model  # noqa: PLC0415
     from miroir.web.chatlog import FileChatLog  # noqa: PLC0415
     from miroir.web.fake import FakeGuide, LocalBackend, fake_engine  # noqa: PLC0415
     from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
@@ -242,13 +235,7 @@ def serve_locally(
         backend = ModalBackend(deployed=True)
     if search is not None:
         backend = search
-    model: ChatModel = FakeGuide()
-    if fake_llm:
-        pass
-    elif settings.mistral_api_key is not None:
-        model = MistralModel(settings.mistral_api_key)
-    elif settings.openrouter_api_key is not None:
-        model = OpenRouterModel(settings.openrouter_api_key)
+    model: ChatModel = (None if fake_llm else chat_model(settings)) or FakeGuide()
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
 
     def chat(fetch: Callable[[str], Awaitable[bytes]]) -> ChatService:

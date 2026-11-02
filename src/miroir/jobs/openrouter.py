@@ -84,14 +84,16 @@ class _Function(_Wire):
     arguments: str | dict[str, object] | None = None
 
 
-class _ToolCall(_Wire):
+class WireToolCall(_Wire):
+    """A tool call as sent by chat APIs in OpenAI's format (OpenRouter, Mistral)."""
+
     id: str = ""
     function: _Function
 
 
 class _ChatMessage(_Wire):
     content: str | None = None
-    tool_calls: list[_ToolCall] | None = None
+    tool_calls: list[WireToolCall] | None = None
 
 
 class _ChatChoice(_Wire):
@@ -464,12 +466,13 @@ def _chat_answer(response: _ChatResponse, *, need_cost: bool) -> ChatAnswer:
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         finish_reason=choice.finish_reason or "",
-        tool_calls=tuple(_tool_call(c) for c in choice.message.tool_calls or ()),
+        tool_calls=tuple(tool_call_of(c) for c in choice.message.tool_calls or ()),
         cached_tokens=(details.cached_tokens or 0) if details is not None else 0,
     )
 
 
-def _tool_call(call: _ToolCall) -> ToolCall:
+def tool_call_of(call: WireToolCall) -> ToolCall:
+    """A wire tool call as a `ToolCall`, its arguments as JSON text even when sent as an object."""
     arguments = call.function.arguments
     if arguments is None:
         text = "{}"
