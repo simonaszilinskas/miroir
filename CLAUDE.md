@@ -30,8 +30,8 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
   spelt `rose-valand`; the collection is `rose-valland`.
 - `MIROIR_DATA_DIR` (default `~/miroir-data`): `records.parquet`, `images.parquet`, `vectors/`,
   `testsets/` (tune halves, galleries) and `testsets-sealed/` (sealed halves, kept apart).
-- Set both in `.env` (copy `.env.example`). API keys (`OPENROUTER_API_KEY`, `HF_TOKEN`) go there
-  too and are never committed.
+- Set both in `.env` (copy `.env.example`). API keys (`OPENROUTER_API_KEY`, `MISTRAL_API_KEY`, `HF_TOKEN`,
+  the `SCW_` keys) go there too and are never committed.
 - Load records with `miroir.records.store.read_records` / `read_images`, not by opening Parquet
   yourself.
 
@@ -39,7 +39,7 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 
 1. Never load or run an ML model on the development machine, not even a smoke test or a short
    timing. Models run on hosted services: OpenRouter when it serves the model, otherwise Modal
-   (open models; model code only in `src/miroir/remote/`). The development machine builds tables
+   or a Scaleway GPU machine (open models; model code only in `src/miroir/remote/`). The development machine builds tables
    and test sets and scores the vectors that come back. Do not install the `jobs` extra there.
 2. Never write into the exports directory.
 3. Never commit data, images, Parquet files, test sets or model weights. Only small text fixtures.

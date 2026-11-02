@@ -8,11 +8,12 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
    exception is `scripts/pop_full_export.py`, a standalone, standard-library tool that downloads
    the full POP export from public sources.
 2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
-   Group by area: `miroir records build`, `miroir jobs embed`, `miroir eval run`.
+   Group by area: `miroir records build`, `miroir embed modal`, `miroir eval run`.
 3. No ML model is ever loaded or run on the development machine, not even for a test: ruff bans importing torch,
    transformers, timm, open_clip, sentence_transformers and mlx. Models run on hosted services.
-   The one exception is `src/miroir/remote/`, code that runs only inside Modal containers and is
-   imported only inside Modal functions; `tests/test_no_models_on_the_mac.py` checks that.
+   The one exception is `src/miroir/remote/`, code that runs only inside Modal containers or on a
+   Scaleway GPU machine, and is imported only there (inside Modal functions, or by the hidden
+   `miroir scw serve` on the machine); `tests/test_no_models_on_the_mac.py` checks that.
 4. New dependencies: base only if every command needs them. Otherwise an extra
    (`jobs` for remote-job code, `api`) in `pyproject.toml`. Dev tools go in the `dev` group.
 
