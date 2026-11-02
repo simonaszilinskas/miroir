@@ -1,47 +1,42 @@
 # Search levels and the move to Scaleway
 
-Plan set 2026-11-02. The ministry's Scaleway project ("Miroir") replaces Modal for compute: GPU machines, Object Storage and Generative APIs, all in Paris.
+Plan set 2026-11-02, cut down the same day. The ministry's Scaleway project ("Miroir") replaces Modal for compute: GPU machines and Object Storage in Paris. Spend cap: €100 without asking again.
 
 ## Why
 
-- The site searches 147k images. POP holds 2.14M distinct images in 2.1M records. The two targets the ministry has named (APMH047981, the Vétheuil altarpiece, and APMH00020986, the Virgin and Child of Thoisy-le-Désert) are not in the July export, but both are in our own POP download.
-- Today's search compares a whole photo with whole photos. It cannot find a part inside a whole: a carved group from a sale catalogue against the 1896 photo of the altarpiece it came from, where the group is about 100 pixels tall among 15 others.
-- The classic page (`/`) and the conversation (`/chat`) are two separate tools. A visitor should not have to choose between them up front.
+- The site searches 147k images. POP holds 2.14M distinct images in 2.1M records. The two targets the ministry has named (APMH047981, the Vétheuil altarpiece, and APMH00020986, the Virgin and Child of Thoisy-le-Désert) are not in the July export, but both are in our own POP download. Other tools on the market (Arte-fact: 3M objects) search everything; so must we.
+- Today's search compares a whole photo with whole photos. It cannot find a part inside a whole: a carved group from a sale catalogue against the 1896 photo of the altarpiece it came from, where the group covers about 3% of the frame.
 
-## One search, three levels
+## What changes
 
-One page, one photo or words box. The visitor picks a level, or starts at Instant and presses "Chercher plus loin", which keeps the photo, the box and the words.
+1. **Index every image of POP.** All 2.14M distinct images, every collection, publishable or not (our own models only), with A7 and A3 as today.
+2. **Crop vectors.** Each photo also gets vectors for its parts (2×2 and 3×3 grids and the detector's outlines), so a visitor's photo of one part can meet the part of a POP photo where it stands. A record takes the score of its best crop. Same models, same ranking.
+3. **Two levels on one page.**
+   - **Instant** (under 2 s, free): today's search, crops included.
+   - **Deeper** (1–3 min, a few cents): the agent (Mistral Large 4) already on `/chat`. It looks at the photo, writes the words a record would use ("Mise au tombeau, retable flamand"), searches, reads records with `read_record` and asks the visitor questions. "Chercher plus loin" starts it from the Instant search, keeping the photo, the framing and the words.
 
-| Level | What runs | Time | Cost per search |
-|---|---|---|---|
-| **Instant** | Today's search: whole-photo vectors (A7 or A3, by route), words, filters, position. The visitor can frame part of the photo or tap an outline. | under 2 s | nothing |
-| **Medium** | Instant, plus: a vision model reads the photo (caption text, kind of object, period) and turns it into words and filters; the photo is compared with crops of index photos, so a part can find its whole; the first 50 are re-ranked by matching points between the photo and each candidate. | 10–20 s | under €0.01 |
-| **Hard** | The agent (Mistral Large 4) uses Medium as its search tool, plus `read_record`, `more_like`, framing and side-by-side comparison, and asks the visitor questions when it is stuck. | 1–3 min | a few cents |
+Nothing else is added unless the measurements below call for it. Held back: AMES re-ranking and point matching (SuperPoint + LightGlue), for the case where crops find the whole but rank it too low; DINOv3, which lost to A7 and A3 in R1.
 
-## Indexing everything
+## Indexing
 
-1. Download all 2.14M images to Object Storage, long side 1,024 px. Report every image that fails, by collection.
-2. Whole-photo vectors with A7 (768 numbers) and A3 (8,448). A3 for 2.14M images is 36 GB, so test a shorter A3 (1,024 numbers) on the tune sets first, from the stored vectors on the Mac (no model).
-3. Crop vectors for objects and interiors: outlines from the detector plus a fixed grid (whole, 2×2, 3×3). A7 and A3 make them, as for whole photos. DINOv3 (L, H+ and 7B) lost to both in R1 (results.md: T1, T3, T5), despite the paper's lead on Met and AmsterTime; it is not retried unless crop search on the part-to-whole tune half falls short. Patch features from the same pass are kept for re-ranking (AMES, below).
+1. Download all 2.14M images to Object Storage, at the largest size POP serves up to 1,024 px on the long side. Report every image that fails, by collection and reason.
+2. Whole-photo vectors, A7 and A3. A3 for 2.14M images is 36 GB at full length, so test a shorter A3 (1,024 numbers) on the tune sets first, from the stored vectors on the Mac (no model).
+3. Crop vectors. How many crops per photo, and with which model, is set from the measured speed of the GPU so that the whole run stays within €100: every image gets crops, the grid's fineness is what moves.
 4. Words: the existing word index over all 2.1M records.
-5. A coverage report: every record with an image has at least one vector, or the reason it does not.
+5. A coverage report: every record with an image has vectors, or the reason it does not.
 
-## Test sets
+## Measures
 
-The ministry has no test set to give. We build our own:
+On VET (3 Vétheuil images) and PARTS (360 detail → whole pairs from POP, tune and sealed halves), plus T2, T2b, T8c and H4 so nothing gets worse:
 
-1. **Vétheuil:** the three images Camille sent (the altarpiece today, two groups in a sale catalogue) against APMH047981 and PM95000723.
-2. **Part to whole:** POP records that hold both a detail photo and a whole view. Query with the detail, expect the record. Split into tune and sealed halves, as before.
-3. **No regression:** T2, T2b, T8c and the H4 photos, so Instant does not get worse.
+1. Today's search on the full index.
+2. The same with crops.
+3. The agent.
 
 ## Order of work
 
-1. Move the jobs and the query search from Modal to Scaleway (Docker image on a GPU machine, Object Storage for files). No spend beyond a smoke test.
-2. Build the part-to-whole test set and run today's search on it and on Vétheuil: the baseline.
+1. Move the jobs and the query search from Modal to Scaleway. (Running.)
+2. Build VET and PARTS. (Done: `miroir testsets vet`, `miroir testsets parts`.)
 3. Download and embed everything; build the full index on Scaleway.
-4. Medium, in this order, each kept only if it helps on the tune halves:
-   1. Query reading: a vision model writes the scene, material, period and kind ("Mise au tombeau, groupe sculpté, bois, retable"), which goes to the word search. POP texts often name the scenes inside an altarpiece, where a 3% group is nearly invisible to a whole-photo vector.
-   2. Crop search over the crop vectors.
-   3. AMES (ECCV 2024, open weights) re-ranks the first 100 from patch features: the largest single gain on ILIAS (CVPR 2025), the closest public benchmark to ours.
-   4. Point matching (SuperPoint + LightGlue) on the first 20, to score and to show the visitor why two photos match. It will not save a carved group photographed from another angle; Hard handles those.
-5. Hard on top of Medium; merge `/` and `/chat` into one page with the three levels; deploy on Scaleway.
+4. Crop vectors; measures 1 to 3.
+5. One page with Instant and Deeper; deploy on Scaleway.
