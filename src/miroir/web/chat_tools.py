@@ -976,10 +976,12 @@ def best_of(args: Mapping[str, object]) -> tuple[str, ...] | None:
         return None
 
 
-_LABELS = {
+#: The step the page shows when a tool's arguments are refused. Every tool needs one.
+_LABELS: dict[ToolName, str] = {
     ToolName.IMAGE_SEARCH: "Recherche par image refusée",
     ToolName.TEXT_SEARCH: "Recherche par mots refusée",
     ToolName.VIEW_RESULTS: "Vignettes refusées",
+    ToolName.READ_RECORD: "Lecture des notices refusée",
     ToolName.MORE_LIKE: "Recherche par ressemblance refusée",
     ToolName.ASK_VISITOR: "Question mal formée",
     ToolName.ASK_REGION: "Cadrage impossible",

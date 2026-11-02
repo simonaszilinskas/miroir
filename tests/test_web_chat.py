@@ -686,3 +686,13 @@ def test_the_home_page_offers_both_searches() -> None:
         assert script.status_code == 200
         assert "GOAL_CHIPS" in script.text
         assert rig.client.get("/static/ui.js").status_code == 200
+
+
+def test_read_record_of_ids_never_seen_is_an_error_the_model_can_read() -> None:
+    script = [call("read_record", {"entity_ids": ["NEVER"]}), shown("OBJ1")]
+    with Rig(script) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    read = tool_messages(rig.model.bodies[1])[-1]
+    assert read == "error: none of these ids came from a search: NEVER"
+    assert card_ids(events) == ["OBJ1"]
