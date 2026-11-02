@@ -182,6 +182,7 @@ class PaidCall:
     budget: Budget
     key_usage_usd: float | None = None
     clock: Callable[[], float] = time.monotonic
+    service: Service = Service.MODAL
 
 
 def paid_call[T](
@@ -217,7 +218,7 @@ def paid_call[T](
             model=model,
             cost_usd=wall * machine.usd_per_s,
             items=items,
-            service=Service.MODAL,
+            service=paid.service,
         )
     return Paid(result, wall * machine.usd_per_s, wall)
 
@@ -234,8 +235,13 @@ class ModalRunner:
         commons: CommonsImages | None = None,
         clock: Callable[[], float] = time.monotonic,
         all_images: bool = False,
+        machine: Machine | None = None,
+        service: Service = Service.MODAL,
     ) -> None:
         self.settings = settings
+        self._machine = machine
+        """The one machine every call runs on (a Scaleway GPU), else each function's own."""
+        self._service = service
         self._all_images = all_images
         """Send images of records that are not publishable too (full-sample index only)."""
         self._calls = calls
@@ -284,7 +290,7 @@ class ModalRunner:
             images=len(done.ids),
             fixed_s=max(paid.wall_s - done.embed_s, 0.0),
             per_image_s=done.embed_s / len(done.ids),
-            usd_per_s=opt.machine.usd_per_s,
+            usd_per_s=self._on(opt.machine).usd_per_s,
             cost_usd=paid.cost_usd,
             created=_today(),
         )
@@ -837,9 +843,9 @@ class ModalRunner:
         items: int,
     ) -> Paid[T]:
         return paid_call(
-            PaidCall(self.ledger, self.budget, self._key_usage, self._clock),
+            PaidCall(self.ledger, self.budget, self._key_usage, self._clock, self._service),
             call,
-            machine=machine,
+            machine=self._on(machine),
             timeout_s=timeout_s,
             kind=kind,
             option=option,
@@ -847,6 +853,9 @@ class ModalRunner:
             model=model,
             items=items,
         )
+
+    def _on(self, machine: Machine) -> Machine:
+        return machine if self._machine is None else self._machine
 
     def _gallery(self, name: str) -> list[str]:
         path = self.settings.gallery_path(name)
@@ -882,7 +891,7 @@ class ModalRunner:
         wall: float,
         skips: dict[str, int],
     ) -> RunInfo:
-        notes = f"Modal {machine.gpu}, {opt.dtype}"
+        notes = f"{self._service.value.capitalize()} {self._on(machine).gpu}, {opt.dtype}"
         if opt.family is Family.DINO:
             notes += f", {opt.resize}"
         if skips:

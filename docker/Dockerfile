@@ -1,0 +1,27 @@
+# The job image for a Scaleway GPU machine: the same model libraries as the Modal image
+# (`miroir.jobs.modal_spec.MODEL_LIBRARIES`) and the miroir package, serving the jobs on one
+# port (`miroir scw serve`). Built on the machine itself by `miroir.jobs.scw_run`, which writes
+# requirements.txt from those pins and picks TORCH_INDEX to match the machine's NVIDIA driver.
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir uv==0.11.29
+
+ARG TORCH_INDEX
+ENV UV_SYSTEM_PYTHON=1 UV_NO_CACHE=1
+COPY requirements.txt lightglue.txt /build/
+# torch first, from the index built for the machine's CUDA; the rest from PyPI keeps it.
+RUN grep -E '^(torch|torchvision)==' /build/requirements.txt > /build/torch.txt \
+    && uv pip install --index-url "$TORCH_INDEX" -r /build/torch.txt \
+    && uv pip install -r /build/requirements.txt \
+    && uv pip install --no-deps -r /build/lightglue.txt
+
+COPY pyproject.toml README.md LICENSE /app/
+COPY src /app/src
+RUN uv pip install --no-deps /app
+
+# Model caches live in /weights, mirrored from the weights bucket, as on Modal.
+ENV HF_HOME=/weights/hf TORCH_HOME=/weights/torch PYTHONUNBUFFERED=1
+ENTRYPOINT ["miroir", "scw", "serve"]

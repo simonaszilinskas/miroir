@@ -12,10 +12,14 @@ import re
 import secrets
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from miroir.config import ENV_FILE, ENV_PASSWORD_KEY, WEB_INDEX, Settings
 from miroir.web import auth
 from miroir.web.bundle import bundle_files
+
+if TYPE_CHECKING:
+    from miroir.web.app import SearchBackend
 
 logger = logging.getLogger(__name__)
 
@@ -193,10 +197,17 @@ CHAT_OPTION = "H5-chat"
 
 
 def serve_locally(
-    settings: Settings, *, name: str, port: int, real: bool = False, fake_llm: bool = False
+    settings: Settings,
+    *,
+    name: str,
+    port: int,
+    real: bool = False,
+    fake_llm: bool = False,
+    search: SearchBackend | None = None,
 ) -> None:
     """The site on http://localhost:<port>, with fake models over the local bundle, or with
-    `real` the deployed GPU search (models on Modal; the page and catalog stay local).
+    `real` the deployed GPU search (models on Modal; the page and catalog stay local), or
+    with the `search` given (a Scaleway machine, `miroir web dev --scw`).
 
     The conversation page uses Mistral Large 4 on Mistral's API when MISTRAL_API_KEY is set,
     else through OpenRouter when OPENROUTER_API_KEY is (with the same caps as the deployed
@@ -204,7 +215,7 @@ def serve_locally(
     otherwise or with `fake_llm`."""
     import uvicorn  # noqa: PLC0415
 
-    from miroir.web.app import SearchBackend, create_app  # noqa: PLC0415
+    from miroir.web.app import create_app  # noqa: PLC0415
     from miroir.web.chat import (  # noqa: PLC0415
         ChatModel,
         ChatService,
@@ -229,6 +240,8 @@ def serve_locally(
         from miroir.web.modal_app import ModalBackend  # noqa: PLC0415
 
         backend = ModalBackend(deployed=True)
+    if search is not None:
+        backend = search
     model: ChatModel = FakeGuide()
     if fake_llm:
         pass
@@ -259,6 +272,6 @@ def serve_locally(
         chat=chat,
     )
     logger.info("conversation page: %s", model.model)
-    if not real:
+    if not real and search is None:
         logger.info("fake models: photo results are look-alikes, not a real search")
     uvicorn.run(site, host="127.0.0.1", port=port, log_level="info")

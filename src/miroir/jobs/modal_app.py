@@ -44,6 +44,9 @@ from miroir.jobs.modal_spec import (
     FILL_TIMEOUT_S,
     L4,
     L4_DINO,
+    LIGHTGLUE,
+    MATCH_LIBRARIES,
+    MODEL_LIBRARIES,
     R0_MACHINE,
     R0_TIMEOUT_S,
     SCALEDOWN_S,
@@ -62,21 +65,7 @@ HF_SECRET_NAME = "huggingface"  # noqa: S105 (the name of a Modal secret, not it
 
 app = modal.App(APP_NAME)
 
-_libraries = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
-    "torch==2.14.1",
-    "torchvision==0.29.1",
-    "transformers==5.19.0",
-    "sentence-transformers[image]==6.1.0",
-    "open-clip-torch==3.3.0",
-    "timm==1.0.30",
-    "qwen-vl-utils==0.0.14",
-    "accelerate==1.15.0",
-    "httpx==0.28.1",
-    "pillow==12.3.0",
-    "numpy==2.5.4",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.15.0",
-)
+_libraries = modal.Image.debian_slim(python_version="3.12").uv_pip_install(*MODEL_LIBRARIES)
 _CACHES = {"HF_HOME": f"{MODAL_WEIGHTS_MOUNT}/hf", "TORCH_HOME": f"{MODAL_WEIGHTS_MOUNT}/torch"}
 image = _libraries.env(_CACHES).add_local_python_source("miroir")
 #: The model libraries and weight caches, shared with the website's search app
@@ -86,11 +75,8 @@ model_libraries, model_caches = _libraries, _CACHES
 #: dependencies (it asks for the GUI build of OpenCV; the headless one is enough here).
 match_libraries = (
     _libraries.apt_install("git")
-    .uv_pip_install("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
-    .pip_install(
-        "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8",
-        extra_options="--no-deps",
-    )
+    .uv_pip_install(*MATCH_LIBRARIES)
+    .pip_install(LIGHTGLUE, extra_options="--no-deps")
     .env(_CACHES)
 )
 match_image = match_libraries.add_local_python_source("miroir")

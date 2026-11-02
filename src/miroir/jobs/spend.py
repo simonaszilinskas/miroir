@@ -43,6 +43,9 @@ class Service(StrEnum):
 
     OPENROUTER = "openrouter"
     MODAL = "modal"
+    SCALEWAY = "scaleway"
+    """Calls on a Scaleway GPU machine, paid from the ministry's project, not from this budget.
+    Machines have their own cap and ledger (`miroir.jobs.scaleway`)."""
 
 
 class BudgetError(RuntimeError):
@@ -174,12 +177,13 @@ def spent_usd(ledger: SpendLedger, key_usage_usd: float | None) -> float:
     """Total spent so far, on every service.
 
     For OpenRouter, the ledger or the key's own count, whichever is higher; for the rest,
-    the ledger.
+    the ledger. Scaleway lines are left out: another account pays them.
     """
     openrouter = ledger.total(service=Service.OPENROUTER)
     if key_usage_usd is not None:
         openrouter = max(openrouter, key_usage_usd)
-    return openrouter + ledger.total() - ledger.total(service=Service.OPENROUTER)
+    others = ledger.total() - ledger.total(service=Service.OPENROUTER)
+    return openrouter + others - ledger.total(service=Service.SCALEWAY)
 
 
 def check_probe(budget: Budget, ledger: SpendLedger, key_usage_usd: float | None) -> float:

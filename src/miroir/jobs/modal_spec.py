@@ -12,6 +12,30 @@ from enum import StrEnum
 import numpy as np
 from numpy.typing import NDArray
 
+#: The model libraries, pinned: the Modal image and the Scaleway machine's Docker image
+#: (`miroir.jobs.scw_run`) install the same ones.
+MODEL_LIBRARIES = (
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "transformers==5.19.0",
+    "sentence-transformers[image]==6.1.0",
+    "open-clip-torch==3.3.0",
+    "timm==1.0.30",
+    "qwen-vl-utils==0.0.14",
+    "accelerate==1.15.0",
+    "httpx==0.28.1",
+    "pillow==12.3.0",
+    "numpy==2.5.4",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+)
+#: Keypoint matching (step E1) on top of those, and LightGlue from its repository, pinned,
+#: installed without its own dependencies (it asks for the GUI build of OpenCV).
+MATCH_LIBRARIES = ("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
+LIGHTGLUE = (
+    "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8"
+)
+
 # Modal prices, checked 2026-10-12 on modal.com/pricing, in dollars per second.
 GPU_USD_PER_S: dict[str, float] = {
     "T4": 0.000164,
@@ -93,9 +117,13 @@ class Machine:
     gpu: str | None
     cpu: float
     memory_gib: int
+    flat_usd_per_s: float | None = None
+    """A whole machine at one price (a Scaleway GPU instance) instead of Modal's three parts."""
 
     @property
     def usd_per_s(self) -> float:
+        if self.flat_usd_per_s is not None:
+            return self.flat_usd_per_s
         return (
             (0.0 if self.gpu is None else GPU_USD_PER_S[self.gpu])
             + self.cpu * CPU_CORE_USD_PER_S
