@@ -65,3 +65,32 @@ def test_chat_raises_on_http_errors() -> None:
     client = _client(httpx.MockTransport(lambda _: httpx.Response(400, json={"message": "no"})))
     with pytest.raises(MistralError, match="HTTP 400"):
         client.chat("mistral-large-4", {"messages": []})
+
+
+def test_chat_reads_plain_text_object_arguments_and_no_usage() -> None:
+    answer = {
+        "choices": [
+            {
+                "message": {
+                    "content": "Voici.",
+                    "tool_calls": [
+                        {"id": "a", "function": {"name": "more_like", "arguments": {"id": "É1"}}}
+                    ],
+                }
+            }
+        ]
+    }
+    client = _client(httpx.MockTransport(lambda _: httpx.Response(200, json=answer)))
+    got = client.chat("mistral-large-4", {"messages": []})
+    assert (got.text, got.thinking, got.cost_usd, got.finish_reason) == ("Voici.", "", 0.0, "")
+    assert json.loads(got.tool_calls[0].arguments) == {"id": "É1"}
+
+
+@pytest.mark.parametrize(
+    ("body", "error"),
+    [({"choices": []}, "no choice"), ({"choices": "nope"}, "unexpected answer")],
+)
+def test_chat_raises_on_an_answer_it_cannot_use(body: dict[str, object], error: str) -> None:
+    client = _client(httpx.MockTransport(lambda _: httpx.Response(200, json=body)))
+    with pytest.raises(MistralError, match=error):
+        client.chat("mistral-large-4", {"messages": []})

@@ -8,7 +8,6 @@ thinking goes to `ChatAnswer.thinking` for the logs.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Mapping
 
@@ -17,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 from miroir.config import MISTRAL_API_BASE
 from miroir.http import Retry, send
-from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
+from miroir.jobs.openrouter import JSON, ChatAnswer, WireToolCall, tool_call_of
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +30,12 @@ PRICES: Mapping[str, tuple[float, float, float]] = {
 
 
 class MistralError(RuntimeError):
+    """Mistral refused a request, or answered with something we cannot read."""
+
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+        """The HTTP status, when Mistral answered with an error status."""
 
 
 class _Wire(BaseModel):
@@ -50,16 +52,6 @@ class _Usage(_Wire):
     prompt_tokens_details: _PromptDetails | None = None
 
 
-class _Function(_Wire):
-    name: str = ""
-    arguments: str | dict[str, object] | None = None
-
-
-class _ToolCall(_Wire):
-    id: str = ""
-    function: _Function
-
-
 class _Chunk(_Wire):
     type: str = "text"
     text: str | None = None
@@ -68,7 +60,7 @@ class _Chunk(_Wire):
 
 class _Message(_Wire):
     content: str | list[_Chunk] | None = None
-    tool_calls: list[_ToolCall] | None = None
+    tool_calls: list[WireToolCall] | None = None
 
 
 class _Choice(_Wire):
@@ -83,6 +75,8 @@ class _Response(_Wire):
 
 
 class MistralClient:
+    """Chat completions on Mistral's API, priced from `PRICES`. Retries as `miroir.http` does."""
+
     def __init__(
         self,
         api_key: SecretStr,
@@ -142,7 +136,7 @@ def _answer(response: _Response, prices: tuple[float, float, float]) -> ChatAnsw
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         finish_reason=choice.finish_reason or "",
-        tool_calls=tuple(_tool_call(c) for c in choice.message.tool_calls or ()),
+        tool_calls=tuple(tool_call_of(c) for c in choice.message.tool_calls or ()),
         cached_tokens=cached,
         thinking=thinking,
     )
@@ -159,14 +153,3 @@ def _split(content: str | list[_Chunk] | None) -> tuple[str, str]:
         t.text or "" for c in content if c.type == "thinking" for t in c.thinking or ()
     )
     return text, thinking
-
-
-def _tool_call(call: _ToolCall) -> ToolCall:
-    arguments = call.function.arguments
-    if arguments is None:
-        text = "{}"
-    elif isinstance(arguments, str):
-        text = arguments
-    else:
-        text = json.dumps(arguments, ensure_ascii=False)
-    return ToolCall(id=call.id, name=call.function.name, arguments=text)

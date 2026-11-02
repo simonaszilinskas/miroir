@@ -207,14 +207,7 @@ def web() -> FastAPI:
     from miroir.logs import setup  # noqa: PLC0415
     from miroir.web.app import create_app  # noqa: PLC0415
     from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
-    from miroir.web.chat import (  # noqa: PLC0415
-        ChatModel,
-        ChatService,
-        Limits,
-        MistralModel,
-        OpenRouterModel,
-        ThumbSource,
-    )
+    from miroir.web.chat import ChatService, Limits, ThumbSource, chat_model  # noqa: PLC0415
     from miroir.web.chatlog import FileChatLog  # noqa: PLC0415
     from miroir.web.publishable import PUBLISHABLE_FILE, read_publishable  # noqa: PLC0415
 
@@ -226,11 +219,7 @@ def web() -> FastAPI:
     folder = Path(MODAL_WEB_INDEX_MOUNT) / WEB_INDEX
     catalog = read_catalog(folder / CATALOG_FILE)
     backend = ModalBackend()
-    model: ChatModel | None = None
-    if settings.mistral_api_key is not None:
-        model = MistralModel(settings.mistral_api_key)
-    elif settings.openrouter_api_key is not None:
-        model = OpenRouterModel(settings.openrouter_api_key)
+    model = chat_model(settings)
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
     limits = Limits(settings.chat_conversation_usd, settings.chat_day_usd)
 
