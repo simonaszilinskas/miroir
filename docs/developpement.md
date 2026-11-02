@@ -27,7 +27,7 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `MIROIR_EXPORTS_DIR` | POP exports, one folder per base (`joconde`, `memoire`, `rose-valand`). Read only |
 | `MIROIR_DATA_DIR` | Where builds, test sets, vectors and indexes go (default `~/miroir-data`). Never inside the repository |
 | `OPENROUTER_API_KEY` | Models served by OpenRouter |
-| `MISTRAL_API_KEY` | Mistral Large 4 on Mistral's own API, for the agentic search (wins over OpenRouter when both are set) |
+| `MISTRAL_API_KEY` | Mistral Large 4 on Mistral's own API, for the agentic search when `OPENROUTER_API_KEY` is not set (OpenRouter wins when both are) |
 | `HF_TOKEN` | Gated model weights, read inside Modal or on a Scaleway machine |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal, unless `~/.modal.toml` exists (`modal token new`) |
 | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_REGION`, `SCW_DEFAULT_ZONE` | Scaleway: GPU machines and Object Storage (the scw CLI's own names) |

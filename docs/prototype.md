@@ -134,7 +134,7 @@ Each conversation is logged as JSON lines with no images (technical spec §8.1).
 uv run miroir web chat-logs   # copies chat-logs/ from the miroir-web-index volume to ~/miroir-data/chat-logs/hosted/
 ```
 
-The deploy fails until the `miroir-openrouter` secret exists. Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment; to change them on Modal, add them to the `miroir-openrouter` secret. The secret keeps its old name; when it holds both keys, Mistral's API wins. After adding `MISTRAL_API_KEY` to `.env`, run `chat-secret` and `deploy` again. Locally, `miroir web dev` runs the agentic search on Mistral's API when `MISTRAL_API_KEY` is in `.env`, else through OpenRouter when `OPENROUTER_API_KEY` is (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
+The deploy fails until the `miroir-openrouter` secret exists. Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment; to change them on Modal, add them to the `miroir-openrouter` secret. The secret keeps its old name; when it holds both keys, OpenRouter wins. Locally, `miroir web dev` runs the agentic search through OpenRouter when `OPENROUTER_API_KEY` is in `.env`, else on Mistral's API when `MISTRAL_API_KEY` is (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
 
 ## Cost
 

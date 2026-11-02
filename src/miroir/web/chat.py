@@ -166,12 +166,12 @@ class MistralModel:
 
 
 def chat_model(settings: Settings) -> ChatModel | None:
-    """The conversation page's model: Mistral's own API when MISTRAL_API_KEY is set, else
-    OpenRouter when OPENROUTER_API_KEY is, else None (no key, no conversation page)."""
-    if settings.mistral_api_key is not None:
-        return MistralModel(settings.mistral_api_key)
+    """The conversation page's model: OpenRouter when OPENROUTER_API_KEY is set, else Mistral's
+    own API when MISTRAL_API_KEY is, else None (no key, no conversation page)."""
     if settings.openrouter_api_key is not None:
         return OpenRouterModel(settings.openrouter_api_key)
+    if settings.mistral_api_key is not None:
+        return MistralModel(settings.mistral_api_key)
     return None
 
 

@@ -100,7 +100,7 @@ def write_env_password(env_file: Path, password: str) -> None:
 
 def set_chat_secret(settings: Settings) -> None:
     """Copy MISTRAL_API_KEY and OPENROUTER_API_KEY, whichever `.env` holds, into the Modal
-    secret the conversation page reads (Mistral wins when both are there). The keys are never
+    secret the conversation page reads (OpenRouter wins when both are there). The keys are never
     printed or logged."""
     import modal  # noqa: PLC0415
 
