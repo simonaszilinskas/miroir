@@ -207,7 +207,7 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 ## Lancer, tester, déployer
 
-Il faut Python 3.12 et [uv](https://docs.astral.sh/uv/). Aucun modèle ne tourne sur la machine de développement : ils tournent chez Modal ou OpenRouter.
+Il faut Python 3.12 et [uv](https://docs.astral.sh/uv/). Aucun modèle ne tourne sur la machine de développement : ils tournent chez Modal ou OpenRouter. Depuis novembre 2026, les tâches de calcul tournent sur des machines GPU du projet Scaleway du ministère, effacées à la fin de chaque tâche (voir [docs/developpement.md](docs/developpement.md#scaleway)).
 
 ```sh
 uv sync                    # installe le projet et les outils de développement
