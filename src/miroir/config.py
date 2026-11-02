@@ -108,6 +108,19 @@ class Settings(BaseSettings):
         default=None, validation_alias="MODAL_TOKEN_SECRET"
     )
     modal_toml: Path = _MODAL_TOML
+    # Scaleway (the ministry's "Miroir" project): GPU machines and Object Storage. The scw
+    # CLI's own names, without the MIROIR_ prefix. The secret key also signs Object Storage.
+    scw_access_key: SecretStr | None = Field(default=None, validation_alias="SCW_ACCESS_KEY")
+    scw_secret_key: SecretStr | None = Field(default=None, validation_alias="SCW_SECRET_KEY")
+    scw_project_id: str | None = Field(default=None, validation_alias="SCW_DEFAULT_PROJECT_ID")
+    scw_region: str = Field(default="fr-par", validation_alias="SCW_DEFAULT_REGION")
+    scw_zone: str = Field(default="fr-par-2", validation_alias="SCW_DEFAULT_ZONE")
+    #: Object Storage bucket names start with this (`<prefix>-weights`, ...). Bucket names are
+    #: shared by every Scaleway customer, so another prefix may be needed.
+    scw_bucket_prefix: str = "miroir"
+    #: Cap, in euros, on all Scaleway GPU machines together (their own ledger,
+    #: `scaleway_dir / "spend.jsonl"`), apart from the OpenRouter and Modal budget below.
+    scw_budget_eur: float = 5.0
 
     # Money cap for all paid model work together (OpenRouter and Modal), in dollars
     # (experiments.md §1 rule 5). The names predate Modal.
@@ -138,6 +151,31 @@ class Settings(BaseSettings):
         """True when Modal can authenticate: both token variables, or ~/.modal.toml."""
         has_env = self.modal_token_id is not None and self.modal_token_secret is not None
         return has_env or self.modal_toml.expanduser().exists()
+
+    @property
+    def scaleway_configured(self) -> bool:
+        """True when the Scaleway keys and project are set."""
+        keys = self.scw_access_key is not None and self.scw_secret_key is not None
+        return keys and self.scw_project_id is not None
+
+    def scaleway_worker_env(self) -> dict[str, str]:
+        """What the worker on a Scaleway machine reads (`miroir.jobs.scw_run`), as environment
+        variables: the bucket prefix and the keys, for Object Storage and for deleting its own
+        machine at its deadline. Holds secrets: never log it."""
+        values = {
+            "SCW_DEFAULT_PROJECT_ID": self.scw_project_id or "",
+            "SCW_DEFAULT_REGION": self.scw_region,
+            "MIROIR_SCW_BUCKET_PREFIX": self.scw_bucket_prefix,
+        }
+        secrets = {
+            "SCW_ACCESS_KEY": self.scw_access_key,
+            "SCW_SECRET_KEY": self.scw_secret_key,
+            "HF_TOKEN": self.hf_token,
+        }
+        for name, secret in secrets.items():
+            if secret is not None:
+                values[name] = secret.get_secret_value()
+        return values
 
     # --- inputs (read only) -------------------------------------------------
 
@@ -271,6 +309,12 @@ class Settings(BaseSettings):
         """Vectors a paid run has already received, kept until the run is written."""
         _check_name(run)
         return self.data_root / "checkpoints" / run
+
+    @property
+    def scaleway_dir(self) -> Path:
+        """Per-machine SSH keys and known hosts (`miroir scw`), the machines' ledger and the
+        smoke-test results."""
+        return self.data_root / "scaleway"
 
     def probe_path(self, option: str) -> Path:
         """Cost measured on 100 images for one option, read before a full run."""

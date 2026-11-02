@@ -10,10 +10,11 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 - `src/miroir/config.py`: every setting and path. Ask it for paths; never build one by hand.
 - `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
-- `src/miroir/remote/`: model code that runs only inside Modal containers. The one place torch may
-  be imported.
+- `src/miroir/remote/`: model code that runs only inside Modal containers or on a Scaleway GPU
+  machine (`worker.py`). The one place torch may be imported.
 - `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
-- `src/miroir/jobs/`: paid model work: OpenRouter calls, the Modal app, spend and privacy checks.
+- `src/miroir/jobs/`: paid model work: OpenRouter calls, the Modal app, Scaleway machines and
+  buckets (`scaleway.py`, `scw_run.py`, `objects.py`), spend and privacy checks.
 - `src/miroir/commons/`, `src/miroir/geo/`, `src/miroir/index/`: Wikimedia Commons photos,
   positions, and the type guess and vector upload.
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to

@@ -56,6 +56,11 @@ geo_app = typer.Typer(
     no_args_is_help=True, help="Step H2: where buildings, objects and query photos are."
 )
 app.add_typer(geo_app, name="geo")
+scw_app = typer.Typer(
+    no_args_is_help=True,
+    help="Scaleway: GPU machines and Object Storage. A machine never outlives its command.",
+)
+app.add_typer(scw_app, name="scw")
 
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
@@ -1513,6 +1518,14 @@ def web_dev(
         bool,
         typer.Option(help="The conversation page uses a scripted stand-in, even with a key."),
     ] = False,
+    scw: Annotated[
+        bool,
+        typer.Option(
+            help="Search on a Scaleway GPU started for this session, deleted when it stops "
+            "(index from `miroir scw upload-index`)."
+        ),
+    ] = False,
+    max_hours: Annotated[float, typer.Option(help="With --scw: the machine's longest life.")] = 1.0,
 ) -> None:
     """Run the website on this Mac with fake models (no model is loaded here).
 
@@ -1520,7 +1533,15 @@ def web_dev(
     is set, else through OpenRouter, within the same spending caps as the deployed site."""
     from miroir.web.ops import serve_locally  # noqa: PLC0415
 
-    serve_locally(get_settings(), name=index, port=port, real=real, fake_llm=fake_llm)
+    settings = get_settings()
+    if not scw:
+        serve_locally(settings, name=index, port=port, real=real, fake_llm=fake_llm)
+        return
+    from miroir.jobs.scw_run import ScalewayBackend, open_scaleway  # noqa: PLC0415
+
+    with open_scaleway(settings, max_hours=max_hours, purpose=f"web dev {index}") as calls:
+        search = ScalewayBackend(calls, index)
+        serve_locally(settings, name=index, port=port, fake_llm=fake_llm, search=search)
 
 
 @web_app.command("chat-secret")
@@ -1541,6 +1562,207 @@ def web_chat_logs() -> None:
     settings = get_settings()
     written = pull_chat_logs(settings)
     typer.echo(f"{len(written)} log file(s) new or grown in {settings.chat_logs_dir / 'hosted'}")
+
+
+# --- Scaleway --------------------------------------------------------------------------------
+
+MaxHours = Annotated[
+    float, typer.Option(help="Longest life of the machine; its worker deletes it then.")
+]
+
+
+@scw_app.command("buckets")
+def scw_buckets() -> None:
+    """Create the Object Storage buckets that stand in for the Modal volumes."""
+    from miroir.jobs.objects import ensure_buckets, s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    for name, outcome in ensure_buckets(settings, s3_client(settings)).items():
+        typer.echo(f"{name}: {outcome}")
+
+
+@scw_app.command("upload-index")
+def scw_upload_index(index: WebIndex = WEB_INDEX) -> None:
+    """Copy a web index bundle to the index bucket, for searches on a Scaleway machine."""
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client, upload_tree  # noqa: PLC0415
+
+    settings = get_settings()
+    folder = settings.web_index_dir(index)
+    bucket = bucket_name(settings, Bucket.INDEX)
+    sent = upload_tree(s3_client(settings), bucket, folder.parent, prefix=index)
+    typer.echo(f"{index}: {sent} file(s) sent to {bucket}")
+
+
+def _leftovers_report() -> tuple[object, list[object]]:
+    from miroir.jobs.scaleway import ZONES, InstanceApi, leftovers  # noqa: PLC0415
+
+    settings = get_settings()
+    api = InstanceApi(settings)
+    zones = tuple(dict.fromkeys((*ZONES, settings.scw_zone)))
+    found = leftovers(api, zones)
+    typer.echo(f"zones: {', '.join(zones)}")
+    for item in found:
+        typer.echo(f"  {item.zone}  {item.kind:<15} {item.id}  {item.label}")
+    if not found:
+        typer.echo("  no machine, loose volume or loose IP")
+    return api, list(found)
+
+
+@scw_app.command("ps")
+def scw_ps() -> None:
+    """List miroir machines, and volumes and IPs attached to no machine, in every zone used."""
+    from miroir.jobs.scaleway import MachineLedger  # noqa: PLC0415
+
+    _leftovers_report()
+    spent = MachineLedger(get_settings().scaleway_dir / "spend.jsonl").total_eur()
+    typer.echo(f"spent on machines so far: €{spent:.2f}")
+
+
+@scw_app.command("cleanup")
+def scw_cleanup(
+    *, yes: Annotated[bool, typer.Option("--yes", help="Delete without asking.")] = False
+) -> None:
+    """Delete every miroir machine (with its volumes and IP) and every loose volume and IP."""
+    from miroir.jobs.scaleway import InstanceApi, Leftover, delete_leftovers  # noqa: PLC0415
+
+    api, found = _leftovers_report()
+    if not found:
+        return
+    if not yes and not typer.confirm(f"delete these {len(found)}?"):
+        raise typer.Abort
+    assert isinstance(api, InstanceApi)
+    delete_leftovers(api, [f for f in found if isinstance(f, Leftover)])
+    typer.echo("after cleanup:")
+    _leftovers_report()
+
+
+@scw_app.command("up")
+def scw_up(max_hours: MaxHours = 1.0) -> None:
+    """Start a GPU machine with the worker on it and keep it until Ctrl-C, then delete it."""
+    import time  # noqa: PLC0415
+
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
+
+    with open_scaleway(get_settings(), max_hours=max_hours, purpose="up") as calls:
+        gpu = calls.gpu
+        typer.echo(
+            f"{gpu.name}: {gpu.offer.commercial_type} in {gpu.offer.zone} at {gpu.ip}, "
+            f"€{gpu.offer.eur_per_hour:.2f}/h. Ctrl-C deletes it."
+        )
+        while time.time() < gpu.deadline:
+            time.sleep(10)
+
+
+@scw_app.command("smoke")
+def scw_smoke(
+    images: Annotated[int, typer.Option(help="Images to embed with each model.")] = 32,
+    max_hours: MaxHours = 1.0,
+) -> None:
+    """Embed a few images with A7 and A3 on a GPU machine and match them to the stored vectors."""
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
+    from miroir.jobs.scw_smoke import (  # noqa: PLC0415
+        MIN_COSINE,
+        run_smoke,
+        save_smoke,
+        smoke_images,
+    )
+
+    settings = get_settings()
+    picked = smoke_images(settings, images)
+    with open_scaleway(settings, max_hours=max_hours, purpose="smoke") as calls:
+        results = run_smoke(calls, settings, picked)
+        where = f"{calls.gpu.offer.commercial_type} {calls.gpu.offer.zone}"
+    path = save_smoke(settings, where, results)
+    for r in results:
+        typer.echo(
+            f"{r.option}: {r.embedded}/{r.asked} images, cosine min {r.min_cosine:.4f} "
+            f"median {r.median_cosine:.4f}, {r.images_per_s:.1f} images/s, "
+            f"model load {r.load_s:.0f} s: {'ok' if r.ok else f'FAILED (needs > {MIN_COSINE})'}"
+        )
+    typer.echo(f"written to {path}")
+    if not all(r.ok for r in results):
+        raise typer.Exit(1)
+
+
+@scw_app.command("serve", hidden=True)
+def scw_serve(
+    port: Annotated[int, typer.Option()],
+    server_id: Annotated[str, typer.Option()],
+    zone: Annotated[str, typer.Option()],
+    deadline: Annotated[
+        float, typer.Option(help="Unix time past which the machine deletes itself.")
+    ],
+) -> None:
+    """The worker, inside the job image on a GPU machine. Never run on the Mac."""
+    from miroir.remote.worker import serve  # noqa: PLC0415 (machine only)
+
+    serve(get_settings(), port=port, server_id=server_id, zone=zone, deadline=deadline)
+
+
+@embed_app.command("scw")
+def embed_scw(
+    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+    gallery: Annotated[str, typer.Option(help="Gallery list.")] = "screening-20k-publishable",
+    queries: Annotated[
+        list[str] | None,
+        typer.Option(help="Embed these test sets' tune query images instead; repeat it."),
+    ] = None,
+    *,
+    probe: Annotated[
+        bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
+    ] = False,
+    max_usd: Annotated[
+        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
+    ] = None,
+    all_images: Annotated[
+        bool,
+        typer.Option(
+            "--all-images",
+            help="Also images of records that are not publishable (full-sample index only).",
+        ),
+    ] = False,
+    max_hours: MaxHours = 2.0,
+) -> None:
+    """`embed modal` on a Scaleway GPU machine: start it, run, delete it. Same vector runs."""
+    from miroir.commons.images import open_commons_images  # noqa: PLC0415
+    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
+    from miroir.jobs.spend import Service  # noqa: PLC0415
+
+    find_option(option)  # fail before starting a machine
+    if queries and probe:
+        raise typer.BadParameter("--probe works with --gallery only")
+    settings = get_settings()
+    purpose = f"embed {option} {'+'.join(queries) if queries else gallery}"
+    with (
+        open_commons_images(settings) as commons,
+        open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls,
+    ):
+        runner = ModalRunner(
+            settings,
+            calls,
+            key_usage_usd=_openrouter_key_usage(),
+            commons=commons,
+            all_images=all_images,
+            machine=calls.machine,
+            service=Service.SCALEWAY,
+        )
+        if queries:
+            done = runner.embed_queries(option, queries, max_usd=max_usd)
+            typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+            return
+        if probe:
+            result, size = runner.probe(option, gallery)
+            typer.echo(
+                f"{option} probe: {result.images} images ({result.per_image_s * 1000:.0f} ms "
+                f"each). Projected GPU time for {gallery} ({size:,} images): "
+                f"${result.projected_usd(size):.2f}"
+            )
+            return
+        written = runner.embed_gallery(option, gallery, max_usd=max_usd)
+    for done in written:
+        typer.echo(f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors")
 
 
 def main() -> None:
