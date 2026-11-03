@@ -8,11 +8,16 @@ tries each of `OFFERS` in turn. Every machine carries the `miroir` tag: `leftove
 a crashed Mac left behind in `ZONES`, and `delete_leftovers` removes it. The worker on the
 machine also deletes it at its deadline (`miroir.remote.worker`).
 
-Money: the price list below, in euros per hour without VAT (Scaleway's public prices of
-2026-11; the API gives none). Scaleway bills a machine by the minute while it exists; each one
-is written, with its whole life, to its own ledger (`Settings.scaleway_dir`), apart from the
-OpenRouter and Modal budget, and a machine is refused when its longest life (`max_hours`)
-would take the ledger past `scw_budget_eur`.
+The demo machine (`miroir.jobs.demo`) is the one exception: it lives on, powered off between
+demos. It carries the `miroir-demo` tag too; `leftovers` lists it and `delete_leftovers` never
+touches it.
+
+Money: the price list below, in euros per hour without VAT, from Scaleway's public catalogue
+(`api.scaleway.com/product-catalog/v2alpha1/public-catalog/products`, read 2026-11-03),
+rounded up. Scaleway bills a machine by the minute while it exists; each one is written, with
+its whole life, to its own ledger (`Settings.scaleway_dir`), apart from the OpenRouter budget,
+and a machine is refused when its longest life (`max_hours`) would take the ledger past
+`scw_budget_eur`.
 """
 
 from __future__ import annotations
@@ -45,6 +50,8 @@ CPU_IMAGE_LABEL = "ubuntu_noble"
 #: Root volume: the Docker image (about 15 GB) and model weights.
 ROOT_GB = 100
 TAG = "miroir"
+#: The demo machine's own tag, beside `TAG`: `delete_leftovers` leaves it alone.
+DEMO_TAG = "miroir-demo"
 #: How long a machine may take to reach "running" once powered on.
 BOOT_TIMEOUT_S = 15 * 60
 #: How long deleting a machine may take before it is reported as left behind.
@@ -65,11 +72,12 @@ class Offer:
         return self.eur_per_hour / 3600
 
 
-#: Tried in order until one starts. L4 (24 GB) holds every model the jobs use.
+#: Tried in order until one starts. L4 (24 GB) holds every model the jobs use. The catalogue
+#: bills both by the minute: €0.013125 (L4) and €0.024498 (L40S).
 OFFERS = (
-    Offer("fr-par-2", "L4-1-24G", 0.75),
-    Offer("pl-waw-2", "L4-1-24G", 0.75),
-    Offer("fr-par-2", "L40S-1-48G", 1.40),
+    Offer("fr-par-2", "L4-1-24G", 0.79),
+    Offer("pl-waw-2", "L4-1-24G", 0.79),
+    Offer("fr-par-2", "L40S-1-48G", 1.47),
 )
 #: Machines without a GPU, for downloading images and building index bundles: many cores
 #: (`POP2-HC`, then the older `GP1-M`), or much memory (`MEMORY_OFFERS`). Hand-entered prices,
@@ -168,19 +176,24 @@ class InstanceApi:
 
     # --- servers ----------------------------------------------------------------------------
 
-    def create_server(self, offer: Offer, name: str, tags: Sequence[str]) -> JSON:
+    def create_server(
+        self, offer: Offer, name: str, tags: Sequence[str], *, ip_id: str | None = None
+    ) -> JSON:
+        """A server with a new dynamic IPv4, or with the flexible IP `ip_id`."""
         body: JSON = {
             "name": name,
             "commercial_type": offer.commercial_type,
             "image": offer.image,
             "project": self.project,
             "tags": list(tags),
-            "dynamic_ip_required": True,
+            "dynamic_ip_required": ip_id is None,
             "routed_ip_enabled": True,
             "volumes": {
                 "0": {"boot": True, "size": offer.root_gb * 10**9, "volume_type": "sbs_volume"}
             },
         }
+        if ip_id is not None:
+            body["public_ips"] = [ip_id]
         path = f"instance/v1/zones/{offer.zone}/servers"
         return cast("JSON", self._call("POST", path, body=body)["server"])
 
@@ -209,6 +222,11 @@ class InstanceApi:
         return list(self._pages(f"instance/v1/zones/{zone}/servers", "servers", params))
 
     # --- IPs and volumes --------------------------------------------------------------------
+
+    def create_ip(self, zone: str, tags: Sequence[str]) -> JSON:
+        """Reserve a flexible IPv4: it keeps its address while its server is off."""
+        body: JSON = {"project": self.project, "type": "routed_ipv4", "tags": list(tags)}
+        return cast("JSON", self._call("POST", f"instance/v1/zones/{zone}/ips", body=body)["ip"])
 
     def ips(self, zone: str) -> list[JSON]:
         params = {"project": self.project, "per_page": 50}
@@ -432,7 +450,7 @@ def _signals_raise() -> Generator[None]:
 class Leftover:
     zone: str
     kind: str
-    """"server", "volume" or "ip"."""
+    """"server", "demo" (the demo machine, kept), "volume", "instance-volume" or "ip"."""
     id: str
     label: str
 
@@ -442,11 +460,13 @@ def leftovers(api: InstanceApi, zones: Sequence[str] = ZONES) -> list[Leftover]:
     found: list[Leftover] = []
     for zone in zones:
         for server in api.servers(zone):
-            if TAG in cast("list[str]", server.get("tags") or []):
+            tags = cast("list[str]", server.get("tags") or [])
+            if TAG in tags:
                 label = (
                     f"{server.get('name')} {server.get('commercial_type')} {server.get('state')}"
                 )
-                found.append(Leftover(zone, "server", str(server["id"]), label))
+                kind = "demo" if DEMO_TAG in tags else "server"
+                found.append(Leftover(zone, kind, str(server["id"]), label))
         for volume in api.block_volumes(zone):
             if not volume.get("references"):
                 size = cast("int", volume.get("size", 0)) // 10**9
@@ -463,7 +483,8 @@ def leftovers(api: InstanceApi, zones: Sequence[str] = ZONES) -> list[Leftover]:
 
 
 def delete_leftovers(api: InstanceApi, found: Sequence[Leftover]) -> None:
-    """Servers first (with their volumes and IPs), then what is still loose."""
+    """Servers first (with their volumes and IPs), then what is still loose. The demo
+    machine is never deleted here (`miroir demo destroy` does it)."""
     for item in found:
         if item.kind == "server":
             delete_machine(api, item.zone, item.id)
@@ -488,11 +509,19 @@ class MachineLedger:
     def record(self, name: str, offer: Offer, seconds: float, purpose: str) -> float:
         minutes = max(1, math.ceil(seconds / 60))
         cost = minutes * 60 * offer.eur_per_s
+        return self.record_cost(
+            name, offer.zone, offer.commercial_type, minutes=minutes, cost=cost, purpose=purpose
+        )
+
+    def record_cost(
+        self, name: str, zone: str, kind: str, *, minutes: int, cost: float, purpose: str
+    ) -> float:
+        """One line of any kind: a machine's life, or storage kept between demos."""
         line = {
             "at": datetime.now(UTC).isoformat(),
             "name": name,
-            "zone": offer.zone,
-            "type": offer.commercial_type,
+            "zone": zone,
+            "type": kind,
             "minutes": minutes,
             "cost_eur": round(cost, 4),
             "purpose": purpose,
@@ -500,7 +529,7 @@ class MachineLedger:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a") as out:
             out.write(json.dumps(line) + "\n")
-        logger.info("%s: %d min on %s, €%.3f", name, minutes, offer.commercial_type, cost)
+        logger.info("%s: %d min of %s, €%.3f", name, minutes, kind, cost)
         return cost
 
     def total_eur(self) -> float:

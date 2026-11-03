@@ -46,13 +46,12 @@ from miroir.jobs.objects import (
 from miroir.records.model import Image
 
 if TYPE_CHECKING:
+    from miroir.remote.search import SearchService
     from miroir.web.engine import SearchRequest
     from miroir.web.toolsearch import ToolQuery
 
 logger = logging.getLogger(__name__)
 
-#: A print's caption and a photo's outlines wait this long for their model (as on Modal).
-MODEL_WAIT_S = 60.0
 WATCH_S = 30.0
 
 
@@ -209,6 +208,8 @@ class Worker:
     # --- the website's search (as `Search` in miroir.web.modal_app) ------------------------
 
     def _service(self, index: str) -> SearchService:
+        from miroir.remote.search import SearchService  # noqa: PLC0415
+
         found = self._search.get(index)
         if found is None:
             root = Path(MODAL_WEB_INDEX_MOUNT)
@@ -228,31 +229,6 @@ class Worker:
 
     def tool_search(self, index: str, query: ToolQuery) -> object:
         return self._service(index).tool_search(query)
-
-
-class SearchService:
-    """The search models, the outline finder and the caption reader over one index bundle."""
-
-    def __init__(self, folder: Path) -> None:
-        from miroir.caption import SITE_CAPTION_MODEL  # noqa: PLC0415
-        from miroir.remote.caption import BackgroundCaptions  # noqa: PLC0415
-        from miroir.remote.search import OutlineFinder, load_search  # noqa: PLC0415
-
-        self.outlines = OutlineFinder()
-        captions = BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
-        self.engine = load_search(folder, captions)
-        captions.load_now()  # alone, after the others: see `BackgroundCaptions.load_now`
-        self.tools = None
-
-    def detect(self, jpeg: bytes) -> object:
-        return self.outlines.find(jpeg)
-
-    def tool_search(self, query: ToolQuery) -> object:
-        from miroir.web.toolsearch import ToolSearch  # noqa: PLC0415
-
-        if self.tools is None:
-            self.tools = ToolSearch(self.engine)
-        return self.tools.run(query)
 
 
 # --- the HTTP side ---------------------------------------------------------------------------

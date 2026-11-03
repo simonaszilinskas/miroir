@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from miroir import logs
-from miroir.config import ENV_PASSWORD_KEY, WEB_INDEX, get_settings
+from miroir.config import DEMO_INDEX, ENV_PASSWORD_KEY, WEB_INDEX, get_settings
 
 if TYPE_CHECKING:
     from miroir.eval.build_sets import BuildReport
     from miroir.eval.h4 import Loaded
     from miroir.eval.results import SetScore
     from miroir.eval.scoring import Interval
+    from miroir.jobs.demo import Demo, DemoMachine
     from miroir.jobs.h4_agent import Outcome, Scenario
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -61,6 +62,11 @@ scw_app = typer.Typer(
     help="Scaleway: GPU machines and Object Storage. A machine never outlives its command.",
 )
 app.add_typer(scw_app, name="scw")
+demo_app = typer.Typer(
+    no_args_is_help=True,
+    help="The demo website on its own Scaleway GPU machine, powered on only for demos.",
+)
+app.add_typer(demo_app, name="demo")
 
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
@@ -2177,3 +2183,251 @@ def archive_score(
         typer.echo(f"{row.label}: {hits} ({row.queries} queries)")
     named, right = rows[0].with_place, rows[0].right_place
     typer.echo(f"captions naming a known commune: {named}, the right one: {right}")
+
+
+# --- the demo machine (`miroir.jobs.demo`) ---------------------------------------------------
+
+
+def _need_demo() -> tuple[Demo, DemoMachine]:
+    """The demo's handle and its machine; exits when `miroir demo create` has not run."""
+    from miroir.jobs.demo import Demo, find_demo  # noqa: PLC0415
+    from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+
+    settings = get_settings()
+    demo = Demo(settings, InstanceApi(settings))
+    machine = find_demo(demo.api)
+    if machine is None:
+        typer.echo("no demo machine: `uv run miroir demo create` makes it (once)", err=True)
+        raise typer.Exit(1)
+    return demo, machine
+
+
+def _need_running(machine: DemoMachine) -> str:
+    if machine.state != "running" or machine.address is None:
+        typer.echo(f"the demo machine is {machine.state}: `uv run miroir demo up`", err=True)
+        raise typer.Exit(1)
+    return machine.address
+
+
+DemoIndex = Annotated[str, typer.Option("--index", help="Bundle in the index bucket.")]
+
+
+@demo_app.command("create")
+def demo_create(index: DemoIndex = DEMO_INDEX) -> None:
+    """Make the demo machine (once): flexible IP, L4 machine, image, index, HTTPS. 30-60 min."""
+    from miroir.jobs.demo import (  # noqa: PLC0415
+        Demo,
+        create_demo,
+        demo_key,
+        demo_shell,
+        install,
+        rest_eur_per_hour,
+        wait_site,
+    )
+    from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+
+    settings = get_settings()
+    demo = Demo(settings, InstanceApi(settings))
+    public = demo_key(settings).with_suffix(".pub").read_text().strip()
+    machine = create_demo(demo, public)
+    assert machine.address is not None
+    assert machine.url is not None
+    typer.echo(f"machine {machine.server_id} running at {machine.address}; installing")
+    shell = demo_shell(settings, machine.address)
+    shell.wait()
+    install(shell, settings, machine, index)
+    waited = wait_site(machine.url)
+    typer.echo(f"site up at {machine.url} ({waited:.0f} s after install)")
+    typer.echo(
+        f"off between demos it costs €{rest_eur_per_hour() * 730:.2f} a month; "
+        "`uv run miroir demo down` powers it off now"
+    )
+
+
+@demo_app.command("install")
+def demo_install(index: DemoIndex = DEMO_INDEX) -> None:
+    """Send this checkout's code to the running machine, rebuild, restart the site."""
+    from miroir.jobs.demo import demo_shell, install, wait_site  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    address = _need_running(machine)
+    install(demo_shell(demo.settings, address), demo.settings, machine, index)
+    assert machine.url is not None
+    waited = wait_site(machine.url)
+    typer.echo(f"site up at {machine.url} ({waited:.0f} s to load)")
+
+
+@demo_app.command("up")
+def demo_up(
+    idle_minutes: Annotated[
+        int | None,
+        typer.Option(help="Power off after this long with no visitor (default from settings)."),
+    ] = None,
+) -> None:
+    """Power the demo machine on, wait until the site answers, print its address."""
+    import time  # noqa: PLC0415
+
+    from miroir.jobs.demo import DEMO_OFFER, demo_shell, idle_command, wait_site  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    start = time.monotonic()
+    machine = demo.power_on(machine)
+    address = _need_running(machine)
+    booted = time.monotonic() - start
+    demo_shell(demo.settings, address).run(idle_command(idle_minutes), timeout=60)
+    assert machine.url is not None
+    wait_site(machine.url)
+    idle = idle_minutes or demo.settings.demo_idle_minutes
+    typer.echo(
+        f"{machine.url}\nup in {time.monotonic() - start:.0f} s ({booted:.0f} s to boot); "
+        f"powers itself off after {idle} min with no visitor, "
+        f"€{DEMO_OFFER.eur_per_hour:.2f} an hour while on"
+    )
+
+
+@demo_app.command("down")
+def demo_down() -> None:
+    """Power the demo machine off. Its disk and address stay; only they are billed."""
+    from miroir.jobs.demo import rest_eur_per_hour  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    machine = demo.power_off(machine)
+    typer.echo(
+        f"off; at rest €{rest_eur_per_hour():.3f} an hour (€{rest_eur_per_hour() * 730:.2f} "
+        f"a month). Spent on Scaleway so far: €{demo.ledger.total_eur():.2f}"
+    )
+
+
+@demo_app.command("status")
+def demo_status() -> None:
+    """State, address, time on, this session's cost, and the ledger's total."""
+    import time  # noqa: PLC0415
+
+    from miroir.jobs.demo import LAST_VISIT, ROOT, demo_shell, rest_eur_per_hour  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    state = demo.settle(machine)
+    typer.echo(f"{machine.state}  {machine.url}  ({machine.server_id}, {machine.zone})")
+    if state.session_start is not None:
+        on = (time.time() - state.session_start) / 60
+        typer.echo(f"on for {on:.0f} min, €{demo.session_cost(state):.2f} so far")
+    if machine.state == "running" and machine.address is not None:
+        seen = demo_shell(demo.settings, machine.address).run(
+            f"stat -c %Y {ROOT}/state/{LAST_VISIT} 2>/dev/null || true", timeout=30
+        )
+        if seen.strip():
+            typer.echo(f"last visitor {(time.time() - float(seen)) / 60:.0f} min ago")
+    typer.echo(
+        f"at rest €{rest_eur_per_hour() * 730:.2f} a month; "
+        f"spent on Scaleway: €{demo.ledger.total_eur():.2f} of €{demo.settings.scw_budget_eur:.2f}"
+    )
+
+
+@demo_app.command("logs")
+def demo_logs(
+    container: Annotated[str, typer.Option(help="miroir-site, miroir-watch or caddy.")] = (
+        "miroir-site"
+    ),
+    lines: Annotated[int, typer.Option(help="Last lines to show.")] = 60,
+) -> None:
+    """The last lines a container on the running machine wrote (no secret is ever logged)."""
+    from miroir.jobs.demo import CONTAINERS, demo_shell  # noqa: PLC0415
+
+    if container not in CONTAINERS:
+        raise typer.BadParameter(f"one of {', '.join(CONTAINERS)}")
+    demo, machine = _need_demo()
+    shell = demo_shell(demo.settings, _need_running(machine))
+    typer.echo(shell.run(f"docker logs --tail {int(lines)} {container} 2>&1", timeout=60))
+
+
+@demo_app.command("chat-logs")
+def demo_chat_logs() -> None:
+    """Copy the conversation page's logs (JSON lines, no images) from the running machine."""
+    import shlex  # noqa: PLC0415
+
+    from miroir.jobs.demo import CHAT_LOGS, ROOT, demo_shell  # noqa: PLC0415
+    from miroir.web.chatlog import pull  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    shell = demo_shell(demo.settings, _need_running(machine))
+    folder = f"{ROOT}/state/{CHAT_LOGS}"
+
+    def names() -> list[str]:
+        found = shell.run(f"cd {folder} 2>/dev/null && find . -name '*.jsonl' || true")
+        return [line.removeprefix("./") for line in found.splitlines() if line.strip()]
+
+    def read(name: str) -> bytes:
+        return shell.run(f"cat {shlex.quote(f'{folder}/{name}')}").encode()
+
+    target = demo.settings.chat_logs_dir / "hosted"
+    written = pull(names, read, target)
+    typer.echo(f"{len(written)} log file(s) new or grown in {target}")
+
+
+@demo_app.command("destroy")
+def demo_destroy(
+    *, yes: Annotated[bool, typer.Option("--yes", help="Delete without asking.")] = False
+) -> None:
+    """Delete the demo machine, its disk and its address (the URL changes after that)."""
+    from miroir.jobs.scaleway import delete_machine  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    if not yes and not typer.confirm(f"delete the demo machine, its disk and {machine.address}?"):
+        raise typer.Abort
+    if machine.state == "running":
+        machine = demo.power_off(machine)
+    demo.settle(machine)
+    delete_machine(demo.api, machine.zone, machine.server_id)
+    demo.state_path.unlink(missing_ok=True)
+    typer.echo("deleted")
+
+
+@demo_app.command("serve", hidden=True)
+def demo_serve(
+    index: Annotated[Path, typer.Option()],
+    state: Annotated[Path, typer.Option()],
+    port: Annotated[int, typer.Option()],
+) -> None:
+    """The site, inside the image on the demo machine. Never run on the Mac."""
+    from miroir.remote.site import serve_site  # noqa: PLC0415 (machine only)
+
+    serve_site(get_settings(), index=index, state=state, port=port)
+
+
+@demo_app.command("watch", hidden=True)
+def demo_watch(
+    server_id: Annotated[str, typer.Option()],
+    zone: Annotated[str, typer.Option()],
+    idle_minutes: Annotated[int, typer.Option()],
+    max_hours: Annotated[float, typer.Option()],
+    state: Annotated[Path, typer.Option()],
+) -> None:
+    """Power the demo machine off when nobody uses it. Runs on the machine."""
+    import time  # noqa: PLC0415
+
+    from miroir.jobs.demo import watch_idle  # noqa: PLC0415
+
+    watch_idle(
+        get_settings(),
+        server_id=server_id,
+        zone=zone,
+        state=state,
+        idle_minutes=idle_minutes,
+        max_hours=max_hours,
+    )
+    while True:  # powering off: Docker would only start this again
+        time.sleep(3600)
+
+
+@demo_app.command("fetch", hidden=True)
+def demo_fetch(index: DemoIndex = DEMO_INDEX) -> None:
+    """Copy the bundle and the weights from their buckets onto the machine's disk."""
+    from miroir.jobs.demo import MOUNTS  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, download_tree, s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    root = Path(MOUNTS["web-index"])
+    got = download_tree(s3, bucket_name(settings, Bucket.INDEX), root, prefix=f"{index}/")
+    weights = download_tree(s3, bucket_name(settings, Bucket.WEIGHTS), Path(MOUNTS["weights"]))
+    typer.echo(f"{index}: {got} file(s) copied; weights: {weights} file(s) copied")

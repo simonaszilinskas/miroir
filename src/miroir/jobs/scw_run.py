@@ -75,9 +75,16 @@ WORKER_PORT = 8700
 #: Folders on the machine: the build context, and the bucket mirrors mounted into the worker.
 REMOTE_ROOT = "/opt/miroir"
 IMAGE_TAG = "miroir-jobs"
-#: Libraries the job image adds to the model libraries: the package's own base dependencies
-#: and boto3, pinned as in uv.lock.
-WORKER_LIBRARIES = ("pyarrow==26.0.0", "typer==0.27.3", "boto3==1.43.123")
+#: Libraries the job image adds to the model libraries, pinned as in uv.lock: the package's
+#: own base dependencies, boto3, and the website's (the demo machine serves it from this image).
+WORKER_LIBRARIES = (
+    "pyarrow==26.0.0",
+    "typer==0.27.3",
+    "boto3==1.43.123",
+    "fastapi==0.143.0",
+    "starlette==1.7.0",
+    "uvicorn==0.54.0",
+)
 SSH_TIMEOUT_S = 10 * 60
 BUILD_TIMEOUT_S = 40 * 60
 #: Startup of the worker: it first copies the weights bucket down.

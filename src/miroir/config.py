@@ -63,9 +63,12 @@ MODAL_WEB_INDEX_MOUNT = "/web-index"
 #: Folder, on that same volume, of the conversation page's logs (`miroir web chat-logs`).
 MODAL_CHAT_LOGS = "chat-logs"
 
-#: The index the prototype serves (`miroir web`): a bundle name from `miroir.web.bundle.INDEXES`.
-#: Switching index is this one line, then `miroir web build-index`, `upload` and `deploy`.
+#: The bundle the site's eval steps and `miroir web dev` read on the Mac (a name from
+#: `miroir.web.bundle.INDEXES`): the July exports, small enough to keep here.
 WEB_INDEX = "full-f2"
+#: The bundle the demo machine serves (`miroir demo`): all of POP, 27.4 GB, kept only in the
+#: index bucket and on the machine's disk. Switching is this line, then `miroir demo install`.
+DEMO_INDEX = "pop-all"
 
 #: The variable that moves the data folder (`Settings.data_dir`), e.g. on a Scaleway machine.
 DATA_DIR_VARIABLE = "MIROIR_DATA_DIR"
@@ -124,6 +127,10 @@ class Settings(BaseSettings):
     #: Cap, in euros, on all Scaleway GPU machines together (their own ledger,
     #: `scaleway_dir / "spend.jsonl"`), apart from the OpenRouter and Modal budget below.
     scw_budget_eur: float = 5.0
+    #: The demo machine (`miroir demo`) powers itself off after this long with no visitor,
+    #: and after `demo_max_hours` on, visitors or not.
+    demo_idle_minutes: int = 60
+    demo_max_hours: float = 8.0
 
     # Money cap for all paid model work together (OpenRouter and Modal), in dollars
     # (experiments.md §1 rule 5). The names predate Modal.
@@ -174,6 +181,28 @@ class Settings(BaseSettings):
             "SCW_ACCESS_KEY": self.scw_access_key,
             "SCW_SECRET_KEY": self.scw_secret_key,
             "HF_TOKEN": self.hf_token,
+        }
+        for name, secret in secrets.items():
+            if secret is not None:
+                values[name] = secret.get_secret_value()
+        return values
+
+    def demo_site_env(self) -> dict[str, str]:
+        """What the website on the demo machine reads (`miroir.jobs.demo`), as environment
+        variables: the shared password, the conversation page's keys (OpenRouter first,
+        `miroir.web.chat.chat_model`) and its spending caps. The session key is made on the
+        machine. Holds secrets: never log it."""
+        if self.app_password is None:
+            msg = f"no {ENV_PASSWORD_KEY} in .env: run `uv run miroir web secret` first"
+            raise RuntimeError(msg)
+        values = {
+            "MIROIR_CHAT_CONVERSATION_USD": str(self.chat_conversation_usd),
+            "MIROIR_CHAT_DAY_USD": str(self.chat_day_usd),
+        }
+        secrets = {
+            "APP_PASSWORD": self.app_password,
+            "OPENROUTER_API_KEY": self.openrouter_api_key,
+            "MISTRAL_API_KEY": self.mistral_api_key,
         }
         for name, secret in secrets.items():
             if secret is not None:
@@ -312,6 +341,12 @@ class Settings(BaseSettings):
         """Vectors a paid run has already received, kept until the run is written."""
         _check_name(run)
         return self.data_root / "checkpoints" / run
+
+    @property
+    def demo_dir(self) -> Path:
+        """The demo machine's SSH key and known hosts, and the times its ledger lines cover
+        (`miroir demo`)."""
+        return self.scaleway_dir / "demo"
 
     @property
     def scaleway_dir(self) -> Path:

@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""The website's search models and gallery vectors on the GPU. Runs only inside Modal.
+"""The website's search models and gallery vectors on the GPU. Runs only on a Scaleway machine.
 
 The query side of the R1 runs: the same encoder classes and options as the gallery
 (`miroir.remote.models`, `OPTIONS`), so query vectors land in the same space as the stored
@@ -33,6 +33,7 @@ from miroir.remote.detect import detect_size, load_detector
 from miroir.remote.models import DEVICE, MegaLocEncoder, SentenceEncoder
 from miroir.web.archive import CaptionReader
 from miroir.web.engine import A3_FILE, A7_FILE, Engine, load_engine
+from miroir.web.toolsearch import ToolHits, ToolQuery, ToolSearch
 
 logger = logging.getLogger(__name__)
 
@@ -121,3 +122,35 @@ class OutlineFinder:
         boxes = self.detector.detect(image)
         shown = pick_outlines(boxes, SITE_RULE, width=image.width, height=image.height)
         return Outlines(shown, detect_ms=round(1000 * (time.monotonic() - start), 1))
+
+
+#: A print's caption and a photo's outlines wait this long for their model while it loads.
+MODEL_WAIT_S = 60.0
+
+
+class SearchService:
+    """Everything the site's searches need over one index bundle: the search models and the
+    gallery vectors (`load_search`), the outline finder and the caption reader.
+
+    The reader loads last, alone: see `BackgroundCaptions.load_now`. Used by the demo
+    machine's site (`miroir.remote.site`) and by the job worker (`miroir web dev --scw`)."""
+
+    def __init__(self, folder: Path) -> None:
+        from miroir.caption import SITE_CAPTION_MODEL  # noqa: PLC0415
+        from miroir.remote.caption import BackgroundCaptions  # noqa: PLC0415
+
+        start = time.monotonic()
+        self.outlines = OutlineFinder()
+        captions = BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
+        self.engine = load_search(folder, captions)
+        captions.load_now()
+        self._tools: ToolSearch | None = None
+        logger.info("search service ready in %.0f s", time.monotonic() - start)
+
+    def detect(self, jpeg: bytes) -> Outlines:
+        return self.outlines.find(jpeg)
+
+    def tool_search(self, query: ToolQuery) -> ToolHits:
+        if self._tools is None:
+            self._tools = ToolSearch(self.engine)
+        return self._tools.run(query)

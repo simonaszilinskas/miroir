@@ -1,8 +1,11 @@
 """The website's FastAPI app: the DSFR page, login, search, record pages, example photos.
 
-`create_app` takes a search backend: the Modal GPU class when deployed
-(`miroir.web.modal_app`), a local engine with fake models for `miroir web dev` and tests.
-Every /api route but login needs a session cookie; /api/search is rate-limited per session.
+`create_app` takes a search backend: the models in the same process on the demo machine
+(`miroir.remote.site`), a Scaleway machine through a tunnel for `miroir web dev --scw`, a
+local engine with fake models for `miroir web dev` and tests. Every /api route but login needs
+a session cookie; /api/search is rate-limited per session. `on_visit` runs on every request
+that carries a valid session: the demo machine counts its idle time from it
+(`miroir.web.visits`).
 """
 
 from __future__ import annotations
@@ -195,6 +198,8 @@ class Site:
     example_cache: dict[str, bytes]
     chat: ChatService | None
     """The conversation page (step H5); None when no model is set up."""
+    on_visit: Callable[[], None]
+    """Runs on every request with a valid session."""
 
 
 def get_site(request: Request) -> Site:
@@ -206,6 +211,7 @@ def require_session(request: Request, site: Annotated[Site, Depends(get_site)]) 
     found = site.sessions.check(request.cookies.get(auth.COOKIE))
     if found is None:
         raise HTTPException(status_code=401, detail="Connectez-vous pour continuer.")
+    site.on_visit()
     return found
 
 
@@ -223,9 +229,11 @@ def create_app(
     secure_cookies: bool = True,
     fetch: Callable[[str], Awaitable[bytes]] | None = None,
     chat: Callable[[Callable[[str], Awaitable[bytes]]], ChatService] | None = None,
+    on_visit: Callable[[], None] | None = None,
 ) -> FastAPI:
     """The app. `fetch` downloads an example photo or a thumbnail (tests pass a fake);
-    `chat` makes the conversation page's service, given that `fetch`."""
+    `chat` makes the conversation page's service, given that `fetch`; `on_visit` runs on
+    every request with a valid session."""
     if not password:
         msg = "the site needs a password (`miroir web secret` sets it)"
         raise ValueError(msg)
@@ -243,6 +251,7 @@ def create_app(
         fetch=fetch or _fetch,
         example_cache={},
         chat=None if chat is None else chat(fetch or _fetch),
+        on_visit=on_visit or _nothing,
     )
     app.middleware("http")(_headers)
     app.add_api_route("/", _index, methods=["GET"], include_in_schema=False)
@@ -250,6 +259,10 @@ def create_app(
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(api)
     return app
+
+
+def _nothing() -> None:
+    return None
 
 
 async def _headers(

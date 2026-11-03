@@ -17,6 +17,7 @@ from miroir.jobs import scaleway
 from miroir.jobs.objects import MAX_PARTS, MIN_PART_BYTES, part_bytes
 from miroir.jobs.scaleway import (
     JSON,
+    OFFERS,
     InstanceApi,
     MachineLedger,
     NoMachineError,
@@ -150,7 +151,7 @@ def test_each_machine_is_written_to_the_ledger_and_the_cap_refuses_more(scw: Set
     with gpu_machine(scw, cast("InstanceApi", api), public_key="ssh-ed25519 A", max_hours=1):
         pass
     ledger = MachineLedger(scw.scaleway_dir / "spend.jsonl")
-    assert ledger.total_eur() == pytest.approx(0.75 / 60)  # one minute, at the least
+    assert ledger.total_eur() == pytest.approx(OFFERS[0].eur_per_hour / 60, abs=1e-4)  # 1 min
     with (
         pytest.raises(RuntimeError, match="Scaleway cap"),
         gpu_machine(scw, cast("InstanceApi", api), public_key="ssh-ed25519 A", max_hours=7),
