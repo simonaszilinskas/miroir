@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGES_MOUNT
+from miroir.config import IMAGES_MOUNT
 from miroir.eval.wire import DetectChunk, DetectedRoom, Located, LocateTask, RoomPhoto
 from miroir.images.fetch import ImageCache
 from miroir.outlines import Box, DetectorOption, clipped
@@ -169,7 +169,7 @@ def locate_artworks(scenes: Sequence[RoomPhoto], tasks: Sequence[LocateTask]) ->
     if "locator" not in _LOADED:
         _LOADED["locator"] = _Locator()
     locator: _Locator = _LOADED["locator"]  # type: ignore[assignment]
-    cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+    cache = ImageCache(Path(IMAGES_MOUNT), None)
     scene_feats = {}
     for scene in scenes:
         image = _open(scene.jpeg)

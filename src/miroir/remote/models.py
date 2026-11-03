@@ -20,7 +20,7 @@ import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGES_MOUNT
+from miroir.config import IMAGES_MOUNT
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
 from miroir.jobs.remote_spec import (
     MAX_ASPECT,
@@ -233,7 +233,7 @@ def embed_images(
     start = time.monotonic()
     limits = httpx.Limits(max_connections=FETCH_CONCURRENCY)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
-        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+        cache = ImageCache(Path(IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=FETCH_CONCURRENCY)
         skips: dict[str, int] = {}
         given = (Fetched(s.image_id, s.jpeg, None) for s in supplied)
@@ -261,7 +261,7 @@ def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, in
     counts: dict[str, int] = {}
     limits = httpx.Limits(max_connections=concurrency)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
-        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+        cache = ImageCache(Path(IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=concurrency)
         for item in fetcher.fetch_all(images):
             key = "ok" if item.skip is None else f"fetch_{item.skip.value}"

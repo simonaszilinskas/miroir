@@ -29,7 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_WEIGHTS_MOUNT, Settings
+from miroir.config import WEIGHTS_MOUNT, Settings
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.bulk import (
     FULL_PREFIX,
@@ -170,7 +170,7 @@ def run_embed(
     s3 = s3_client(settings)
     bucket = bucket_name(settings, Bucket.IMAGES)
     job = f"embed-{first}-{last}"
-    weights = Path(MODAL_WEIGHTS_MOUNT)
+    weights = Path(WEIGHTS_MOUNT)
     download_tree(s3, bucket_name(settings, Bucket.WEIGHTS), weights)
     july = _july(s3, bucket)
     written = [

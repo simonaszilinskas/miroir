@@ -6,9 +6,8 @@ arguments and `why`, the ids it listed, its time), and the end of each turn. Nev
 (the visitor's photo, a framed part, a thumbnail), never a key, never a position: a `near`
 filter's coordinates are written as "(position)".
 
-On the Mac the files go to `Settings.chat_logs_dir`; on Modal to the index volume
-(`config.MODAL_CHAT_LOGS`), committed at the end of each turn, and `miroir web chat-logs`
-copies them back.
+On the Mac the files go to `Settings.chat_logs_dir`; on the demo machine to its state folder,
+and `miroir demo chat-logs` copies them back.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ _SAFE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 class ChatLog(Protocol):
     def write(self, day: str, conversation: str, line: Mapping[str, JSON]) -> None: ...
     async def flush(self) -> None:
-        """Make what was written durable (a Modal volume commit)."""
+        """Make what was written durable (`FileChatLog` runs its `commit`, when given)."""
         ...
 
 
@@ -95,7 +94,7 @@ def redact(args: Mapping[str, object]) -> dict[str, JSON]:
 def pull(
     names: Callable[[], list[str]], read: Callable[[str], bytes], destination: Path
 ) -> list[Path]:
-    """Copy log files from a store (the Modal volume) into `destination`, keeping their
+    """Copy log files from a store (the demo machine, over SSH) into `destination`, keeping their
     `<day>/<conversation>.jsonl` layout. `names` lists them, relative to the logs folder.
     Files already copied whole are skipped. Returns the files written."""
     written: list[Path] = []
