@@ -15,7 +15,6 @@ from miroir.images.transform import CELLS, Transform, TransformError, apply, pad
 from miroir.outlines import Box
 from miroir.web.catalog import CatalogRecord
 from miroir.web.chat_tools import (
-    MAX_TRANSFORMS,
     Signature,
     ToolName,
     ToolOutcome,
@@ -102,7 +101,6 @@ class Ctx:
         self._outlines = outlines
         self.queries: list[ToolQuery] = []
         self.kept: dict[str, bytes] = {}
-        self.transforms = 0
         self.signatures: list[Signature] = []
 
     @property
@@ -161,12 +159,6 @@ class Ctx:
         self.kept[key] = jpeg
         return key
 
-    def use_transform(self) -> bool:
-        if self.transforms >= MAX_TRANSFORMS:
-            return False
-        self.transforms += 1
-        return True
-
 
 def search(ctx: Ctx, transform: Mapping[str, object] | None, **extra: object) -> ToolOutcome:
     args: dict[str, object] = {"why": "Je vise une partie.", **extra}
@@ -217,7 +209,6 @@ def test_no_transform_searches_the_whole_photo_as_before() -> None:
     assert outcome.step.label == "Recherche par image (réglage automatique)"
     assert ctx.queries[0].image == ctx.photo
     assert not outcome.thumbnails
-    assert ctx.transforms == 0
     assert search(ctx, {}).error  # the same search again: refused as a repeat
 
 
@@ -247,17 +238,6 @@ def test_bad_transforms_come_back_as_errors_the_model_can_read(
 def test_without_outlines_an_outline_crop_is_refused() -> None:
     outcome = search(Ctx(outlines=()), {"outline": 1})
     assert "found no outline" in outcome.text
-
-
-def test_transformed_searches_are_capped_per_message() -> None:
-    ctx = Ctx()
-    cells = list(CELLS)
-    for cell in cells[:MAX_TRANSFORMS]:
-        assert not search(ctx, {"cell": cell}).error
-    refused = search(ctx, {"cell": cells[MAX_TRANSFORMS]})
-    assert refused.error
-    assert "no transformed searches left" in refused.text
-    assert len(ctx.queries) == MAX_TRANSFORMS
 
 
 def test_the_running_step_names_the_transform() -> None:

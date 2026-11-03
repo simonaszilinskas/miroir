@@ -20,8 +20,6 @@ from miroir.web.app import create_app
 from miroir.web.catalog import Filters
 from miroir.web.chat import (
     BRIEF,
-    MAX_TOOL_CALLS,
-    MAX_VIEWS,
     ONESHOT_NOTE,
     ChatService,
     Limits,
@@ -405,6 +403,7 @@ def test_a_repeated_search_is_not_run_and_the_model_is_told() -> None:
 
 
 def test_searches_stop_at_the_cap_for_one_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat_module, "MAX_TOOL_CALLS", 8)  # a script short enough to read
     monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # the tiny index has nothing new to add
     words = [
         "vase",
@@ -422,12 +421,12 @@ def test_searches_stop_at_the_cap_for_one_message(monkeypatch: pytest.MonkeyPatc
         calls([("text_search", {"query": w, "why": WHY}) for w in words]),
         shown("PA1"),
     ]
-    with Rig(script) as rig:  # the first look is sure: only the cap of 8 stops searches
+    with Rig(script) as rig:  # the first look is sure: only the cap stops searches
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
     replies = tool_messages(rig.model.bodies[2])[1:]
     assert len(replies) == len(words)
-    assert sum(r.startswith("not run: no search") for r in replies) == len(words) - MAX_TOOL_CALLS
+    assert sum(r.startswith("not run: no search") for r in replies) == len(words) - 8
     assert rig.model.bodies[2]["tool_choice"] == "required"
 
 
@@ -678,7 +677,8 @@ def test_an_empty_reply_is_not_sent_back_to_the_model() -> None:
     assert all(m.get("content") or m.get("tool_calls") for m in messages)
 
 
-def test_looks_at_thumbnails_have_their_own_cap() -> None:
+def test_looks_at_thumbnails_have_their_own_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat_module, "MAX_VIEWS", 3)
     views = [searching("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2")]
     script = [
         *views,
@@ -689,7 +689,8 @@ def test_looks_at_thumbnails_have_their_own_cap() -> None:
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
     last = tool_messages(rig.model.bodies[-1])
-    assert last[-1].startswith(f"not run: {MAX_VIEWS} looks at thumbnails")
+    assert last[-1].startswith("not run: ")
+    assert "looks at thumbnails already" in last[-1]
 
 
 def tool_names(body: Mapping[str, JSON]) -> set[str]:
@@ -803,3 +804,10 @@ def test_the_model_reads_the_outlines_and_sees_the_image_it_searched() -> None:
     assert "The image searched: cropped to outline 2 (painting)" in last
     assert "data:image/jpeg;base64," in last
     assert card_ids(events) == ["OBJ1"]
+
+
+def test_the_step_caps_leave_room_for_a_thorough_run() -> None:
+    """Raised 2026-11-03: the spending caps, not the step caps, end a long run."""
+    assert chat_module.MAX_TOOL_CALLS >= 20
+    assert chat_module.MAX_MODEL_CALLS >= 25
+    assert chat_module.MAX_SEARCHES >= 10

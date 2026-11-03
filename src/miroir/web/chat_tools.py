@@ -77,8 +77,6 @@ MAX_CHOICES = 4
 SAME_WORDS = 0.75
 #: Thumbnails a step shows the visitor.
 STEP_THUMBS = 8
-#: Image searches on a transformed photo (cropped, turned, grey) per visitor message.
-MAX_TRANSFORMS = 6
 #: Long side of a transformed photo as searched, and as the model sees it after the search.
 TRANSFORM_SIDE = 1024
 TRANSFORM_VIEW_SIDE = 384
@@ -248,10 +246,6 @@ class ToolContext(Protocol):
 
     def keep_query_image(self, jpeg: bytes) -> str:
         """Keep a transformed photo for the model to look at; returns its key."""
-        ...
-
-    def use_transform(self) -> bool:
-        """Count one transformed search; False when the turn has used `MAX_TRANSFORMS`."""
         ...
 
 
@@ -583,12 +577,6 @@ def _transformed(
     ctx: ToolContext, image: bytes, asked: AskedTransform
 ) -> tuple[bytes, tuple[Thumbnail, ...]]:
     """The image with the transform done, and the thumbnail of it the model looks at next."""
-    if not ctx.use_transform():
-        msg = (
-            f"no transformed searches left for this message ({MAX_TRANSFORMS}): search the "
-            "photo as it is, or show_results"
-        )
-        raise ArgumentError(msg)
     try:
         done = apply(image, asked.transform, TRANSFORM_SIDE)
     except (TransformError, OSError) as err:
@@ -984,7 +972,7 @@ _TRANSFORM_SCHEMA: dict[str, JSON] = {
     "type": "object",
     "description": (
         "Leave it out to search the whole photo. Otherwise what to do to the photo before the "
-        f"search (at most {MAX_TRANSFORMS} such searches per message). Crop with one of "
+        "search; it counts as a search. Crop with one of "
         "outline, box or cell; combine freely with rotate, mirror and grayscale."
     ),
     "properties": {

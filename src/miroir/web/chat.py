@@ -57,7 +57,6 @@ from miroir.outlines import DETECT_SIDE, Box, Outlines
 from miroir.web.catalog import COLLECTION_LABELS, Catalog, CatalogRecord, Filters
 from miroir.web.chat_tools import (
     MAX_RESULTS,
-    MAX_TRANSFORMS,
     OUTLINES_LISTED,
     SEARCHES,
     Signature,
@@ -86,21 +85,24 @@ logger = logging.getLogger(__name__)
 MODEL = "mistralai/mistral-large-4-0"
 MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "top_p": 1.0, "reasoning": {"effort": "low"}}
 MAX_TOKENS = 800
-#: Searches per visitor message; then the model must show results or ask.
-MAX_TOOL_CALLS = 8
+#: The step caps of one visitor message. Raised 2026-11-03 (from 8 searches, 3 without a
+#: sure match, 2 stale, 3 looks, 12 model calls) so a thorough "Approfondi" run, cropped and
+#: grey searches included, can go on; the spending caps (`Limits`) are the real limit.
+#: Searches per visitor message, transformed ones included; then results or a question.
+MAX_TOOL_CALLS = 20
 #: Searches per visitor message without a sure match (a first-look card rated "Très
 #: proche"); then only a question or the results.
-MAX_SEARCHES = 3
+MAX_SEARCHES = 10
 #: Searches in a row that bring nothing new into the best-so-far; then the same stop.
-MAX_STALE = 2
+MAX_STALE = 4
 #: First-look results the model must look at before it searches, and best-so-far's size.
 LOOK_FIRST = 4
 BEST = 5
 #: Looks at thumbnails per visitor message, apart from the searches (the smoke test with
 #: Mistral spent its 8 calls on searches and could not check its picks by eye).
-MAX_VIEWS = 3
+MAX_VIEWS = 6
 #: Model calls per visitor message, all told.
-MAX_MODEL_CALLS = 12
+MAX_MODEL_CALLS = 25
 #: Thumbnails kept in what the model is sent again each call; older ones become a note.
 KEEP_THUMBS = 12
 #: Transformed photos kept in what the model is sent again each call (the latest ones).
@@ -439,12 +441,6 @@ class Conversation:
         self.query_images[key] = jpeg
         return key
 
-    def use_transform(self) -> bool:
-        if self.turn.transforms >= MAX_TRANSFORMS:
-            return False
-        self.turn.transforms += 1
-        return True
-
     def title_of(self, entity_id: str) -> str:
         known = self.known.get(entity_id)
         return "" if known is None else known.title
@@ -513,13 +509,11 @@ class Conversation:
 class _Turn:
     """What one visitor message has used so far (the method's counters; they change)."""
 
-    __slots__ = ("lock", "searches", "stale", "transforms", "unjudged")
+    __slots__ = ("lock", "searches", "stale", "unjudged")
 
     def __init__(self) -> None:
         self.searches = 0
         """Searches that ran."""
-        self.transforms = 0
-        """Image searches on a transformed photo."""
         self.stale = 0
         """Searches in a row that added nothing to the best-so-far."""
         self.unjudged: tuple[tuple[str, ...], tuple[str, ...]] | None = None
@@ -1120,7 +1114,6 @@ class ChatService:
             views=MAX_VIEWS,
             searches=MAX_SEARCHES,
             stale=MAX_STALE,
-            transforms=MAX_TRANSFORMS,
         )
 
     def _render(self, c: Conversation) -> list[JSON]:
@@ -1298,7 +1291,7 @@ a cell of a 3 by 3 grid; leave transform out to search the whole photo again. Us
 (with stretch for a faded print) when you look for a black and white archive print \
 (Mémoire, Mérimée, Palissy) from a colour photo; turn or mirror a photo taken sideways or \
 reversed. You see each transformed image after its search: check the crop holds what you \
-meant. At most {transforms} transformed searches per visitor message; they count as searches.
+meant. They count as searches.
 - Do not run a search again with reworded words: it will be refused.
 - At most {calls} searches and {views} looks at thumbnails per visitor message.
 - Do not say a pick looks like the photo unless you have seen its thumbnail.

@@ -182,6 +182,7 @@ def test_the_brief_asks_for_words_from_evidence_never_guesses() -> None:
 def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(chat_module, "MAX_SEARCHES", 3)  # a script short enough to read
     monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # this test is about the count alone
     script = [
         LOOK,
@@ -209,7 +210,10 @@ def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_result
     assert not last_tools(rig)[-2].startswith("not run")
 
 
-def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn() -> None:
+def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
     script = [
         LOOK,  # the first look's three entities are already the best so far
         searching("image_search", {"model": "A3"}),
@@ -229,6 +233,7 @@ def test_a_search_that_brings_a_new_best_resets_the_stale_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(chat_module, "MAX_SEARCHES", 99)
+    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
     script = [
         searching("text_search", {"query": "église"}),
         searching("text_search", {"query": "vase", "best": ["PA1"]}),  # PA1 came from the 1st
