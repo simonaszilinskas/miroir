@@ -39,7 +39,7 @@ On VET (3 Vétheuil images) and PARTS (360 detail → whole pairs from POP, tune
 2. Build VET and PARTS. (Done: `miroir testsets vet`, `miroir testsets parts`.)
 3. Download and embed everything; build the full index on Scaleway. (Done 2026-11-03: bundle `pop-all`, below.)
 4. Crop vectors; measures 1 to 3.
-5. One page with Instant and Deeper; deploy on Scaleway.
+5. One page with Instant and Deeper; deploy on Scaleway. (Deploy done 2026-11-03: the site serves `pop-all` on the demo machine, `miroir demo up`; prototype.md, "Hosting". On VET today's search puts the target first for VET-1 and VET-3, fourth for VET-2. The one page is still to do.)
 
 ### What step 3 built (2026-11-03)
 
