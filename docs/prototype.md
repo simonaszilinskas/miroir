@@ -16,7 +16,7 @@ What a person can do:
 4. **Results.** One list of cards, one per building or object, from the closest to the least close. Each card shows a small badge with its level: **"Très proche"** (green: most likely the right record), **"Proche"** (blue: maybe it, check) or **"Ressemblance"** (grey: looks alike, compare with your photo); a line above the list says what each means. Only the first card can be "Très proche" or "Proche" (see "Card levels" below). Then the POP image that matches best (marked "Correspond : revers", "détail"… when it is not the record's main image), title, place, collection, a link to POP. Mémoire photos of one building form one card ("12 photos", POP photos only). Filters (collection, region, département, domain, period) narrow the search before ranking. Words refine a photo search ("à Toulouse"). The page shows, quietly, whether it took the photo for a building or an object. When a building photo's first card is not "Très proche", the page says what helps: "Utiliser ma position", the commune with "Préciser avec des mots", a photo of the whole façade.
 5. **Old photo on its card (archive print).** When the photo is a black-and-white print glued on a card with a caption, as Mémoire's are, the results say **"Cadre et légende détectés"** and show the caption Miroir read ("Légende lue : « BEAUNE (Côte d'Or) Eglise Notre-Dame… »"). Its words join the search. "Corriger la légende" opens a box to fix the text and search again; "Retirer la légende" searches with the photo alone. Other photos are not affected. On T1 archive prints the right building is in the top 10 for 89% of prints, against 46% without the caption (results.md, T1 archive).
 6. **Record.** Every POP photo of the building or object, key facts, the description, and links to the full POP records. Commons photos are not shown ("Pas d'image dans POP pour cette notice" for the six buildings that have none).
-7. **Agentic search** (`#/agentique`; `/chat` and the old `#/conversation` lead there). A photo, words, or one of the same six examples. The page asks "Que cherchez-vous ?" with four chips ("C'est quoi ?", "C'est où ?", "D'autres comme ça", "Qui l'a fait ?") and a free-text box. Mistral Large 4, an open model reached on Mistral's own API, then leads the search over the live index: each step shows what it searched and why, and opens to its thumbnails. It reads the full records of the results it is weighing before it shows them. It may ask a question (with suggested answers, a free-text box and "Je ne sais pas") or ask the visitor to frame part of the photo. It ends with result cards, each with a short reason, or says plainly that the thing is not in the collections. A line under the title says the photo goes to that model (it still says through OpenRouter). Spending caps per conversation and per day; past them the page offers the simple search. How it works: technical spec §8.1.
+7. **Agentic search** (`#/agentique`; `/chat` and the old `#/conversation` lead there). A photo, words, or one of the same six examples. The page asks "Que cherchez-vous ?" with four chips ("C'est quoi ?", "C'est où ?", "D'autres comme ça", "Qui l'a fait ?") and a free-text box. Mistral Large 4, an open model reached through OpenRouter (on Mistral's own API when only that key is set), then leads the search over the live index: each step shows what it searched and why, and opens to its thumbnails. It reads the full records of the results it is weighing before it shows them. It may ask a question (with suggested answers, a free-text box and "Je ne sais pas") or ask the visitor to frame part of the photo. It ends with result cards, each with a short reason, or says plainly that the thing is not in the collections. A line under the title says the photo goes to that model through OpenRouter. Spending caps per conversation and per day; past them the page offers the simple search. How it works: technical spec §8.1.
 
 Wikimedia Commons photos stay behind the scenes: 10,221 of them in the index help find 2,726 buildings, but a card whose best match is a Commons photo shows the building's best-matching POP image instead, with no Commons label or credit. The home page's example photos from Commons are queries, not results: they keep their credit.
 
@@ -80,7 +80,7 @@ Before: one "sure" or "not sure" answer for the whole search (cut-offs 0.934 arc
 
 The first index, `screening-v2` (21,785 publishable images), scored T1 50.7, T3 89.9, T5 61.2, T2 24.8, T2b 94.3 hit@10; switch back with `WEB_INDEX = "screening-v2"`.
 
-### Index of all of POP (`pop-all`, built 2026-11-03, not served yet)
+### Index of all of POP (`pop-all`, built and served since 2026-11-03)
 
 Every POP image the models could read: 2,257,225 image rows (Commons photos included), 2,135,437 records, 885,596 buildings and objects; 99.86% of records with an image have vectors (docs/search-levels.md, "What step 3 built"). Built on Scaleway with `miroir scw pop-index` (docs/developpement.md, "Scaleway"), 27.4 GB in the `miroir-index` bucket under `pop-all/`. MegaLoc is kept as a 1,024-number shortlist on the GPU (4.6 GB) and whole in int8 in memory (19.1 GB), so serving it needs about 20 GB of memory for the int8 vectors alone. The card levels and the sure rule are those of `full-f2`, not set again on this index.
 
@@ -95,6 +95,13 @@ Tune halves, the bundle's own `report.json` (the July index `full-f2` in bracket
 | T2b museum work (Commons) | 78.0 (82.1) | 83.5 (88.7) | 88.0 (94.5) |
 
 Not-found sets, first card wrongly sure: T8 9.6%, T8c 4.7%. Buildings gain most, since many more of their photos are now in the index; objects lose a little among 15 times more images.
+
+Visitor check on the demo machine (2026-11-03, `pop-all`, over HTTPS from the Mac, upload included):
+
+- **Vétheuil (VET).** The target, PM95000723 (photo APMH047981), comes **first** for the two sale-catalogue pages (VET-1 "Très proche", VET-3 "Proche") and **fourth** for today's colour photo of the altarpiece (VET-2), behind three other churches. Tapping the outline of the carved group on VET-1 also finds it first; none of VET-2's outlines does.
+- **Other photos.** Five PARTS details find their whole first (the detail photo is itself in the index, so this checks only that the path works); two T2 phone photos of buildings find their building first; two T2b museum works come first and second; two T1 archive prints come first, their captions read ("VIEUX (Tarn) Église…").
+- **Time.** A photo search takes 0.3 s, a print with its caption 1.6–2.3 s, words 0.25 s, outlines 0.3–0.4 s. The record page of PM95000723 shows 24 images and 40 records.
+- **Agentic search.** One conversation on VET-1 ("Ce groupe sculpté a été volé…") took 2 minutes and about 2 cents: it read the record, searched words, and ended with PM95000723 first (exact) and a looted *Mise au tombeau* (MNR 961) to check.
 
 End-to-end check on the deployed site (2026-10-13): photos fetched from POP and Commons and posted to `/api/search`. Collection photos (T1, T3, T5) find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches the gallery's); Commons photos (T2, T2b) get the confidence computed offline from their stored query vectors (0.914, 0.859, 0.55…) and the right record first or second. Words: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" and "Nature morte au lièvre" first; "Pont du Gard" first; English words do less well.
 
@@ -113,9 +120,44 @@ Two photos that are in neither the index nor any test set (neither is among the 
 
 Both first searches met a sleeping engine and took over a minute.
 
-## Run and deploy
+## Hosting
 
-How the site is deployed: see "Hosting" in this file.
+Since 2026-11-03 the site runs on one Scaleway GPU machine, `miroir-demo`, that is on only for demos (`src/miroir/jobs/demo.py`). Before, it ran on Modal.
+
+- **Address:** <https://51-159-130-27.sslip.io>. A flexible IP keeps the address while the machine is off, so the URL never changes. sslip.io turns the name into that address; Caddy, on the machine, gets and renews the Let's Encrypt certificate.
+- **Machine:** an L4-1-24G (one L4 GPU with 24 GB, 8 CPUs, 48 GB of memory) in fr-par-2, with one 100 GB block volume that holds the system, the Docker image, the model weights and the `pop-all` bundle. Nothing is downloaded at start.
+- **Inside:** three containers that Docker starts at every boot. `miroir-site` loads the models and the bundle, then serves the page on the machine's loopback (`src/miroir/remote/site.py`); `caddy` takes HTTPS on ports 80 and 443; `miroir-watch` powers the machine off (below). Loaded, the site uses 30 of the 48 GB of memory (the MegaLoc vectors in int8 are 19 GB) and 19 of the GPU's 23 GB.
+
+```sh
+uv run miroir demo up        # power on, wait until the page answers, print the address
+uv run miroir demo down      # power off: only the disk and the address are billed
+uv run miroir demo status    # on or off, time on, this session's cost, last visitor, spend
+uv run miroir demo logs      # the site's last lines (--container caddy or miroir-watch)
+uv run miroir demo install   # after a code change: rebuild on the machine and restart (machine on)
+uv run miroir demo chat-logs # copy the agentic search's logs to ~/miroir-data/chat-logs/hosted/
+```
+
+`miroir demo create` made the machine once (IP, machine, image, bundle, HTTPS: 12 minutes); `miroir demo destroy` deletes it with its disk and address.
+
+**Power.** `demo up` takes about COLD_START from the command to a page that answers: 30 s to boot, then about 4 minutes to load (the catalog of 2.26 million images 50 s, the 19 GB of int8 vectors, the facts the agentic search filters on 50 s, the caption reader 10 s). The machine powers itself off after 60 minutes with no visitor, even if the Mac is closed: the watcher looks once a minute at the last request that carried a session (robots that probe the address, and the page `demo up` waits for, do not count). It also stops after 8 hours on, visitors or not. `demo up --idle-minutes N` sets another wait for that session (`MIROIR_DEMO_IDLE_MINUTES` and `MIROIR_DEMO_MAX_HOURS` change the defaults, then `demo install`). Checked 2026-11-03: with 8 minutes, the machine powered off 8 minutes after the last search.
+
+**No GPU free.** Scaleway sometimes has no L4 free in fr-par-2, even for a machine that was just on. `demo up` then tries again every 30 s for 5 minutes, then says so: try later. The machine cannot move to another zone without moving its disk.
+
+**Money.** Prices from Scaleway's public catalogue (`api.scaleway.com/product-catalog/v2alpha1/public-catalog/products`, 2026-11-03), without VAT:
+
+| What | Price | When |
+|---|---|---|
+| L4-1-24G | €0.013125 a minute (€0.79 an hour) | while on |
+| Block volume, 100 GB, 5K IOPS | €0.00013 per GB an hour (€9.49 a month) | always |
+| Flexible IPv4 | €0.005 an hour (€3.65 a month) | always |
+
+So a demo hour costs €0.79 (€0.81 with the disk and address), and the machine at rest €13.14 a month. Each session and the storage between commands go to the machines' ledger (`~/miroir-data/scaleway/spend.jsonl`) when a `demo` command sees them end: a session the watcher ended is billed up to the time Scaleway gives for the stop. `demo up` refuses to start when 8 hours on would take the ledger past `MIROIR_SCW_BUDGET_EUR`.
+
+**Secrets.** `demo install` sends the site's password and the model keys from `.env` to root-only files on the machine, over SSH, on standard input: never on a command line, in cloud-init or in a log. The site's container gets the password and the OpenRouter and Mistral keys; the session key is made on the machine once and never leaves it. The watcher's container holds the project's Scaleway key, the only one that can power the machine off: the project key may not create a narrower IAM key (2026-11-03, `permissions_denied` on IAM). Anyone root on the machine could read it; only the Mac's own SSH key gets in.
+
+**Agentic search.** Its spending per day is kept on the machine's disk (`/opt/miroir/state/chat-days.json`) and its logs beside it (`state/chat-logs/`); `demo chat-logs` copies them to the Mac. The logs of the Modal site (2026-10-19 to 10-27) are in `~/miroir-data/chat-logs/hosted/`.
+
+## Run and deploy
 
 **Bundles and code.** New code reads older bundles (a bundle without `levels.json` falls back on the older sure rule; a `routing.json` without `caption_a7` and `caption_bm25` takes the caption weights from `miroir.web.routing`, 0.3 / 0.7), but older code refuses a `routing.json` that holds the caption weights.
 
@@ -153,7 +195,7 @@ Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (d
 
 ## Cost
 
-On Modal, until 2026-11-03 (the demo machine's costs: see "Hosting"): an L4 with 4 CPUs and 24 GB cost about $1.18 an hour while awake. Each wake-up cost about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
+The demo machine: €0.79 an hour while on, €13.14 a month at rest (see "Hosting"). Before 2026-11-03, on Modal, an L4 with 4 CPUs and 24 GB cost about $1.18 an hour while awake and each wake-up about $0.22. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
 
 The agentic search also pays for the model: a turn cost about $0.02–0.04 through OpenRouter. Mistral sends no price with its answers, so the site works out each call's cost from its tokens at prices typed into `miroir.jobs.mistral.PRICES` ($2 per million input tokens, $6 output). Check them against Mistral's console. It stops at $0.10 a conversation and $2 a day for all visitors (`MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD`).
 
@@ -161,12 +203,12 @@ The agentic search also pays for the model: a turn cost about $0.02–0.04 throu
 
 - **Position.** Rose Valland works have no place (looted and moved), and Mémoire objects sit at their commune's centre, so with the position on they rank below precise neighbours. The visitor can turn the position off.
 
-- **Index.** The site serves the 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing. The index of all of POP (`pop-all`, above) is built but not served yet.
+- **Index.** The site serves all of POP (`pop-all`, above). Its card levels and sure rule were set on the July index and not set again; scores below that are not marked `pop-all` were measured on the July index.
 - **Phone photos of buildings.** Without the photo's position, the right building comes first for a quarter of photos (25.8%), in the top 3 for a third (32.6%) and in the top 10 for 36.8%. A building whose Commons photos are in the index is found far more often than one without (58.6% against 24.9% hit@10 on the screening gallery): 1,198 of 3,924 buildings have none. Interiors and close details stay hard. With the photo's GPS position (H2) the right building is in the top 10 for most photos.
 - **Levels are cautious.** About 30% of in-index photo searches get a "Très proche" first card and 11–18% a "Proche" one; the rest see "Ressemblance" cards to compare. Words never reach "Très proche". A caption read on an archive print raises T1 hit@1 from 34% to 71%, but the level reads the photo's cosines only, so it undersells those searches.
 - **Word search** finds the right record in the top 10 for about one description in six (T7: 17.6%; half and half scored 8.0%). Names work ("Pont du Gard" comes first); descriptions of common things (a church, a coin) match too many records, and Mémoire buildings are found only 7% of the time. A region in the words ("bourgogne") does not narrow the search; the region filter does. T6, written by hand, does not exist yet ([t6-guide.md](t6-guide.md)).
 - **Period filter** for Mémoire reads the date of the photo, not of the building.
 - **Outlines on a crowded wall.** On the Jeu de Paume room photos the right record is in the top 5 for 87% of works when every outline is shown, 78% with the 20 shown first (it was 52% with the 12 surest; results.md, step C): on the densest walls the visitor still needs "Afficher les N autres". Outlines' names come from the detector's prompts and are often wrong (it calls a statue a stained glass window); the page only uses them in labels for screen readers.
 - **Keypoint re-ranking (E1) is not on the site:** it lifts T3 hit@1 by 12 points but adds 3 s per search (6 s at the 95th percentile), mostly reading candidate images.
-- **Cold start** (on Modal, until 2026-11-03) of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
+- **Off between demos.** Someone must run `miroir demo up` (about COLD_START) before a demo; a visitor who finds it off sees no page. It powers itself off after an hour without a visitor. Scaleway is sometimes out of L4s (see "Hosting").
 - **Type guess** trained on the full-sample index (`miroir.index.guess`). It calls more than half of phone photos of buildings objects (it partly learned colour); they then get 0.2 A7 + 0.8 A3, close to what a colour building gets.

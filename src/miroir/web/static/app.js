@@ -135,6 +135,10 @@ function loadAfterLogin() {
   loadFacets();
   api('stats').then((s) => {
     $('#index-size').textContent = `${s.images.toLocaleString('fr-FR')}`;
+    if (s.notice) {
+      $('#site-notice-text').textContent = s.notice;
+      $('#site-notice').hidden = false;
+    }
   }).catch(() => {});
 }
 

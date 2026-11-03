@@ -62,7 +62,8 @@ class QueryModels:
 
 
 class GpuGallery:
-    """Both models' gallery vectors on the GPU, in catalog row order."""
+    """Both models' gallery vectors on the GPU in float16, in catalog row order. Without a
+    GPU they stay in memory in float32: a CPU multiplies float16 many times slower."""
 
     def __init__(self, directory: Path) -> None:
         start = time.monotonic()
@@ -77,11 +78,14 @@ class GpuGallery:
 
     @staticmethod
     def _load(path: Path) -> torch.Tensor:
-        return torch.from_numpy(np.load(path)).to(DEVICE)
+        matrix = np.load(path)
+        if DEVICE == "cpu":
+            return torch.from_numpy(matrix.astype(np.float32))
+        return torch.from_numpy(matrix).to(DEVICE)
 
     @torch.inference_mode()
     def _cosines(self, matrix: torch.Tensor, query: Floats) -> Floats:
-        q = torch.from_numpy(np.asarray(query, dtype=np.float16)).to(DEVICE)
+        q = torch.from_numpy(np.asarray(query)).to(DEVICE, dtype=matrix.dtype)
         return (matrix @ q).float().cpu().numpy()
 
     def a7(self, query: Floats) -> Floats:
@@ -132,18 +136,27 @@ class SearchService:
     """Everything the site's searches need over one index bundle: the search models and the
     gallery vectors (`load_search`), the outline finder and the caption reader.
 
-    The reader loads last, alone: see `BackgroundCaptions.load_now`. Used by the demo
-    machine's site (`miroir.remote.site`) and by the job worker (`miroir web dev --scw`)."""
+    The reader loads last, alone: see `BackgroundCaptions.load_now`. Without a GPU it is left
+    out (Qwen3-VL 4B would take most of a minute per print on the CPU): prints are searched
+    without their caption, and `degraded` says so. Used by the demo machine's site
+    (`miroir.remote.site`) and by the job worker (`miroir web dev --scw`)."""
 
     def __init__(self, folder: Path) -> None:
         from miroir.caption import SITE_CAPTION_MODEL  # noqa: PLC0415
         from miroir.remote.caption import BackgroundCaptions  # noqa: PLC0415
 
         start = time.monotonic()
+        self.degraded = DEVICE == "cpu"
+        """No GPU: slower searches, no caption reading."""
         self.outlines = OutlineFinder()
-        captions = BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
+        captions = (
+            None
+            if self.degraded
+            else BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
+        )
         self.engine = load_search(folder, captions)
-        captions.load_now()
+        if captions is not None:
+            captions.load_now()
         # The conversation page's filters need every entity's facts (about 50 s on all of
         # POP). Gathered before the site listens: in a thread beside the first searches, it
         # held Python's lock and the first photo search took 27 s instead of 0.3 s.

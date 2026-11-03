@@ -179,6 +179,8 @@ class Stats:
     images: int
     records: int
     entities: int
+    notice: str | None = None
+    """A line the page shows at the top, e.g. when the site runs without a GPU."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,8 @@ class Site:
     """The conversation page (step H5); None when no model is set up."""
     on_visit: Callable[[], None]
     """Runs on every request with a valid session."""
+    notice: str | None
+    """Shown at the top of the page (`/api/stats`)."""
 
 
 def get_site(request: Request) -> Site:
@@ -230,10 +234,11 @@ def create_app(
     fetch: Callable[[str], Awaitable[bytes]] | None = None,
     chat: Callable[[Callable[[str], Awaitable[bytes]]], ChatService] | None = None,
     on_visit: Callable[[], None] | None = None,
+    notice: str | None = None,
 ) -> FastAPI:
     """The app. `fetch` downloads an example photo or a thumbnail (tests pass a fake);
     `chat` makes the conversation page's service, given that `fetch`; `on_visit` runs on
-    every request with a valid session."""
+    every request with a valid session; `notice` is a line the page shows at the top."""
     if not password:
         msg = "the site needs a password (`miroir web secret` sets it)"
         raise ValueError(msg)
@@ -252,6 +257,7 @@ def create_app(
         example_cache={},
         chat=None if chat is None else chat(fetch or _fetch),
         on_visit=on_visit or _nothing,
+        notice=notice,
     )
     app.middleware("http")(_headers)
     app.add_api_route("/", _index, methods=["GET"], include_in_schema=False)
@@ -328,7 +334,7 @@ async def warm(_: SessionId, site: SiteDep) -> dict[str, bool]:
 @api.get("/stats")
 async def stats(_: SessionId, site: SiteDep) -> Stats:
     catalog = site.catalog
-    return Stats(len(catalog.images), len(catalog.records), catalog.entity_count)
+    return Stats(len(catalog.images), len(catalog.records), catalog.entity_count, site.notice)
 
 
 @api.get("/facets")

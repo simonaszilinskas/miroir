@@ -2107,7 +2107,7 @@ DemoIndex = Annotated[str, typer.Option("--index", help="Bundle in the index buc
 
 @demo_app.command("create")
 def demo_create(index: DemoIndex = DEMO_INDEX) -> None:
-    """Make the demo machine (once): flexible IP, L4 machine, image, index, HTTPS. 30-60 min."""
+    """Make the demo machine (once): flexible IP, L4 machine, image, index, HTTPS. 12 min."""
     from miroir.jobs.demo import (  # noqa: PLC0415
         Demo,
         create_demo,
@@ -2156,27 +2156,43 @@ def demo_up(
         int | None,
         typer.Option(help="Power off after this long with no visitor (default from settings)."),
     ] = None,
+    *,
+    gpu_only: Annotated[
+        bool, typer.Option("--gpu-only", help="Wait for a GPU rather than run on the CPU.")
+    ] = False,
+    index: DemoIndex = DEMO_INDEX,
 ) -> None:
-    """Power the demo machine on, wait until the site answers, print its address."""
+    """Power the demo machine on, wait until the site answers, print its address.
+
+    When no L4 is free it runs as the next machine type that is (DEMO_OFFERS): an L40S, or a
+    machine without a GPU, where searches are slower and captions are not read."""
     import time  # noqa: PLC0415
 
-    from miroir.jobs.demo import DEMO_OFFER, demo_shell, idle_command, wait_site  # noqa: PLC0415
+    from miroir.jobs.demo import (  # noqa: PLC0415
+        demo_shell,
+        fit_hardware,
+        idle_command,
+        offer_of,
+        wait_site,
+    )
 
     demo, machine = _need_demo()
     start = time.monotonic()
-    machine = demo.power_on(machine)
+    machine = demo.power_on(machine, allow_cpu=not gpu_only)
     address = _need_running(machine)
     booted = time.monotonic() - start
     shell = demo_shell(demo.settings, address)
     shell.wait()  # "running" comes a little before SSH answers
+    gpu = fit_hardware(shell, machine, demo.settings, index)
     shell.run(idle_command(idle_minutes), timeout=60)
     assert machine.url is not None
     wait_site(machine.url)
     idle = idle_minutes or demo.settings.demo_idle_minutes
+    offer = offer_of(machine.commercial_type)
     typer.echo(
-        f"{machine.url}\nup in {time.monotonic() - start:.0f} s ({booted:.0f} s to boot); "
-        f"powers itself off after {idle} min with no visitor, "
-        f"€{DEMO_OFFER.eur_per_hour:.2f} an hour while on"
+        f"{machine.url}\nup in {time.monotonic() - start:.0f} s ({booted:.0f} s to boot) as "
+        f"{offer.commercial_type}{'' if gpu else ' (no GPU: slower, no captions)'}, "
+        f"€{offer.eur_per_hour:.2f} an hour; powers itself off after {idle} min with no visitor"
     )
 
 

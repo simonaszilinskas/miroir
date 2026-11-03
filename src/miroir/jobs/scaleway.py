@@ -201,6 +201,11 @@ class InstanceApi:
         path = f"instance/v1/zones/{zone}/servers/{server_id}/user_data/{key}"
         self._call("PATCH", path, content=text.encode())
 
+    def set_type(self, zone: str, server_id: str, commercial_type: str) -> None:
+        """Change a stopped server's type; its volumes and IP stay."""
+        path = f"instance/v1/zones/{zone}/servers/{server_id}"
+        self._call("PATCH", path, body={"commercial_type": commercial_type})
+
     def set_tags(self, zone: str, server_id: str, tags: Sequence[str]) -> None:
         path = f"instance/v1/zones/{zone}/servers/{server_id}"
         self._call("PATCH", path, body={"tags": list(tags)})

@@ -17,7 +17,7 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
   model options (`remote_spec.py`), Scaleway machines and buckets (`scaleway.py`, `scw_run.py`,
   `objects.py`), the demo machine (`demo.py`), spend and privacy checks.
 - `src/miroir/commons/`, `src/miroir/geo/`, `src/miroir/index/`: Wikimedia Commons photos,
-  positions, and the type guess and vector upload.
+  positions, and the type guess.
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to
   `eval/results/`.
 - `src/miroir/web/`: the prototype website (FastAPI, on the demo machine): ranking, card levels, the agentic

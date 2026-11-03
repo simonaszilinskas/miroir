@@ -39,7 +39,9 @@ from miroir.remote.preprocess import dino_eval, dino_whole, squash
 
 logger = logging.getLogger(__name__)
 
-DEVICE = "cuda"
+#: The GPU, or the CPU on a machine without one (the demo machine's fallback when no GPU
+#: is free, `miroir.jobs.demo.DEMO_OFFERS`).
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 GEM_P = 3.0
 #: Parallel image reads on the machine (image folder, else POP), running ahead of the GPU.
 FETCH_CONCURRENCY = 32

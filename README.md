@@ -39,7 +39,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 ## Ce que fait le prototype
 
-Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : adresse et accès dans [docs/prototype.md](docs/prototype.md), section Hosting. Une recherche prend moins d'une seconde.
+Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : **<https://51-159-130-27.sslip.io>**. Mot de passe : demandez-le au porteur du projet. La machine s'allume avec `uv run miroir demo up` (environ COLD_START) et s'éteint seule après une heure sans visiteur ; le détail est dans [docs/prototype.md](docs/prototype.md), section Hosting. Elle cherche dans tout POP : 2,1 millions de notices avec image. Une recherche prend moins d'une seconde.
 
 La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
 
@@ -179,11 +179,11 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 **Vitesse à grande échelle.** Mesuré sur 3 millions d'images, plus que tout POP : la recherche prend environ une demi-seconde sur le serveur, comme aujourd'hui. Le démarrage à froid s'allongerait, car il y a plus de données à charger ; il faudrait garder le serveur allumé pendant les tests.
 
-**Hébergement.** Tout POP tient sur le même type de serveur qu'aujourd'hui, en rangeant les données autrement : un premier tri rapide garde 2 000 candidats, puis seuls ceux-là sont comparés en détail. La qualité baisse d'un point au plus sur mes tests. Le serveur coûterait environ 1,25 € par heure d'usage, contre 1,10 € aujourd'hui, et s'éteint seul après 10 minutes sans recherche.
+**Hébergement.** Depuis le 3 novembre 2026, le site cherche dans tout POP sur une seule machine Scaleway à carte graphique L4, à Paris, en rangeant les données autrement : un premier tri rapide garde 2 000 candidats, puis seuls ceux-là sont comparés en détail. La machine coûte 0,79 € par heure allumée et 13 € par mois éteinte (son disque et son adresse). Elle s'éteint seule après une heure sans visiteur.
 
-**Ce que le projet a coûté.** Environ 27 € de calcul pour tous les essais au 19 octobre 2026 (29,70 $ : 22,40 $ chez Modal, 7,30 $ chez OpenRouter), plus les heures de serveur du site en ligne, qui ne sont pas comptées dans ce total.
+**Ce que le projet a coûté.** Environ 27 € de calcul pour tous les essais au 19 octobre 2026 (29,70 $ : 22,40 $ chez Modal, 7,30 $ chez OpenRouter), plus les heures de serveur du site en ligne, qui ne sont pas comptées dans ce total. Depuis, le projet Scaleway du ministère a payé environ 41 € pour indexer tout POP et mettre le site en ligne (au 3 novembre 2026).
 
-**Des prix indicatifs.** L'installation actuelle sert aux tests : ses prix ne valent pas devis pour un service en production. Le serveur loue une carte graphique à l'heure et s'éteint après 10 minutes sans recherche. Un démarrage à froid coûte peu (1 à 2 minutes de serveur, quelques centimes) ; son vrai défaut est l'attente du premier visiteur. Garder le serveur allumé en permanence coûterait environ 900 € par mois (1,25 € × 720 heures). Avec beaucoup d'usage, ce coût s'amortit vite : une recherche occupe la carte graphique environ 0,2 seconde, donc un serveur peut traiter des milliers de recherches par heure, pour moins d'un centime chacune. L'hébergement d'un vrai service (disponibilité, hébergeur, plusieurs serveurs) reste à chiffrer.
+**Des prix indicatifs.** L'installation actuelle sert aux tests : ses prix ne valent pas devis pour un service en production. Le serveur loue une carte graphique à la minute et s'éteint après une heure sans visiteur. L'allumer coûte peu (quelques minutes de serveur, quelques centimes) ; son vrai défaut est l'attente : il faut l'allumer avant une démonstration. Le garder allumé en permanence coûterait environ 590 € par mois (0,79 € × 730 heures, plus le disque et l'adresse). Avec beaucoup d'usage, ce coût s'amortit vite : une recherche occupe la carte graphique environ 0,2 seconde, donc un serveur peut traiter des milliers de recherches par heure, pour moins d'un centime chacune. L'hébergement d'un vrai service (disponibilité, hébergeur, plusieurs serveurs) reste à chiffrer.
 
 ## Limites et risques
 

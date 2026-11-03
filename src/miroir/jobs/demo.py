@@ -9,7 +9,10 @@ Unlike the job machines (`miroir.jobs.scaleway.gpu_machine`), this one is made o
   starts again at every boot: the site (`miroir.remote.site`), Caddy (HTTPS with a Let's
   Encrypt certificate for `<ip>.sslip.io`) and the watcher (`watch_idle`).
 - `up` powers it on and waits until the page answers; `down` powers it off. Off, Scaleway
-  bills only the volume and the IP (`rest_eur_per_hour`).
+  bills only the volume and the IP (`rest_eur_per_hour`). GPUs are often all taken: when no
+  L4 is free, `up` changes the machine's type, while it is off, to the next of
+  `DEMO_OFFERS` (an L40S, then machines without a GPU, where the site searches more slowly
+  and reads no captions) and puts it back on an L4 at the next `up` when one is free.
 - The watcher powers the machine off after `Settings.demo_idle_minutes` with no visitor, or
   after `Settings.demo_max_hours` on, so a closed Mac never leaves it running. It holds the
   project's Scaleway key in a root-only file: the key could not be narrowed to this machine
@@ -60,6 +63,32 @@ DEMO_NAME = "miroir-demo"
 #: L4: the site also runs the outline finder and the caption reader (Qwen3-VL 4B), and the
 #: pop-all bundle keeps 19 GB of vectors in memory (the L4 machine has 48 GB).
 DEMO_OFFER = Offer("fr-par-2", "L4-1-24G", 0.79, IMAGE_LABEL, root_gb=100)
+#: The types `up` tries, in order, on the same disk (prices from the public catalogue,
+#: 2026-11-03, rounded up). Without a GPU the site needs about 55 GB of memory (float32
+#: gallery vectors). Left out: RENDER-S (P100, 16 GB: the models need 19 GB, EmbeddingGemma 2
+#: needs bfloat16, which Pascal lacks, and it costs €1.22 an hour), and H100 (€2.73 an hour).
+DEMO_OFFERS = (
+    DEMO_OFFER,
+    Offer("fr-par-2", "L40S-1-48G", 1.47, IMAGE_LABEL, root_gb=100),
+    Offer("fr-par-2", "POP2-HM-12C-96G", 0.62, IMAGE_LABEL, root_gb=100),
+    Offer("fr-par-2", "POP2-HM-16C-128G", 0.83, IMAGE_LABEL, root_gb=100),
+)
+#: Commercial types with a GPU (the rest run the site on the CPU).
+GPU_TYPES = ("L4-", "L40S-", "H100-")
+
+
+def has_gpu(commercial_type: str) -> bool:
+    return commercial_type.startswith(GPU_TYPES)
+
+
+def offer_of(commercial_type: str) -> Offer:
+    """The offer of a type `up` may pick; an unknown one is priced as the dearest."""
+    for offer in DEMO_OFFERS:
+        if offer.commercial_type == commercial_type:
+            return offer
+    return max(DEMO_OFFERS, key=lambda o: o.eur_per_hour)
+
+
 #: Block Storage (5K IOPS) and a zonal flexible IPv4, in euros an hour, from the public
 #: catalogue (2026-11-03): €0.00013 per GB an hour, and €0.005 an hour for the IP.
 VOLUME_EUR_PER_GB_HOUR = 0.00013
@@ -78,10 +107,12 @@ MOUNTS = {"web-index": "/web-index", "weights": "/weights", "state": "/state"}
 SCW_ENV = "env"
 SITE_ENV = "site.env"
 SESSION_ENV = "session.env"
-#: Under state/: the last visit (`miroir.web.visits`), the idle limit for this session, and
-#: the conversation page's spending per day and logs (`miroir.remote.site`).
+#: Under state/: the last visit (`miroir.web.visits`), the idle limit for this session,
+#: whether the containers were made for a GPU, and the conversation page's spending per day
+#: and logs (`miroir.remote.site`).
 LAST_VISIT = "last-visit"
 IDLE_FILE = "idle-minutes"
+HARDWARE_FILE = "hardware"
 CHAT_DAYS = "chat-days.json"
 CHAT_LOGS = "chat-logs"
 CONTAINERS = ("miroir-site", "miroir-watch", "caddy")
@@ -122,13 +153,24 @@ class DemoState:
     """When the machine was powered on, while that session is not in the ledger yet."""
     rest_paid_until: float | None = None
     """The volume and IP are in the ledger up to here."""
+    session_type: str | None = None
+    """The commercial type of that session (the price it is billed at)."""
 
 
 def read_state(path: Path) -> DemoState:
     if not path.exists():
         return DemoState()
-    raw = cast("dict[str, float | None]", json.loads(path.read_text(encoding="utf-8")))
-    return DemoState(raw.get("session_start"), raw.get("rest_paid_until"))
+    raw = cast("dict[str, float | str | None]", json.loads(path.read_text(encoding="utf-8")))
+    start, rest, kind = (
+        raw.get("session_start"),
+        raw.get("rest_paid_until"),
+        raw.get("session_type"),
+    )
+    return DemoState(
+        None if start is None else float(start),
+        None if rest is None else float(rest),
+        None if kind is None else str(kind),
+    )
 
 
 def write_state(path: Path, state: DemoState) -> None:
@@ -148,6 +190,7 @@ class DemoMachine:
     address: str | None
     changed: float | None
     """Unix time of its last change of state (Scaleway's `modification_date`)."""
+    commercial_type: str = DEMO_OFFER.commercial_type
 
     @property
     def url(self) -> str | None:
@@ -171,6 +214,7 @@ def _machine(zone: str, server: dict[str, object]) -> DemoMachine:
         state=str(server.get("state")),
         address=v4[0] if v4 else None,
         changed=None if changed is None else datetime.fromisoformat(str(changed)).timestamp(),
+        commercial_type=str(server.get("commercial_type", DEMO_OFFER.commercial_type)),
     )
 
 
@@ -229,18 +273,21 @@ class Demo:
         state = replace(state, rest_paid_until=now)
         if state.session_start is None and machine.state != "stopped":
             # Powered on elsewhere (the console): count from its last change, or from now.
-            state = replace(state, session_start=machine.changed or now)
+            state = replace(
+                state, session_start=machine.changed or now, session_type=machine.commercial_type
+            )
         if state.session_start is not None and machine.state == "stopped":
             end = machine.changed if machine.changed is not None else now
             end = min(max(end, state.session_start), now)
-            self.ledger.record(DEMO_NAME, DEMO_OFFER, end - state.session_start, "demo")
-            state = replace(state, session_start=None)
+            offer = offer_of(state.session_type or machine.commercial_type)
+            self.ledger.record(DEMO_NAME, offer, end - state.session_start, "demo")
+            state = replace(state, session_start=None, session_type=None)
         write_state(self.state_path, state)
         return state
 
-    def check_budget(self, hours: float) -> None:
+    def check_budget(self, hours: float, offer: Offer = DEMO_OFFER) -> None:
         spent = self.ledger.total_eur()
-        worst = hours * DEMO_OFFER.eur_per_hour
+        worst = hours * offer.eur_per_hour
         cap = self.settings.scw_budget_eur
         if spent + worst > cap:
             msg = (
@@ -254,40 +301,63 @@ class Demo:
         if state.session_start is None:
             return 0.0
         minutes = max(1, math.ceil((self.clock() - state.session_start) / 60))
-        return minutes * 60 * DEMO_OFFER.eur_per_s
+        return minutes * 60 * offer_of(state.session_type or "").eur_per_s
 
     # --- power -----------------------------------------------------------------------------
 
-    def power_on(self, machine: DemoMachine) -> DemoMachine:
-        """Power on (refused past the cap) and wait until Scaleway says it runs. When no GPU
-        is free, try again every `STOCK_WAIT_S` for a few minutes: GPUs come back often."""
+    def power_on(self, machine: DemoMachine, *, allow_cpu: bool = True) -> DemoMachine:
+        """Power on and wait until Scaleway says it runs.
+
+        Tries each of `DEMO_OFFERS` in order (without a GPU only with `allow_cpu`), skipping
+        those whose longest session would pass the cap, changing the machine's type while it
+        is off; when none starts, tries again every `STOCK_WAIT_S`, `STOCK_TRIES` times."""
         self.settle(machine)
         if machine.state in {"running", "starting"}:
             return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
         if machine.state != "stopped":
             msg = f"the demo machine is {machine.state}: wait a minute and try again"
             raise RuntimeError(msg)
-        self.check_budget(self.settings.demo_max_hours)
+        offers = [o for o in DEMO_OFFERS if allow_cpu or has_gpu(o.commercial_type)]
+        affordable = [o for o in offers if self._fits(o)]
+        if not affordable:
+            self.check_budget(self.settings.demo_max_hours, offers[0])  # raises, with the sums
         self._keep_key(machine)
+        current = machine.commercial_type
         for attempt in range(STOCK_TRIES):
-            try:
-                self.api.action(machine.zone, machine.server_id, "poweron")
-                break
-            except ScalewayError as err:
-                if not out_of_stock(err):
-                    raise
-                if attempt == STOCK_TRIES - 1:
-                    msg = (
-                        f"no free {DEMO_OFFER.commercial_type} in {machine.zone} for "
-                        f"{STOCK_TRIES * STOCK_WAIT_S / 60:.0f} min; try again later"
-                    )
-                    raise RuntimeError(msg) from err
-                logger.warning("no free GPU yet; trying again in %.0f s", STOCK_WAIT_S)
+            for offer in affordable:
+                if offer.commercial_type != current:
+                    self.api.set_type(machine.zone, machine.server_id, offer.commercial_type)
+                    current = offer.commercial_type
+                try:
+                    self.api.action(machine.zone, machine.server_id, "poweron")
+                except ScalewayError as err:
+                    if not out_of_stock(err):
+                        raise
+                    logger.warning("%s: none free", offer.commercial_type)
+                    continue
+                logger.info("powering on as %s (€%.2f an hour)", current, offer.eur_per_hour)
+                started = replace(
+                    read_state(self.state_path), session_start=self.clock(), session_type=current
+                )
+                write_state(self.state_path, started)
+                return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
+            if attempt < STOCK_TRIES - 1:
+                logger.warning("no machine free yet; trying again in %.0f s", STOCK_WAIT_S)
                 self.sleep(STOCK_WAIT_S)
-        write_state(
-            self.state_path, replace(read_state(self.state_path), session_start=self.clock())
+        names = ", ".join(o.commercial_type for o in affordable)
+        msg = (
+            f"none of {names} free in {machine.zone} for "
+            f"{STOCK_TRIES * STOCK_WAIT_S / 60:.0f} min; try again later"
         )
-        return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
+        raise RuntimeError(msg)
+
+    def _fits(self, offer: Offer) -> bool:
+        try:
+            self.check_budget(self.settings.demo_max_hours, offer)
+        except RuntimeError:
+            logger.info("%s left out: past the cap", offer.commercial_type)
+            return False
+        return True
 
     def _keep_key(self, machine: DemoMachine) -> None:
         """Make sure the boot writes the Mac's key: machines made before the tag lacked it."""
@@ -347,7 +417,10 @@ def create_demo(demo: Demo, public_key: str) -> DemoMachine:
     server_id = str(server["id"])
     api.set_user_data(zone, server_id, "cloud-init", cloud_init(public_key))
     now = demo.clock()
-    write_state(demo.state_path, DemoState(session_start=now, rest_paid_until=now))
+    first = DemoState(
+        session_start=now, rest_paid_until=now, session_type=DEMO_OFFER.commercial_type
+    )
+    write_state(demo.state_path, first)
     api.action(zone, server_id, "poweron")
     machine = DemoMachine(server_id, zone, "starting", str(ip.get("address")), None)
     return wait_state(api, machine, "running", BOOT_TIMEOUT_S)
@@ -392,8 +465,29 @@ def install(
         f"mkdir -p {ROOT}/caddy && cat > {ROOT}/caddy/Caddyfile",
         stdin=caddyfile(machine.address).encode(),
     )
-    for command in container_commands(machine, settings, index):
+    start_containers(shell, machine, settings, index, gpu=has_gpu(machine.commercial_type))
+
+
+def start_containers(
+    shell: Shell, machine: DemoMachine, settings: Settings, index: str, *, gpu: bool
+) -> None:
+    """(Re)make the three containers for this hardware, and note which it was for."""
+    for command in container_commands(machine, settings, index, gpu=gpu):
         shell.run(command, timeout=10 * 60)  # the first run pulls Caddy's image
+    shell.run(f"echo {'gpu' if gpu else 'cpu'} > {ROOT}/state/{HARDWARE_FILE}")
+
+
+def fit_hardware(shell: Shell, machine: DemoMachine, settings: Settings, index: str) -> bool:
+    """After a boot: when the machine's type changed between GPU and CPU since the containers
+    were made, make them again for it (the site's container asks Docker for the GPU).
+    Returns whether the machine has a GPU."""
+    gpu = has_gpu(machine.commercial_type)
+    made_for = shell.run(f"cat {ROOT}/state/{HARDWARE_FILE} 2>/dev/null || echo gpu").strip()
+    if made_for != ("gpu" if gpu else "cpu"):
+        logger.info("containers made for %s, machine has %s: making them again", made_for,
+                    "a GPU" if gpu else "no GPU")  # fmt: skip
+        start_containers(shell, machine, settings, index, gpu=gpu)
+    return gpu
 
 
 def site_env(settings: Settings) -> str:
@@ -438,13 +532,15 @@ def fetch_command(index: str = DEMO_INDEX) -> str:
 
 
 def container_commands(
-    machine: DemoMachine, settings: Settings, index: str = DEMO_INDEX
+    machine: DemoMachine, settings: Settings, index: str = DEMO_INDEX, *, gpu: bool = True
 ) -> list[str]:
     """The three containers, made again from scratch. `--restart unless-stopped` starts
-    them at every boot."""
+    them at every boot. Without `gpu` the site's container asks for no GPU (Docker refuses
+    to start it otherwise) and its models run on the CPU."""
     restart = "--restart unless-stopped"
+    gpus = "--gpus all " if gpu else ""
     site = (
-        f"docker run -d --name miroir-site {restart} --gpus all --network host --shm-size 8g "
+        f"docker run -d --name miroir-site {restart} {gpus}--network host --shm-size 8g "
         f"--env-file {ROOT}/{SITE_ENV} --env-file {ROOT}/{SESSION_ENV} "
         f"{_volumes('web-index', 'weights', 'state', read_only=('web-index',))} "
         f"--entrypoint miroir {IMAGE_TAG} demo serve "

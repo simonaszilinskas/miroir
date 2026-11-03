@@ -22,7 +22,9 @@ from miroir.outlines import DETECT_SIDE, PROMPTS, Box, DetectorKind, DetectorOpt
 
 logger = logging.getLogger(__name__)
 
-DEVICE = "cuda"
+#: The GPU, or the CPU on a machine without one (the demo machine's fallback when no GPU
+#: is free, `miroir.jobs.demo.DEMO_OFFERS`).
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 #: Raw boxes kept per photo, surest first, after merging near-identical ones.
 MAX_RAW = 80
 #: Two raw boxes this alike (IoU) are one, whatever their prompts.

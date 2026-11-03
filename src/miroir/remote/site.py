@@ -39,6 +39,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: What the page says when the machine has no GPU (no GPU was free at power-on).
+CPU_NOTICE = (
+    "Mode dégradé : aucune carte graphique n’était libre, Miroir tourne sur un serveur sans. "
+    "Les recherches prennent quelques secondes de plus et la légende des tirages anciens "
+    "n’est pas lue."
+)
+
 
 class InProcessBackend:
     """The search backend (`miroir.web.app.SearchBackend`) with the models in this process.
@@ -111,6 +118,7 @@ def serve_site(settings: Settings, *, index: Path, state: Path, port: int) -> No
         session_key=settings.session_secret.get_secret_value().encode(),
         chat=None if model is None else chat,
         on_visit=VisitMark(state / LAST_VISIT).touch,
+        notice=CPU_NOTICE if service.degraded else None,
     )
     logger.info("conversation page: %s", "off (no key)" if model is None else model.model)
     # Caddy, on the same machine, is the only client: it sets X-Forwarded-For.

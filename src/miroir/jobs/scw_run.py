@@ -237,9 +237,13 @@ def start_worker(
 def build_image(shell: Shell, settings: Settings, *, match: bool = False) -> None:
     """Send the keys and the build context, and build the job image on the machine."""
     send_env(shell, settings)
-    smi = shell.run("nvidia-smi")
-    logger.info("GPU: %s", " ".join(line.strip() for line in smi.splitlines()[2:4]))
-    cuda = float(smi.split("CUDA Version:")[1].split()[0])
+    smi = shell.run("nvidia-smi", check=False)
+    if "CUDA Version:" in smi:
+        logger.info("GPU: %s", " ".join(line.strip() for line in smi.splitlines()[2:4]))
+        cuda = float(smi.split("CUDA Version:")[1].split()[0])
+    else:  # the demo machine on a type without a GPU: the newest wheels run on the CPU too
+        logger.info("no GPU: building with the newest PyTorch wheels")
+        cuda = TORCH_INDEXES[0][0]
     shell.run(
         f"rm -rf {REMOTE_ROOT}/build && mkdir -p {REMOTE_ROOT}/build "
         f"&& tar -xzf - -C {REMOTE_ROOT}/build",

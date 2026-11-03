@@ -26,6 +26,7 @@ from miroir.jobs.demo import (
     container_commands,
     create_demo,
     find_demo,
+    has_gpu,
     hostname,
     read_state,
     rest_eur_per_hour,
@@ -82,8 +83,9 @@ class Clock:
 class FakeApi:
     """One zone's servers and IPs in memory."""
 
-    def __init__(self, *, stock: bool = True) -> None:
-        self.stock = stock
+    def __init__(self) -> None:
+        self.free = {"L4-1-24G"}
+        """Commercial types that can power on."""
         self.by_id: dict[str, JSON] = {}
         self.reserved: list[JSON] = []
         self.actions: list[tuple[str, str]] = []
@@ -103,6 +105,7 @@ class FakeApi:
             "name": name,
             "state": "stopped",
             "tags": tags,
+            "commercial_type": offer.commercial_type,
             "public_ips": [{"id": ip_id, "address": "51.15.1.2", "family": "inet"}],
             "modification_date": "2026-11-03T10:00:00+00:00",
             "volumes": {"0": {"id": "v1", "volume_type": "sbs_volume"}},
@@ -113,13 +116,17 @@ class FakeApi:
     def set_user_data(self, zone: str, server_id: str, key: str, text: str) -> None:
         assert "ssh-ed25519" in text
 
+    def set_type(self, zone: str, server_id: str, commercial_type: str) -> None:
+        assert self.by_id[server_id]["state"] == "stopped"
+        self.by_id[server_id]["commercial_type"] = commercial_type
+
     def set_tags(self, zone: str, server_id: str, tags: list[str]) -> None:
         self.by_id[server_id]["tags"] = tags
 
     def action(self, zone: str, server_id: str, action: str) -> None:
         self.actions.append((server_id, action))
         if action == "poweron":
-            if not self.stock:
+            if self.by_id[server_id]["commercial_type"] not in self.free:
                 raise ScalewayError(412, "out_of_stock", "out of stock")
             self.by_id[server_id]["state"] = "running"
         elif action == "poweroff":
@@ -245,15 +252,42 @@ def test_power_on_is_refused_past_the_cap(settings: Settings) -> None:
     assert fake.by_id["s1"]["state"] == "stopped"
 
 
-def test_no_gpu_free_is_tried_again_then_said(settings: Settings) -> None:
+def test_without_a_free_l4_it_runs_on_the_cpu_and_is_billed_at_that_price(
+    settings: Settings,
+) -> None:
     fake, clock = FakeApi(), Clock()
     demo, machine = made(settings, fake, clock)
     machine = demo.power_off(machine)
-    fake.stock = False
+    fake.free = {"POP2-HM-12C-96G"}  # no L4, no L40S
+    machine = demo.power_on(machine)
+    assert machine.commercial_type == "POP2-HM-12C-96G"
+    assert not has_gpu(machine.commercial_type)
+    clock.now += HOUR
+    demo.power_off(machine)
+    session = [line for line in ledger(settings) if line["purpose"] == "demo"][-1]
+    assert session["type"] == "POP2-HM-12C-96G"
+    assert session["cost_eur"] == pytest.approx(0.62, abs=1e-3)
+
+
+def test_the_next_up_goes_back_to_an_l4_when_one_is_free(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    fake.by_id["s1"]["commercial_type"] = "POP2-HM-12C-96G"
+    found = find_demo(_api(fake))
+    assert found is not None
+    assert demo.power_on(found).commercial_type == "L4-1-24G"
+
+
+def test_gpu_only_waits_then_says_none_was_free(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    fake.free = {"POP2-HM-12C-96G"}
     waits: list[float] = []
     demo = Demo(settings, _api(fake), clock, sleep=waits.append)
-    with pytest.raises(RuntimeError, match="no free L4-1-24G"):
-        demo.power_on(machine)
+    with pytest.raises(RuntimeError, match="none of L4-1-24G, L40S-1-48G free"):
+        demo.power_on(machine, allow_cpu=False)
     assert len(waits) == demo_module.STOCK_TRIES - 1
 
 
@@ -261,13 +295,31 @@ def test_a_gpu_freed_while_waiting_starts_the_machine(settings: Settings) -> Non
     fake, clock = FakeApi(), Clock()
     demo, machine = made(settings, fake, clock)
     machine = demo.power_off(machine)
-    fake.stock = False
+    fake.free = set()
 
     def wait(_: float) -> None:
-        fake.stock = True
+        fake.free = {"L4-1-24G"}
 
     demo = Demo(settings, _api(fake), clock, sleep=wait)
-    assert demo.power_on(machine).state == "running"
+    assert demo.power_on(machine, allow_cpu=False).state == "running"
+
+
+def test_a_type_past_the_cap_is_left_out(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    MachineLedger(settings.scaleway_dir / "spend.jsonl").record_cost(
+        "earlier", "fr-par-2", "L4", minutes=1, cost=40.0, purpose="embed"
+    )  # €50 cap: 8 h of an L40S (€11.76) no longer fits, 8 h of an L4 (€6.32) does
+    fake.free = {"L40S-1-48G"}
+    with pytest.raises(RuntimeError, match="none of L4-1-24G, POP2"):
+        Demo(settings, _api(fake), clock, sleep=lambda _: None).power_on(machine)
+
+
+def test_containers_for_a_machine_without_gpu_ask_for_none(settings: Settings) -> None:
+    machine = DemoMachine("s1", "fr-par-2", "running", "51.15.1.2", None, "POP2-HM-12C-96G")
+    assert "--gpus" not in " ".join(container_commands(machine, settings, gpu=False))
+    assert "--gpus all" in " ".join(container_commands(machine, settings, gpu=True))
 
 
 def test_status_counts_the_open_session(settings: Settings) -> None:

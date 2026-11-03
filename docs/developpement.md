@@ -76,7 +76,9 @@ Paris has none). Each command starts a machine, builds the job image on it from
 `docker/Dockerfile` with this checkout's code (about 4 minutes), runs, and deletes the machine
 with its volume and IP: on success, on error and on Ctrl-C. The machine also deletes itself at
 `--max-hours`, even if the Mac is gone. Every machine carries the `miroir` tag, so
-`miroir scw ps` finds anything left behind and `miroir scw cleanup` deletes it.
+`miroir scw ps` finds anything left behind and `miroir scw cleanup` deletes it. The one
+machine that lives on is the website's demo machine (`miroir demo`, prototype.md, section
+Hosting): `scw ps` lists it as `demo` and `scw cleanup` leaves it alone.
 
 Four Object Storage buckets hold the files the machines and the website read
 (`src/miroir/jobs/objects.py`):
@@ -114,8 +116,12 @@ for the whole of `--max-hours` to the ledger's total, and refuses when that pass
 the cap is a project decision.
 
 The prices are typed by hand into `OFFERS` in `src/miroir/jobs/scaleway.py` (euros an hour
-without VAT, Scaleway's public prices of November 2026; the API gives none). Check them
-against the bill in the Scaleway console, and fix them when they differ.
+without VAT, rounded up). The Instance API gives none, but Scaleway's public catalogue does,
+with no key: `https://api.scaleway.com/product-catalog/v2alpha1/public-catalog/products`. Read
+on 2026-11-03: L4-1-24G €0.013125 a minute (€0.7875 an hour; the table had €0.75 until then,
+so earlier L4 lines of the ledger are 5% low), L40S-1-48G €0.024498 a minute (€1.47; it had
+€1.40), POP2-HM-16C-128G €0.824 an hour (it has €1.05), block storage €0.00013 per GB an
+hour, a flexible IPv4 €0.005 an hour.
 
 Smoke test, 2026-11-02, L4-1-24G in fr-par-2: every A7 and A3 vector matched the July Modal
 vectors (cosine 1.0000); 6 minutes of machine, €0.08.
