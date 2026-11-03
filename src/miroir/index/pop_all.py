@@ -254,8 +254,8 @@ def assemble(settings: Settings, client: S3Client, work: Path) -> dict[str, obje
             source.july.info,
             gallery=INDEX,
             created=datetime.now(UTC).date(),
-            notes=f"July vectors ({source.july.info.gallery}) and Scaleway L4 vectors of the "
-            "files July lacked, from the stored images shrunk to 512 px as in July",
+            notes=f"July vectors ({source.july.info.gallery}) and Scaleway L40S vectors of "
+            "the files July lacked, from the stored images shrunk to 512 px as in July",
         )
         gathered = Gathered((*rows.files, *commons), source)
         write_vectors(settings.vectors_path(run), (*rows.ids, *commons), gathered, info)  # pyright: ignore[reportArgumentType]

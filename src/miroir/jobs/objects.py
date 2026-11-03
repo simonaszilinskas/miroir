@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 #: Parallel transfers between a folder and a bucket.
 TRANSFERS = 32
 UPLOAD_ATTEMPTS = 5
+#: Scaleway Object Storage takes at most 1,000 parts per multipart upload; boto3's default
+#: 8 MB parts stop an upload near 8 GB (the `pop-all` int8 store weighs 19 GB).
+MAX_PARTS = 1000
+MIN_PART_BYTES = 8 * 1024 * 1024
 
 
 class Bucket(StrEnum):
@@ -154,10 +158,21 @@ def upload_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -> 
 def upload_files(client: S3Client, bucket: str, root: Path, files: Iterable[Path]) -> None:
     """Upload these files, keyed by their path under `root`."""
 
+    from boto3.s3.transfer import TransferConfig  # noqa: PLC0415
+
     def put(path: Path) -> None:
-        _again(lambda: client.upload_file(str(path), bucket, _key(root, path)))
+        config = TransferConfig(multipart_chunksize=part_bytes(path.stat().st_size))
+        _again(lambda: client.upload_file(str(path), bucket, _key(root, path), Config=config))
 
     list(bounded_map(put, list(files), workers=TRANSFERS))
+
+
+def part_bytes(size: int) -> int:
+    """Part size for a file of `size` bytes: boto3's 8 MB, or more so the parts stay within
+    `MAX_PARTS`, rounded up to the MB."""
+    mb = 1024 * 1024
+    need = -(-size // MAX_PARTS)
+    return max(MIN_PART_BYTES, -(-need // mb) * mb)
 
 
 def _again(call: Callable[[], None]) -> None:
