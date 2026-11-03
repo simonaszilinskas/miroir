@@ -63,12 +63,14 @@ def s3_client(settings: Settings, connections: int = TRANSFERS) -> S3Client:
     if settings.scw_access_key is None or settings.scw_secret_key is None:
         msg = "Scaleway is not set up: SCW_ACCESS_KEY and SCW_SECRET_KEY go in .env"
         raise RuntimeError(msg)
-    # Scaleway does not take the checksums newer boto3 adds to every upload.
+    # Scaleway does not take the checksums newer boto3 adds to every upload. It answers
+    # "InternalError" in bursts now and then: retried up to 12 times (5 were not enough on
+    # 2026-11-03).
     config = Config(
         max_pool_connections=connections,
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
-        retries={"max_attempts": 5, "mode": "standard"},
+        retries={"max_attempts": 12, "mode": "standard"},
     )
     return boto3.client(  # pyright: ignore[reportUnknownMemberType]
         "s3",
