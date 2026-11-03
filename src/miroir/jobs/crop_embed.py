@@ -156,9 +156,9 @@ def trial_key(name: str) -> str:
     return f"{PREFIX}/{name}/trial.json"
 
 
-def job_name(name: str, first: int, last: int) -> str:
-    """The status file's job: one per machine's range of pieces."""
-    return f"crops-{name}-{first}-{last}"
+def job_name(name: str, first: int, last: int, *, reverse: bool = False) -> str:
+    """The status file's job: one per machine's range of pieces and direction."""
+    return f"crops-{name}-{first}-{last}" + ("-reverse" if reverse else "")
 
 
 # --- what a piece holds ----------------------------------------------------------------------
@@ -339,7 +339,7 @@ def crop_launch(
     from miroir.jobs.scw_run import IMAGE_TAG, MOUNTS, REMOTE_ROOT, build_image  # noqa: PLC0415
 
     def start(shell: Shell, machine: Machine) -> None:
-        tag = torch_tag or ("cu126" if machine.offer.commercial_type == "RENDER-S" else "")
+        tag = "cu126" if machine.offer.commercial_type == "RENDER-S" else ""
         build_image(shell, settings, torch_tag=tag)
         run = f"docker run -d --env-file {REMOTE_ROOT}/env {MOUNTS} --entrypoint miroir "
         shell.run(
@@ -348,11 +348,11 @@ def crop_launch(
         )
         shell.run(
             f"{run} --name crops --gpus all --shm-size 8g {IMAGE_TAG} scw crop-embed-run "
-            f"--name {name} --first {first} --last {last}"
+            f"--name {name} --first {first} --last {last}" + (" --reverse" if reverse else "")
         )
 
     return Launch(
-        job=job_name(name, first, last),
+        job=job_name(name, first, last, reverse=reverse),
         shards=(0,),
         start=start,
         alive="docker ps -q --filter name=^crops$ | wc -l",

@@ -258,17 +258,25 @@ class Reporter:
         logger.info("%s", self.status.line())
 
 
-def run_crop_embed(settings: Settings, *, name: str, first: int, last: int) -> JobStatus:
-    """Pieces `first`..`last` of the job `name` that are not written yet."""
+def run_crop_embed(
+    settings: Settings, *, name: str, first: int, last: int, reverse: bool = False
+) -> JobStatus:
+    """Pieces `first`..`last` of the job `name` that are not written yet, last first with
+    `reverse`: a second machine on a range meets the first in the middle, each skipping
+    the pieces the other wrote."""
     s3 = s3_client(settings, connections=FETCHERS + 8)
     bucket = bucket_name(settings, Bucket.IMAGES)
     spec = read_crop_spec(s3.get_object(Bucket=bucket, Key=spec_key(name))["Body"].read())
     pieces = spec.pieces()[first : last + 1]
     done = written_pieces(s3, bucket, name)
     todo = [p for p in pieces if p not in done]
+    if reverse:
+        todo.reverse()
     note = f"{len(pieces) - len(todo)} pieces already written"
     reporter = Reporter(
-        s3, bucket, JobStatus(job_name(name, first, last), 0, 1, total=len(todo), note=note)
+        s3,
+        bucket,
+        JobStatus(job_name(name, first, last, reverse=reverse), 0, 1, total=len(todo), note=note),
     )
     try:
         reporter.set(force=True, note="weights")
@@ -288,6 +296,16 @@ def run_crop_embed(settings: Settings, *, name: str, first: int, last: int) -> J
         raise
     reporter.set(force=True, state=JobState.DONE)
     return reporter.status
+
+
+def _written(s3, bucket: str, key: str) -> bool:
+    from botocore.exceptions import ClientError  # noqa: PLC0415
+
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+    except ClientError:
+        return False
+    return True
 
 
 def _files_of(s3, bucket: str, spec: CropSpec, piece: str) -> list[str]:
@@ -313,6 +331,8 @@ def _run(
 
     def work() -> Iterator[tuple[str, str]]:
         for piece in todo:
+            if _written(s3, bucket, piece_key(spec.name, piece)):
+                continue  # another machine on the range did it meanwhile
             yield from ((piece, f) for f in _files_of(s3, bucket, spec, piece))
             yield piece, ""  # the piece ends here
 

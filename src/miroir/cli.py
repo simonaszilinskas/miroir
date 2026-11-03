@@ -1871,15 +1871,19 @@ def scw_crop_embed_run(
     name: Annotated[str, typer.Option(help="The crop job (its spec is in the images bucket).")],
     first: Annotated[int, typer.Option(help="First piece.")],
     last: Annotated[int, typer.Option(help="Last piece, included.")],
+    *,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Last piece first.")] = False,
 ) -> None:
     """Crop vectors for pieces of a crop job, in the job image on a GPU machine. Never run on
     the Mac."""
     from miroir.remote.crop_embed import run_crop_embed  # noqa: PLC0415 (machine only)
 
-    run_crop_embed(get_settings(), name=name, first=first, last=last)
+    run_crop_embed(get_settings(), name=name, first=first, last=last, reverse=reverse)
 
 
-def _run_crop_job(name: str, first: int, last: int, max_hours: float, *, any_gpu: bool) -> None:
+def _run_crop_job(
+    name: str, first: int, last: int, max_hours: float, *, any_gpu: bool, reverse: bool = False
+) -> None:
     """One machine for pieces `first`..`last`, the best offer in stock; deleted at the end."""
     from miroir.jobs.crop_embed import crop_launch, crop_offers, in_stock  # noqa: PLC0415
     from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
@@ -1896,7 +1900,7 @@ def _run_crop_job(name: str, first: int, last: int, max_hours: float, *, any_gpu
     if not offers:
         typer.echo("no GPU in stock: nothing started")
         raise typer.Exit(1)
-    launch = crop_launch(settings, name, first, last)
+    launch = crop_launch(settings, name, first, last, reverse=reverse)
     done = run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
     for status in done:
         typer.echo(status.line())
@@ -1939,12 +1943,14 @@ def scw_crop_embed(
     any_gpu: Annotated[
         bool, typer.Option("--any-gpu", help="Also a RENDER-S (P100) when no L4 or L40S is free.")
     ] = False,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Last piece first.")] = False,
 ) -> None:
     """3x3 crop vectors of every stored POP file, pieces `first` to `last`, on one GPU machine
-    (resumable: pieces already written are skipped). The spec comes from `crop-embed-spec`."""
+    (resumable: pieces already written are skipped; `--reverse` starts from the last, to share
+    a range with a machine already on it). The spec comes from `crop-embed-spec`."""
     from miroir.jobs.crop_embed import FULL_NAME  # noqa: PLC0415
 
-    _run_crop_job(FULL_NAME, first, last, max_hours, any_gpu=any_gpu)
+    _run_crop_job(FULL_NAME, first, last, max_hours, any_gpu=any_gpu, reverse=reverse)
 
 
 @scw_app.command("crop-embed-spec")
