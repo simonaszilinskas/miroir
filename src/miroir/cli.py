@@ -343,6 +343,26 @@ def eval_run(
     _echo_scores([scored])
 
 
+@eval_app.command("crops")
+def eval_crops() -> None:
+    """Score the crop slice test from the tables `miroir scw crop-slice` brought back."""
+    import json  # noqa: PLC0415
+
+    from miroir.config import eval_result_path  # noqa: PLC0415
+    from miroir.eval.crops import cases_of, load_scores, report  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries  # noqa: PLC0415
+
+    settings = get_settings()
+    folder = slice_dir(settings)
+    spec = read_spec((folder / "spec.json").read_bytes())
+    scores = load_scores(folder, spec)
+    out = report(scores, cases_of(spec, slice_queries(settings)))
+    path = eval_result_path("R3", "SL", "crop-slice")
+    path.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+    typer.echo(json.dumps(out, indent=1, ensure_ascii=False))
+    typer.echo(f"written to {path}")
+
+
 @eval_app.command("compare")
 def eval_compare(
     a: Annotated[Path, typer.Argument(help="Result file of run a.")],
@@ -1848,6 +1868,36 @@ def scw_pop_embed(
             typer.echo(
                 f"{option_id}: {count} July files again, cosine min {low:.4f}, median {median:.4f}"
             )
+
+
+@scw_app.command("crop-slice-run", hidden=True)
+def scw_crop_slice_run() -> None:
+    """The crop slice test, in the job image on a GPU machine. Never run on the Mac."""
+    from miroir.remote.crop_slice import run_crop_slice  # noqa: PLC0415 (machine only)
+
+    run_crop_slice(get_settings())
+
+
+@scw_app.command("crop-slice")
+def scw_crop_slice(max_hours: MaxHours = 3.4) -> None:
+    """Crop slice test (docs/search-levels.md): crops of a 50,000-image gallery on an L40S,
+    scored against VET, PARTS, T2 and T3; the score tables land in the Scaleway folder."""
+    from miroir.jobs.crop_slice import crop_launch, fetch_outputs, prepare  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    typer.echo(prepare(settings, s3).note)
+    offers = [o for o in OFFERS if o.zone == "fr-par-2" and "L40S" in o.commercial_type]
+    try:
+        run_unattended(
+            settings, crop_launch(settings), offers=offers, max_hours=max_hours, purpose="crops"
+        )
+    finally:
+        for path in fetch_outputs(settings, s3):
+            typer.echo(f"got {path}")
 
 
 @scw_app.command("build-pop-index", hidden=True)
