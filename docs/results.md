@@ -835,7 +835,7 @@ Hit@1 / hit@10:
 | **Two-stage, PCA 128 picks 20,000 of POP's crops** | **77.8 / 88.3** | **68.0 / 79.0** | **75.8 / 96.0** | **61.1 / 76.1** | **55.0 / 66.0** | **64.6 / 89.9** |
 | Two-stage, PCA 256 picks 20,000 of POP's crops | 77.8 / 88.9 | 68.0 / 78.0 | 75.8 / 94.9 | 61.1 / 76.7 | 55.0 / 66.0 | 64.6 / 89.9 |
 
-int8 storage changes nothing beyond a tenth of a point. Wrong record first, slice ("lost": right first before, wrong first after): whole length loses 1 T2 and 2 T3 queries; PCA 256 norm loses 10 T2 and 8 T3; PCA 128 norm 16 and 12; two-stage with PCA 128 and 20,000 crops 1 and 1, as whole length does.
+int8 storage moves no figure by more than a point against float32. Wrong record first, slice ("lost": right first before, wrong first after): whole length loses 1 T2 and 2 T3 queries; PCA 256 norm loses 10 T2 and 8 T3; PCA 128 norm 16 and 12; two-stage with PCA 128 and 20,000 crops 1 and 1, as whole length does.
 
 Speed of MegaLoc on the L40S, 1,024 crops, cosine with float32 (`trial.json`): float32 241 crops a second; TF32 449 (worst cosine 0.999996); bfloat16 790 (worst 0.961); float16 764 (worst 0.9996, median 0.999994).
 
