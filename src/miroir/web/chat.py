@@ -818,7 +818,8 @@ class ChatService:
             if said and not _summarised(answer.tool_calls):
                 c.emit({"type": "say", "text": said})
             if not answer.tool_calls:
-                c.messages.append({"role": "assistant", "content": answer.text})
+                # Mistral refuses an assistant message with neither words nor calls.
+                c.messages.extend([{"role": "assistant", "content": answer.text}] if said else [])
                 if nudged:
                     return "message"
                 # Mistral sometimes says what it will do next and stops: once a turn, it is

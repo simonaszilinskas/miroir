@@ -7,6 +7,7 @@ import base64
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -656,6 +657,17 @@ def test_a_reply_without_a_tool_call_is_nudged_once() -> None:
     assert [e["text"] for e in of(second, "say")] == ["Merci !", "Bonne visite."]
     assert second[-1]["waiting"] == "message"
     assert len(rig.model.bodies) == 4
+
+
+def test_an_empty_reply_is_not_sent_back_to_the_model() -> None:
+    """A reasoning model may answer with thinking only: an empty assistant message makes
+    Mistral refuse the next call (HTTP 400 on the live demo)."""
+    script = [say_only(""), shown("PA1")]
+    with Rig(script) as rig:
+        cid = rig.start()
+        assert card_ids(rig.send(cid, "goal", EXACT)) == ["PA1"]
+    messages = cast("list[Mapping[str, JSON]]", rig.model.bodies[1]["messages"])
+    assert all(m.get("content") or m.get("tool_calls") for m in messages)
 
 
 def test_looks_at_thumbnails_have_their_own_cap() -> None:
