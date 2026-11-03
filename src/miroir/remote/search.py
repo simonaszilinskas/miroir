@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -144,13 +145,14 @@ class SearchService:
         captions = BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
         self.engine = load_search(folder, captions)
         captions.load_now()
-        self._tools: ToolSearch | None = None
+        self._tools = ToolSearch(self.engine)
         logger.info("search service ready in %.0f s", time.monotonic() - start)
+        # The conversation page's filters need every entity's facts: gathered beside the
+        # first searches rather than in the first filtered one.
+        threading.Thread(target=self._tools.warm, daemon=True).start()
 
     def detect(self, jpeg: bytes) -> Outlines:
         return self.outlines.find(jpeg)
 
     def tool_search(self, query: ToolQuery) -> ToolHits:
-        if self._tools is None:
-            self._tools = ToolSearch(self.engine)
         return self._tools.run(query)

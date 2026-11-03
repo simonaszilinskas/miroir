@@ -361,3 +361,14 @@ def _iso(when: float) -> str:
     from datetime import UTC, datetime  # noqa: PLC0415
 
     return datetime.fromtimestamp(when, UTC).isoformat()
+
+
+def test_tool_search_gathers_its_filter_facts_ahead() -> None:
+    from miroir.web.toolsearch import ToolSearch  # noqa: PLC0415
+
+    engine, _ = h.engine(building=False)
+    tools = ToolSearch(engine)
+    tools.warm()
+    facts = tools._facts
+    assert facts is not None
+    assert len(facts.bases) == engine.catalog.entity_count
