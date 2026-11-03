@@ -3,9 +3,9 @@
 Every T1 tune query photo, as POP serves it (a print on a card with a typed caption), goes
 through the website's own `Engine.search` on the full index, with the query's shoot hidden
 (`SearchRequest.exclude_images`). The models do not run here: their outputs are computed on
-Modal once and replayed.
+a GPU machine once and replayed.
 
-- `run_remote` (Modal): the print cut from its mount (`images.mount`, on the Mac) and the
+- `run_remote` (GPU machine): the print cut from its mount (`images.mount`, on the Mac) and the
   whole photo, each embedded by EmbeddingGemma 2 and MegaLoc as the site embeds a photo;
   the caption read by each open model of `caption.CAPTION_MODELS`; the A7 text vector of
   each caption. Saved under `Settings.archive_dir`.
@@ -36,7 +36,7 @@ from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import CaptionChunk, CaptionPhoto
 from miroir.images.mount import crop_picture, find_picture
 from miroir.jobs.gpu_run import PaidCall, paid_call
-from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, L4, OPTIONS, ChunkResult, ModelOption
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, OPTIONS, ChunkResult, Machine, ModelOption
 from miroir.jobs.remote_spec import SuppliedImage as Supplied
 from miroir.jobs.spend import SpendKind
 from miroir.records.model import Image
@@ -105,10 +105,13 @@ def archive_photos(settings: Settings) -> list[ArchivePhoto]:
     return out
 
 
-# --- on Modal ---------------------------------------------------------------------------------
+# --- on the GPU machine ----------------------------------------------------------------------
 
 
 class ArchiveCalls(Protocol):
+    @property
+    def machine(self) -> Machine: ...
+
     def embed(
         self, option: ModelOption, images: Sequence[Image], supplied: Sequence[Supplied] = ()
     ) -> ChunkResult: ...
@@ -145,7 +148,7 @@ def run_remote(
             done = paid_call(
                 paid,
                 lambda option=option: calls.embed(option, [], supplied),
-                machine=option.machine,
+                machine=calls.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=option_id,
@@ -167,7 +170,7 @@ def run_remote(
             done = paid_call(
                 paid,
                 lambda model=model, asked=asked: calls.read_captions(model, asked),
-                machine=L4,
+                machine=calls.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option="caption",
@@ -193,7 +196,7 @@ def run_remote(
             done = paid_call(
                 paid,
                 lambda option=option, texts=texts: calls.embed_texts(option, texts, texts),
-                machine=option.machine,
+                machine=calls.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=A7,
@@ -221,7 +224,7 @@ def caption_seconds(settings: Settings, model: str) -> Floats:
 
 
 class _Replay:
-    """The site's two interfaces, answering from vectors computed on Modal."""
+    """The site's two interfaces, answering from vectors computed on a GPU machine."""
 
     def __init__(
         self, photos: Mapping[str, tuple[Floats, Floats]], texts: Mapping[str, Floats]

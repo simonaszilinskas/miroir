@@ -1,7 +1,7 @@
-"""What runs on Modal: the open-model options, their GPUs, and Modal's prices.
+"""What runs on the GPU machine: the open-model options and the timeouts of a call.
 
-Plain data, read on the Mac (to plan, check spend and name runs) and inside the containers
-(to load the right model). No Modal or model import here.
+Plain data, read on the Mac (to plan, check spend and name runs) and on the machine (to load
+the right model). No model import here.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from enum import StrEnum
 import numpy as np
 from numpy.typing import NDArray
 
-#: The model libraries, pinned: the Modal image and the Scaleway machine's Docker image
-#: (`miroir.jobs.scw_run`) install the same ones.
+#: The model libraries, pinned: the Scaleway machine's Docker image (`miroir.jobs.scw_run`)
+#: installs them.
 MODEL_LIBRARIES = (
     "torch==2.14.1",
     "torchvision==0.29.1",
@@ -36,20 +36,9 @@ LIGHTGLUE = (
     "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8"
 )
 
-# Modal prices, checked 2026-10-12 on modal.com/pricing, in dollars per second.
-GPU_USD_PER_S: dict[str, float] = {
-    "T4": 0.000164,
-    "L4": 0.000222,
-    "A10": 0.000306,
-    "L40S": 0.000542,
-    "A100-80GB": 0.000694,
-}
-CPU_CORE_USD_PER_S = 0.0000131
-MEMORY_GIB_USD_PER_S = 0.00000222
-
 #: Images per remote call. The Mac logs spend and checks the budget between calls.
 CHUNK_IMAGES = 500
-#: A call may run this long, model download included, before Modal stops it.
+#: A call may run this long, model download included (the tunnel waits a little longer).
 CHUNK_TIMEOUT_S = 20 * 60
 #: AmsterTime download (0.9 GB) and unpacking.
 DOWNLOAD_TIMEOUT_S = 30 * 60
@@ -57,8 +46,6 @@ DOWNLOAD_TIMEOUT_S = 30 * 60
 R0_TIMEOUT_S = 30 * 60
 #: Queries per keypoint-matching call (step E1), each with its shortlist of 50.
 MATCH_QUERIES = 40
-#: A warm container waits this long for the next call before it shuts down.
-SCALEDOWN_S = 120
 #: EmbeddingGemma 2's prompt for words searched against images: the website's query side
 #: (`miroir.remote.search`) and the T7 query runs (`embed_texts`) both use it.
 TEXT_PROMPT = "SearchQuery"
@@ -67,7 +54,7 @@ CHUNK_TEXTS = 2_000
 
 
 class Family(StrEnum):
-    """Models that load and run the same way. One Modal function each."""
+    """Models that load and run the same way."""
 
     DINO = "dino"
     SIGLIP2 = "siglip2"
@@ -112,45 +99,21 @@ class DType(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Machine:
-    """What one Modal function asks for. Billing counts all three."""
+    """The machine a call runs on, at one price for the whole machine."""
 
-    gpu: str | None
-    cpu: float
-    memory_gib: int
-    flat_usd_per_s: float | None = None
-    """A whole machine at one price (a Scaleway GPU instance) instead of Modal's three parts."""
-
-    @property
-    def usd_per_s(self) -> float:
-        if self.flat_usd_per_s is not None:
-            return self.flat_usd_per_s
-        return (
-            (0.0 if self.gpu is None else GPU_USD_PER_S[self.gpu])
-            + self.cpu * CPU_CORE_USD_PER_S
-            + self.memory_gib * MEMORY_GIB_USD_PER_S
-        )
+    gpu: str
+    """Its type, e.g. "L4-1-24G"; run notes name it."""
+    usd_per_s: float
 
 
-#: Every family function. The cheapest GPU that holds every model here: 24 GB, bf16, and
-#: more compute per dollar than a T4.
-L4 = Machine(gpu="L4", cpu=4.0, memory_gib=16)
-#: R0 embedding: the DINOv3 7B weights (13.4 GB in bf16) pass through host memory.
-R0_MACHINE = Machine(gpu="L4", cpu=4.0, memory_gib=32)
-#: DINO models: the DINOv3 7B weights (13.4 GB in bf16) pass through host memory.
-L4_DINO = Machine(gpu="L4", cpu=4.0, memory_gib=32)
-#: R0 download: AmsterTime into a volume, no GPU.
-DOWNLOAD_MACHINE = Machine(gpu=None, cpu=1.0, memory_gib=2)
-#: Filling the image volume: many downloads at once, no GPU.
-FILL_MACHINE = Machine(gpu=None, cpu=2.0, memory_gib=4)
-#: Containers filling the image volume at once, and downloads in each.
-FILL_CONTAINERS = 8
+#: Parallel downloads when filling the images bucket (`GpuRunner.fill_images`).
 FILL_CONCURRENCY = 16
 FILL_TIMEOUT_S = 20 * 60
 
 
 @dataclass(frozen=True, slots=True)
 class ModelOption:
-    """One way to embed images on Modal."""
+    """One way to embed images with an open model."""
 
     id: str
     """Run-name prefix and probe key, e.g. "A1-dinov2-g-224-cls"."""
@@ -166,14 +129,9 @@ class ModelOption:
     dtype: DType
     batch_size: int
     gated: bool = False
-    """Weights need an accepted licence on Hugging Face (read through the `huggingface` secret)."""
+    """Weights need an accepted licence on Hugging Face (read with `HF_TOKEN`)."""
     resize: Resize = Resize.CENTRE_CROP
     """DINO only: crop to a square, or keep the whole image."""
-
-    @property
-    def machine(self) -> Machine:
-        """What its family's Modal function asks for."""
-        return L4_DINO if self.family is Family.DINO else L4
 
 
 def _dino(
@@ -269,14 +227,14 @@ def option(option_id: str) -> ModelOption:
     """Look up a gallery option or an R0 option by its id."""
     found = OPTIONS.get(option_id) or {o.id: o for o in R0_OPTIONS.values()}.get(option_id)
     if found is None:
-        msg = f"unknown Modal option {option_id!r}; known: {', '.join(OPTIONS)}"
+        msg = f"unknown model option {option_id!r}; known: {', '.join(OPTIONS)}"
         raise ValueError(msg)
     return found
 
 
 @dataclass(frozen=True, slots=True)
 class SuppliedImage:
-    """An image the Mac sends as bytes: a Commons query photo, which containers never fetch."""
+    """An image the Mac sends as bytes: a Commons query photo, which the machine never fetches."""
 
     image_id: str
     jpeg: bytes
@@ -293,6 +251,6 @@ class ChunkResult:
     skips: dict[str, int]
     """Images left out, by reason."""
     load_s: float
-    """Seconds spent loading the model in this call; 0 when the container had it already."""
+    """Seconds spent loading the model in this call; 0 when the machine had it already."""
     embed_s: float
     """Seconds spent fetching and embedding."""

@@ -1,21 +1,22 @@
-"""Embedding runs on Modal, driven from the Mac: probe, gallery run, and R0 on AmsterTime.
+"""Embedding runs on the GPU machine, driven from the Mac: probe, gallery run, and R0.
 
-Money (experiments.md §1 rule 5). Modal bills by the second for GPU, CPU and memory. Each
-remote call is timed on the Mac, from the call to its answer, and costs that many seconds at
-the function's published price (`remote_spec.Machine.usd_per_s`): a little more than Modal
-bills, since the clock also runs while the call travels. The cost goes into the one project
-ledger, tagged `modal`, even when the call fails. Before every call, total spend plus the
-call's worst case (its timeout at full price) must stay inside the usable budget. A gallery
-run needs a 100-image probe of the same model and size on file, and stops once it costs
-`OVERRUN_FACTOR` times its projection. Each answer is saved to a checkpoint as it arrives,
-so a stopped run resumes without paying twice.
+Every call goes to one Scaleway GPU machine (`miroir.jobs.scw_run.open_scaleway`), which
+yields the calls (`RemoteCalls`) and the machine's price (`RemoteCalls.machine`).
 
-Privacy (technical spec §9): Modal is an outside service, so only images of `publishable`
-records go there; a gallery with any other image is refused. Commons query photos are openly
-licensed: the Mac fetches them from Wikimedia (`CommonsImages`) and sends their bytes.
-The full-sample index is an exception (`all_images=True`): open models on our own
-Modal account may see every image, publishable or not (decided 2026-10-12 for the
-prototype). It never applies to OpenRouter.
+Money (experiments.md §1 rule 5). Each remote call is timed on the Mac, from the call to its
+answer, and costs that many seconds at the machine's price: a little more than the machine's
+share of the bill, since the clock also runs while the call travels. The cost goes into the one
+project ledger, tagged with the service (`scaleway`), even when the call fails. Before every
+call, total spend plus the call's worst case (its timeout at full price) must stay inside the
+usable budget. A gallery run needs a 100-image probe of the same model and size on file, and
+stops once it costs `OVERRUN_FACTOR` times its projection. Each answer is saved to a checkpoint
+as it arrives, so a stopped run resumes without paying twice.
+
+Privacy (technical spec §9): only images of `publishable` records go to the GPU machine; a
+gallery with any other image is refused. Commons query photos are openly licensed: the Mac
+fetches them from Wikimedia (`CommonsImages`) and sends their bytes. The full-sample index is
+an exception (`all_images=True`): open models on our own machines may see every image,
+publishable or not (decided 2026-10-12 for the prototype). It never applies to OpenRouter.
 """
 
 from __future__ import annotations
@@ -23,9 +24,9 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from itertools import batched
@@ -49,15 +50,10 @@ from miroir.jobs.remote_spec import (
     CHUNK_IMAGES,
     CHUNK_TEXTS,
     CHUNK_TIMEOUT_S,
-    DOWNLOAD_MACHINE,
     DOWNLOAD_TIMEOUT_S,
-    FILL_CONTAINERS,
-    FILL_MACHINE,
     FILL_TIMEOUT_S,
-    L4,
     MATCH_QUERIES,
     OPTIONS,
-    R0_MACHINE,
     R0_OPTIONS,
     R0_TIMEOUT_S,
     TEXT_PROMPT,
@@ -88,7 +84,7 @@ logger = logging.getLogger(__name__)
 OVERRUN_FACTOR = 1.5
 #: Start-up varies more than per-image time; small runs get this much slack on top.
 OVERRUN_MARGIN_USD = 0.25
-SERVICE_NAME = "Modal"
+SERVICE_NAME = "the GPU machine"
 
 
 class SuppliesImages(Protocol):
@@ -98,7 +94,12 @@ class SuppliesImages(Protocol):
 
 
 class RemoteCalls(Protocol):
-    """The calls a run makes. `miroir.jobs.modal_app.ModalCalls` sends them to Modal."""
+    """The calls a run makes. `miroir.jobs.scw_run.ScalewayCalls` sends them to the machine."""
+
+    @property
+    def machine(self) -> Machine:
+        """The machine every call runs on, at its price."""
+        ...
 
     def embed(
         self,
@@ -109,7 +110,6 @@ class RemoteCalls(Protocol):
     def embed_texts(
         self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
-    def scale(self, option: ModelOption, containers: int) -> None: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
     def amstertime_embed(self, option: ModelOption) -> ChunkResult: ...
@@ -118,7 +118,7 @@ class RemoteCalls(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class GpuProbe:
-    """Time and cost of embedding about 100 gallery images with one option on Modal."""
+    """Time and cost of embedding about 100 gallery images with one option on a GPU."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
 
@@ -152,7 +152,7 @@ def load_gpu_probe(path: Path) -> GpuProbe | None:
     try:
         return _PROBE.validate_json(path.read_bytes())
     except (ValidationError, json.JSONDecodeError) as err:
-        msg = f"{path} is not a Modal probe: {err}"
+        msg = f"{path} is not a GPU probe: {err}"
         raise BudgetError(msg) from err
 
 
@@ -176,13 +176,13 @@ class Paid[T]:
 
 @dataclass(frozen=True, slots=True)
 class PaidCall:
-    """What a paid Modal call needs to check the budget and log its cost."""
+    """What a paid call on the GPU machine needs to check the budget and log its cost."""
 
     ledger: SpendLedger
     budget: Budget
     key_usage_usd: float | None = None
     clock: Callable[[], float] = time.monotonic
-    service: Service = Service.MODAL
+    service: Service = Service.SCALEWAY
 
 
 def paid_call[T](
@@ -224,7 +224,7 @@ def paid_call[T](
 
 
 class GpuRunner:
-    """Runs embedding jobs on Modal and logs what each call costs."""
+    """Runs embedding jobs on the GPU machine and logs what each call costs."""
 
     def __init__(
         self,
@@ -235,12 +235,9 @@ class GpuRunner:
         commons: CommonsImages | None = None,
         clock: Callable[[], float] = time.monotonic,
         all_images: bool = False,
-        machine: Machine | None = None,
-        service: Service = Service.MODAL,
+        service: Service = Service.SCALEWAY,
     ) -> None:
         self.settings = settings
-        self._machine = machine
-        """The one machine every call runs on (a Scaleway GPU), else each function's own."""
         self._service = service
         self._all_images = all_images
         """Send images of records that are not publishable too (full-sample index only)."""
@@ -261,7 +258,7 @@ class GpuRunner:
         opt = option(option_id)
         ids = self._gallery(gallery)
         left = check_probe(self.budget, self.ledger, self._key_usage)
-        worst = opt.machine.usd_per_s * CHUNK_TIMEOUT_S
+        worst = self._calls.machine.usd_per_s * CHUNK_TIMEOUT_S
         if worst > left:
             msg = f"a probe may cost up to ${worst:.2f}; probes have ${left:.2f} left"
             raise BudgetError(msg)
@@ -269,7 +266,6 @@ class GpuRunner:
         run = f"probe-{run_name(opt, gallery)}"
         paid = self._paid(
             lambda: self._calls.embed(opt, self._images(sample)),
-            machine=opt.machine,
             timeout_s=CHUNK_TIMEOUT_S,
             kind=SpendKind.PROBE,
             option=opt.id,
@@ -290,7 +286,7 @@ class GpuRunner:
             images=len(done.ids),
             fixed_s=max(paid.wall_s - done.embed_s, 0.0),
             per_image_s=done.embed_s / len(done.ids),
-            usd_per_s=self._on(opt.machine).usd_per_s,
+            usd_per_s=self._calls.machine.usd_per_s,
             cost_usd=paid.cost_usd,
             created=_today(),
         )
@@ -312,15 +308,13 @@ class GpuRunner:
         gallery: str,
         *,
         max_usd: float | None = None,
-        workers: int = 1,
         reuse: Sequence[str] = (),
     ) -> tuple[VectorSet, ...]:
         """Embed every image of a gallery and write its vector runs (technical spec §7.1).
 
         One run, or two for CLS+GeM (`output_runs`). `max_usd` refuses the run when the probe
-        projects a higher cost. `workers` sends that many chunks at once, each to its own
-        container. `reuse` names vector runs of the same model and settings whose vectors are
-        taken as they are instead of being paid for again.
+        projects a higher cost. `reuse` names vector runs of the same model and settings whose
+        vectors are taken as they are instead of being paid for again.
         """
         opt = option(option_id)
         run = run_name(opt, gallery)
@@ -343,8 +337,6 @@ class GpuRunner:
             resolution=opt.resolution,
             count=len(todo),
         )
-        if probe is not None and workers > 1:  # each extra container starts up once
-            projected += (workers - 1) * probe.fixed_s * probe.usd_per_s
         if max_usd is not None and projected > max_usd:
             msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
             raise BudgetError(msg)
@@ -360,7 +352,7 @@ class GpuRunner:
         start = self._clock()
         skips: dict[str, int] = {}
         cost = 0.0
-        for paid in self._embed_chunks(opt, run, todo, workers):
+        for paid in self._embed_chunks(opt, run, todo):
             cost += paid.cost_usd
             _check_chunk(paid.result, opt)
             if paid.result.ids:
@@ -376,7 +368,6 @@ class GpuRunner:
         info = self._info(
             opt,
             gallery=gallery,
-            machine=opt.machine,
             cost=total,
             wall=self._clock() - start,
             skips=skips,
@@ -444,7 +435,6 @@ class GpuRunner:
         for images, supplied in self._query_chunks(pop, commons, skips):
             paid = self._paid(
                 lambda images=images, supplied=supplied: self._calls.embed(opt, images, supplied),
-                machine=opt.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=opt.id,
@@ -460,7 +450,6 @@ class GpuRunner:
         info = self._info(
             opt,
             gallery=label,
-            machine=opt.machine,
             cost=self.ledger.total(SpendKind.RUN, run=run),
             wall=self._clock() - start,
             skips=skips,
@@ -505,7 +494,6 @@ class GpuRunner:
             chunk_texts = [texts[i] for i in chunk]
             paid = self._paid(
                 lambda a=chunk_ids, b=chunk_texts: self._calls.embed_texts(opt, a, b),
-                machine=opt.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=opt.id,
@@ -524,7 +512,6 @@ class GpuRunner:
             self._info(
                 opt,
                 gallery=label,
-                machine=opt.machine,
                 cost=cost,
                 wall=self._clock() - start,
                 skips={},
@@ -545,7 +532,7 @@ class GpuRunner:
     ) -> VectorSet:
         """Embed images whose bytes the Mac sends, into run `<option>-<label>`.
 
-        For images a container cannot read itself: Commons photos added to the gallery (F2),
+        For images the machine cannot read itself: Commons photos added to the gallery (F2),
         or grey copies made on the Mac (F1). POP ids must be publishable. Needs a probe of
         the option, like a gallery run; resumes from its checkpoint.
         """
@@ -595,7 +582,6 @@ class GpuRunner:
                 continue
             paid = self._paid(
                 lambda supplied=supplied: self._calls.embed(opt, [], supplied),
-                machine=opt.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=opt.id,
@@ -612,7 +598,6 @@ class GpuRunner:
         info = self._info(
             opt,
             gallery=label,
-            machine=opt.machine,
             cost=self.ledger.total(SpendKind.RUN, run=run),
             wall=self._clock() - start,
             skips=skips,
@@ -644,14 +629,12 @@ class GpuRunner:
             yield [], supplied
 
     def _embed_chunks(
-        self, opt: ModelOption, run: str, todo: Sequence[str], workers: int
+        self, opt: ModelOption, run: str, todo: Sequence[str]
     ) -> Iterator[Paid[ChunkResult]]:
-        """Send `todo` in chunks, `workers` at a time; yield each answer as it arrives."""
-
-        def send(chunk: list[str]) -> Paid[ChunkResult]:
-            return self._paid(
-                lambda: self._calls.embed(opt, self._images(chunk)),
-                machine=opt.machine,
+        """Send `todo` in chunks, one after another; yield each answer as it arrives."""
+        for chunk in _chunks(todo):
+            yield self._paid(
+                lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option=opt.id,
@@ -660,28 +643,13 @@ class GpuRunner:
                 items=len(chunk),
             )
 
-        if workers <= 1:
-            for chunk in _chunks(todo):
-                yield send(chunk)
-            return
-        self._calls.scale(opt, workers)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures: list[Future[Paid[ChunkResult]]] = [
-                pool.submit(send, chunk) for chunk in _chunks(todo)
-            ]
-            try:
-                for future in as_completed(futures):
-                    yield future.result()
-            finally:
-                for future in futures:
-                    future.cancel()
-
     def _reuse(
         self, opt: ModelOption, name: str, wanted: set[str], held: set[str], checkpoint: Checkpoint
     ) -> int:
         """Copy the vectors of an earlier run into the checkpoint. Returns how many were taken.
 
-        Refused unless the run used the same model, size, pooling and number type on Modal.
+        Refused unless the run used the same model, size, pooling and number type on a GPU:
+        on Modal before 2026-11-03 (notes "Modal L4, float32") or on Scaleway since.
         """
         done = read_vectors(self.settings.vectors_path(name))
         info = done.info
@@ -689,7 +657,7 @@ class GpuRunner:
             opt.model,
             opt.resolution,
             opt.pooling.value,
-        ) and f"Modal {opt.machine.gpu}, {opt.dtype}" in info.notes
+        ) and _made_on_a_gpu(info.notes, opt)
         if not same:
             msg = f"{name} was not embedded with the settings of {opt.id}; not reused"
             raise ValueError(msg)
@@ -719,33 +687,27 @@ class GpuRunner:
         return None
 
     def fill_images(self, gallery: str) -> dict[str, int]:
-        """Fetch a gallery's images once into the Modal image volume, several containers at once.
+        """Fetch a gallery's images once into the images bucket, through the machine.
 
         Model runs then read images there instead of from POP. Images already there are skipped.
-        Cost: the call's wall time for every container that may run.
+        Cost: the call's wall time on the machine.
         """
         ids = self._gallery(gallery)
-        machine = Machine(
-            FILL_MACHINE.gpu,
-            FILL_MACHINE.cpu * FILL_CONTAINERS,
-            FILL_MACHINE.memory_gib * FILL_CONTAINERS,
-        )
         chunks = list(_chunks(ids))
         paid = self._paid(
             lambda: self._calls.fill_images([self._images(c) for c in chunks]),
-            machine=machine,
-            timeout_s=FILL_TIMEOUT_S * len(chunks) // FILL_CONTAINERS + FILL_TIMEOUT_S,
+            timeout_s=FILL_TIMEOUT_S * len(chunks),
             kind=SpendKind.RUN,
             option="images",
             run=f"images-{gallery}",
             model="none",
             items=len(ids),
         )
-        logger.info("image volume: %s for %s, $%.4f", paid.result, gallery, paid.cost_usd)
+        logger.info("images bucket: %s for %s, $%.4f", paid.result, gallery, paid.cost_usd)
         return paid.result
 
     def match(self, name: str, tasks: Sequence[MatchTask], *, max_usd: float) -> int:
-        """Keypoint matches of each query against its shortlist (step E1), on a Modal GPU.
+        """Keypoint matches of each query against its shortlist (step E1), on the GPU machine.
 
         Each answer is appended to `Settings.matches_path(name)` as it arrives, so a stopped
         run resumes. Stops before a call once the run has cost `max_usd`. Returns queries done.
@@ -763,7 +725,6 @@ class GpuRunner:
                 raise BudgetError(msg)
             paid = self._paid(
                 lambda chunk=chunk: self._calls.match(chunk),
-                machine=L4,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option="E1",
@@ -777,11 +738,11 @@ class GpuRunner:
             held.update({q.query_id: q for q in paid.result.queries})
             logger.info("%s: %d/%d queries, $%.4f", name, len(held), len(tasks), cost)
         if missing:
-            logger.warning("%s: %d image(s) could not be read on Modal", name, len(missing))
+            logger.warning("%s: %d image(s) could not be read on the machine", name, len(missing))
         return len(held)
 
     def r0(self, name: str) -> VectorSet:
-        """Round R0: download AmsterTime into a Modal volume, embed all 2,462 images there."""
+        """Round R0: download AmsterTime on the machine and embed its 2,462 images there."""
         if name not in R0_OPTIONS:
             msg = f"unknown R0 model {name!r}; known: {', '.join(R0_OPTIONS)}"
             raise ValueError(msg)
@@ -792,7 +753,6 @@ class GpuRunner:
         start = self._clock()
         downloaded = self._paid(
             self._calls.amstertime_download,
-            machine=DOWNLOAD_MACHINE,
             timeout_s=DOWNLOAD_TIMEOUT_S,
             kind=SpendKind.RUN,
             option="R0",
@@ -800,10 +760,9 @@ class GpuRunner:
             model="none",
             items=0,
         )
-        logger.info("AmsterTime on Modal: %d images", downloaded.result)
+        logger.info("AmsterTime on the machine: %d images", downloaded.result)
         paid = self._paid(
             lambda: self._calls.amstertime_embed(opt),
-            machine=R0_MACHINE,
             timeout_s=R0_TIMEOUT_S,
             kind=SpendKind.RUN,
             option="R0",
@@ -818,7 +777,6 @@ class GpuRunner:
         info = self._info(
             opt,
             gallery=amstertime.GALLERY,
-            machine=R0_MACHINE,
             cost=cost,
             wall=self._clock() - start,
             skips=done.skips,
@@ -834,7 +792,6 @@ class GpuRunner:
         self,
         call: Callable[[], T],
         *,
-        machine: Machine,
         timeout_s: int,
         kind: SpendKind,
         option: str,
@@ -845,7 +802,7 @@ class GpuRunner:
         return paid_call(
             PaidCall(self.ledger, self.budget, self._key_usage, self._clock, self._service),
             call,
-            machine=self._on(machine),
+            machine=self._calls.machine,
             timeout_s=timeout_s,
             kind=kind,
             option=option,
@@ -853,9 +810,6 @@ class GpuRunner:
             model=model,
             items=items,
         )
-
-    def _on(self, machine: Machine) -> Machine:
-        return machine if self._machine is None else self._machine
 
     def _gallery(self, name: str) -> list[str]:
         path = self.settings.gallery_path(name)
@@ -886,12 +840,11 @@ class GpuRunner:
         opt: ModelOption,
         *,
         gallery: str,
-        machine: Machine,
         cost: float,
         wall: float,
         skips: dict[str, int],
     ) -> RunInfo:
-        notes = f"{self._service.value.capitalize()} {self._on(machine).gpu}, {opt.dtype}"
+        notes = f"{self._service.value.capitalize()} {self._calls.machine.gpu}, {opt.dtype}"
         if opt.family is Family.DINO:
             notes += f", {opt.resize}"
         if skips:
@@ -908,6 +861,11 @@ class GpuRunner:
             route=Route.HOSTED,
             notes=notes,
         )
+
+
+def _made_on_a_gpu(notes: str, opt: ModelOption) -> bool:
+    """Whether run notes start "Modal <gpu>, <dtype>" or "Scaleway <gpu>, <dtype>"."""
+    return re.match(rf"(Modal|Scaleway) [^,;]+, {re.escape(opt.dtype)}\b", notes) is not None
 
 
 def _one_pooling(info: RunInfo, pooling: Pooling, *, shared: bool) -> RunInfo:

@@ -1,8 +1,9 @@
-"""Running the website from the Mac: upload an index, set the password, deploy, run locally.
+"""Running the website from the Mac: upload an index, set the password, run locally.
 
-`miroir web secret` makes one shared password, keeps it in the repository's `.env`
-(`config.ENV_PASSWORD_KEY`, never committed) and in the `miroir-app` Modal secret, and never
-prints it.
+`miroir web upload` copies a built bundle to the index bucket, where the demo machine and
+`miroir web dev --scw` read it. `miroir web secret` makes one shared password, keeps it in the
+repository's `.env` (`config.ENV_PASSWORD_KEY`, never committed) and never prints it;
+`miroir demo install` sends it to the demo machine.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from miroir.web import auth
 from miroir.web.bundle import bundle_files
 
 if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
+
     from miroir.web.app import SearchBackend
 
 logger = logging.getLogger(__name__)
@@ -26,60 +29,41 @@ logger = logging.getLogger(__name__)
 ENV_PASSWORD = ENV_PASSWORD_KEY
 
 
-def upload_index(settings: Settings, name: str = WEB_INDEX) -> int:
-    """Copy a built bundle to the index volume, under /<name>. Returns bytes sent."""
-    import modal  # noqa: PLC0415 (only this command needs it)
+def upload_index(settings: Settings, name: str = WEB_INDEX, client: S3Client | None = None) -> int:
+    """Copy a built bundle to the index bucket, under `<name>/`. Returns bytes sent.
 
-    from miroir.web.modal_app import INDEX_VOLUME  # noqa: PLC0415
+    Every file goes, even one the bucket holds at the same size (`levels.json` rewritten)."""
+    return _upload(settings, name, bundle_files(settings.web_index_dir(name)), client)
 
-    files = bundle_files(settings.web_index_dir(name))
-    volume = modal.Volume.from_name(INDEX_VOLUME, create_if_missing=True)
-    with volume.batch_upload(force=True) as batch:
-        for path in files:
-            batch.put_file(path, f"/{name}/{path.name}")  # pyright: ignore[reportUnknownMemberType]
+
+def upload_file(
+    settings: Settings, name: str, file_name: str, client: S3Client | None = None
+) -> int:
+    """Copy one file of a built bundle to the index bucket (e.g. `places.npz` alone)."""
+    return _upload(settings, name, [settings.web_index_dir(name) / file_name], client)
+
+
+def _upload(settings: Settings, name: str, files: list[Path], client: S3Client | None) -> int:
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client, upload_files  # noqa: PLC0415
+
+    bucket = bucket_name(settings, Bucket.INDEX)
+    root = settings.web_index_dir(name).parent
+    upload_files(client or s3_client(settings), bucket, root, files)
     size = sum(p.stat().st_size for p in files)
-    logger.info("uploaded %d files (%.0f MB) to %s:/%s", len(files), size / 1e6, INDEX_VOLUME, name)
+    logger.info("uploaded %d file(s) (%.1f MB) to %s/%s", len(files), size / 1e6, bucket, name)
     return size
 
 
-def upload_file(settings: Settings, name: str, file_name: str) -> int:
-    """Copy one file of a built bundle to the index volume (e.g. `places.npz` alone)."""
-    import modal  # noqa: PLC0415
-
-    from miroir.web.modal_app import INDEX_VOLUME  # noqa: PLC0415
-
-    path = settings.web_index_dir(name) / file_name
-    volume = modal.Volume.from_name(INDEX_VOLUME, create_if_missing=True)
-    with volume.batch_upload(force=True) as batch:
-        batch.put_file(path, f"/{name}/{file_name}")  # pyright: ignore[reportUnknownMemberType]
-    logger.info(
-        "uploaded %s (%.1f MB) to %s:/%s", file_name, path.stat().st_size / 1e6, INDEX_VOLUME, name
-    )
-    return path.stat().st_size
-
-
 def set_secret(*, rotate: bool = False, env_file: Path = ENV_FILE) -> bool:
-    """Make sure `.env` and the Modal secret hold the same password. True when it changed.
+    """Make sure `.env` holds the site's password. True when it made a new one.
 
-    The Modal secret cannot be read back, so a password already in `.env` is trusted to be
-    the one in Modal; `rotate` replaces both.
+    `rotate` replaces it. The demo machine gets it with `miroir demo install`.
     """
-    import modal  # noqa: PLC0415
-
-    from miroir.web.modal_app import APP_SECRET_NAME  # noqa: PLC0415
-
-    existing = read_env_password(env_file)
-    names = {s.name for s in modal.Secret.objects.list()}
-    if existing and APP_SECRET_NAME in names and not rotate:
-        logger.info("password already in .env and in the %s secret: kept", APP_SECRET_NAME)
+    if read_env_password(env_file) and not rotate:
+        logger.info("password already in %s: kept", env_file)
         return False
-    password = auth.new_password()
-    modal.Secret.objects.delete(APP_SECRET_NAME, allow_missing=True)
-    modal.Secret.objects.create(
-        APP_SECRET_NAME, {"APP_PASSWORD": password, "SESSION_SECRET": secrets.token_urlsafe(32)}
-    )
-    write_env_password(env_file, password)
-    logger.info("new password written to %s and to the %s secret", env_file, APP_SECRET_NAME)
+    write_env_password(env_file, auth.new_password())
+    logger.info("new password written to %s", env_file)
     return True
 
 
@@ -96,70 +80,6 @@ def write_env_password(env_file: Path, password: str) -> None:
     lines = [line for line in text.splitlines() if not line.startswith(f"{ENV_PASSWORD}=")]
     lines.append(f"{ENV_PASSWORD}={password}")
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def set_chat_secret(settings: Settings) -> None:
-    """Copy MISTRAL_API_KEY and OPENROUTER_API_KEY, whichever `.env` holds, into the Modal
-    secret the conversation page reads (OpenRouter wins when both are there). The keys are never
-    printed or logged."""
-    import modal  # noqa: PLC0415
-
-    from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
-
-    keys = {
-        name: key.get_secret_value()
-        for name, key in (
-            ("MISTRAL_API_KEY", settings.mistral_api_key),
-            ("OPENROUTER_API_KEY", settings.openrouter_api_key),
-        )
-        if key is not None
-    }
-    if not keys:
-        msg = "no MISTRAL_API_KEY or OPENROUTER_API_KEY in .env or the environment"
-        raise RuntimeError(msg)
-    modal.Secret.objects.delete(CHAT_SECRET_NAME, allow_missing=True)
-    modal.Secret.objects.create(CHAT_SECRET_NAME, keys)
-    logger.info("%s written to the %s Modal secret", ", ".join(keys), CHAT_SECRET_NAME)
-
-
-def deploy() -> str:
-    """Deploy the `miroir-web` app. Returns the site's URL."""
-    import modal  # noqa: PLC0415
-
-    from miroir.web.modal_app import app, web  # noqa: PLC0415  # pyright: ignore[reportUnknownVariableType]
-
-    with modal.enable_output():
-        app.deploy()
-    url = web.get_web_url()
-    return url or "(no URL: check `modal app list`)"
-
-
-def pull_chat_logs(settings: Settings) -> list[Path]:
-    """Copy the deployed site's conversation logs from the index volume into
-    `Settings.chat_logs_dir / "hosted"`. Returns the files written (new or grown)."""
-    import modal  # noqa: PLC0415
-    from modal.types import FileEntryType  # noqa: PLC0415
-
-    from miroir.config import MODAL_CHAT_LOGS  # noqa: PLC0415
-    from miroir.web.chatlog import pull  # noqa: PLC0415
-    from miroir.web.modal_app import INDEX_VOLUME  # noqa: PLC0415
-
-    volume = modal.Volume.from_name(INDEX_VOLUME)
-
-    def names() -> list[str]:
-        try:
-            entries = volume.listdir(MODAL_CHAT_LOGS, recursive=True)
-        except FileNotFoundError:
-            return []
-        prefix = f"{MODAL_CHAT_LOGS}/"
-        return [
-            e.path.lstrip("/").removeprefix(prefix) for e in entries if e.type == FileEntryType.FILE
-        ]
-
-    def read(name: str) -> bytes:
-        return b"".join(volume.read_file(f"{MODAL_CHAT_LOGS}/{name}"))
-
-    return pull(names, read, settings.chat_logs_dir / "hosted")
 
 
 class LedgerSpend:
@@ -201,13 +121,12 @@ def serve_locally(
     *,
     name: str,
     port: int,
-    real: bool = False,
     fake_llm: bool = False,
     search: SearchBackend | None = None,
 ) -> None:
     """The site on http://localhost:<port>, with fake models over the local bundle, or with
-    `real` the deployed GPU search (models on Modal; the page and catalog stay local), or
-    with the `search` given (a Scaleway machine, `miroir web dev --scw`).
+    the `search` given (models on a Scaleway machine, `miroir web dev --scw`; the page and
+    catalog stay local).
 
     The conversation page uses Mistral Large 4 on Mistral's API when MISTRAL_API_KEY is set,
     else through OpenRouter when OPENROUTER_API_KEY is (with the same caps as the deployed
@@ -228,13 +147,7 @@ def serve_locally(
         msg = f"no {ENV_PASSWORD} in .env: run `uv run miroir web secret` first"
         raise RuntimeError(msg)
     engine = fake_engine(folder)
-    backend: SearchBackend = LocalBackend(engine)
-    if real:
-        from miroir.web.modal_app import ModalBackend  # noqa: PLC0415
-
-        backend = ModalBackend(deployed=True)
-    if search is not None:
-        backend = search
+    backend: SearchBackend = LocalBackend(engine) if search is None else search
     model: ChatModel = (None if fake_llm else chat_model(settings)) or FakeGuide()
     publishable = read_publishable(folder / PUBLISHABLE_FILE)
 
@@ -259,6 +172,6 @@ def serve_locally(
         chat=chat,
     )
     logger.info("conversation page: %s", model.model)
-    if not real and search is None:
+    if search is None:
         logger.info("fake models: photo results are look-alikes, not a real search")
     uvicorn.run(site, host="127.0.0.1", port=port, log_level="info")
