@@ -114,7 +114,7 @@ class NoMachineError(RuntimeError):
     """No offer could start a machine."""
 
 
-def _out_of_stock(err: ScalewayError) -> bool:
+def out_of_stock(err: ScalewayError) -> bool:
     text = str(err).lower()
     return err.kind == "out_of_stock" or "out of stock" in text or "no capacity" in text
 
@@ -331,7 +331,7 @@ def gpu_machine(
                 server = api.create_server(offer, name, tags)
             except ScalewayError as err:
                 errors.append(f"{offer.zone} {offer.commercial_type}: {err}")
-                if _out_of_stock(err):
+                if out_of_stock(err):
                     logger.warning("%s %s: out of stock", offer.zone, offer.commercial_type)
                     continue
                 raise
@@ -342,7 +342,7 @@ def gpu_machine(
                 try:
                     api.action(offer.zone, server_id, "poweron")
                 except ScalewayError as err:
-                    if not _out_of_stock(err):
+                    if not out_of_stock(err):
                         raise
                     errors.append(f"{offer.zone} {offer.commercial_type}: {err}")
                     logger.warning(

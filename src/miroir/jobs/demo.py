@@ -50,6 +50,7 @@ from miroir.jobs.scaleway import (
     ScalewayError,
     cloud_init,
     key_tag,
+    out_of_stock,
 )
 from miroir.jobs.scw_run import Shell, build_image
 
@@ -89,6 +90,9 @@ CONTAINERS = ("miroir-site", "miroir-watch", "caddy")
 BOOT_TIMEOUT_S = 15 * 60
 SITE_TIMEOUT_S = 20 * 60
 STOP_TIMEOUT_S = 10 * 60
+#: When no GPU is free at power-on, try again this many times, this far apart.
+STOCK_TRIES = 10
+STOCK_WAIT_S = 30.0
 #: The watcher looks this often.
 WATCH_S = 60.0
 
@@ -195,6 +199,7 @@ class Demo:
     settings: Settings
     api: InstanceApi
     clock: Callable[[], float] = time.time
+    sleep: Callable[[float], None] = time.sleep
 
     @property
     def ledger(self) -> MachineLedger:
@@ -254,25 +259,31 @@ class Demo:
     # --- power -----------------------------------------------------------------------------
 
     def power_on(self, machine: DemoMachine) -> DemoMachine:
-        """Power on (refused past the cap) and wait until Scaleway says it runs."""
+        """Power on (refused past the cap) and wait until Scaleway says it runs. When no GPU
+        is free, try again every `STOCK_WAIT_S` for a few minutes: GPUs come back often."""
         self.settle(machine)
-        if machine.state == "running":
-            return machine
+        if machine.state in {"running", "starting"}:
+            return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
         if machine.state != "stopped":
             msg = f"the demo machine is {machine.state}: wait a minute and try again"
             raise RuntimeError(msg)
         self.check_budget(self.settings.demo_max_hours)
         self._keep_key(machine)
-        try:
-            self.api.action(machine.zone, machine.server_id, "poweron")
-        except ScalewayError as err:
-            if err.kind == "out_of_stock" or "stock" in str(err).lower():
-                msg = (
-                    f"no free {DEMO_OFFER.commercial_type} in {machine.zone} right now; "
-                    "try again in a few minutes"
-                )
-                raise RuntimeError(msg) from err
-            raise
+        for attempt in range(STOCK_TRIES):
+            try:
+                self.api.action(machine.zone, machine.server_id, "poweron")
+                break
+            except ScalewayError as err:
+                if not out_of_stock(err):
+                    raise
+                if attempt == STOCK_TRIES - 1:
+                    msg = (
+                        f"no free {DEMO_OFFER.commercial_type} in {machine.zone} for "
+                        f"{STOCK_TRIES * STOCK_WAIT_S / 60:.0f} min; try again later"
+                    )
+                    raise RuntimeError(msg) from err
+                logger.warning("no free GPU yet; trying again in %.0f s", STOCK_WAIT_S)
+                self.sleep(STOCK_WAIT_S)
         write_state(
             self.state_path, replace(read_state(self.state_path), session_start=self.clock())
         )

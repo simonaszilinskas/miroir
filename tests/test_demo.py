@@ -245,13 +245,29 @@ def test_power_on_is_refused_past_the_cap(settings: Settings) -> None:
     assert fake.by_id["s1"]["state"] == "stopped"
 
 
-def test_no_gpu_free_says_so(settings: Settings) -> None:
+def test_no_gpu_free_is_tried_again_then_said(settings: Settings) -> None:
     fake, clock = FakeApi(), Clock()
     demo, machine = made(settings, fake, clock)
     machine = demo.power_off(machine)
     fake.stock = False
+    waits: list[float] = []
+    demo = Demo(settings, _api(fake), clock, sleep=waits.append)
     with pytest.raises(RuntimeError, match="no free L4-1-24G"):
         demo.power_on(machine)
+    assert len(waits) == demo_module.STOCK_TRIES - 1
+
+
+def test_a_gpu_freed_while_waiting_starts_the_machine(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    fake.stock = False
+
+    def wait(_: float) -> None:
+        fake.stock = True
+
+    demo = Demo(settings, _api(fake), clock, sleep=wait)
+    assert demo.power_on(machine).state == "running"
 
 
 def test_status_counts_the_open_session(settings: Settings) -> None:
