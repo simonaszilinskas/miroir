@@ -38,7 +38,6 @@ On VET (3 Vétheuil images) and PARTS (360 detail → whole pairs from POP, tune
 1. Move the jobs and the query search from Modal to Scaleway. (Jobs done; the site still runs on Modal.)
 2. Build VET and PARTS. (Done: `miroir testsets vet`, `miroir testsets parts`.)
 3. Download and embed everything; build the full index on Scaleway. (Done 2026-11-03: bundle `pop-all`, below.)
-
 4. Crop vectors; measures 1 to 3.
 5. One page with Instant and Deeper; deploy on Scaleway.
 
