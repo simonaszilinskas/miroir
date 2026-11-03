@@ -106,7 +106,7 @@ class NumpyCrops:
 
 @dataclass(frozen=True, slots=True)
 class _Piece:
-    fd: int
+    path: Path
     offset: int
     """Where the rows start in the `.npy` file (past its header)."""
     width: int
@@ -117,17 +117,18 @@ class WholeCrops:
     """The crops' whole vectors in int8, one `.npy` file per piece of the crop job; only the
     rows a search rescores are read, each run of neighbouring rows in one read, `READERS`
     reads at once: a network disk answers each read in about a millisecond, but serves many
-    at a time."""
+    at a time. Each read opens its file and closes it (a process may hold only about 1,000
+    files open, and there are 4,096 pieces)."""
 
     folder: Path
     starts: Ints
     """First crop row of each piece, in order."""
     names: tuple[str, ...]
     scale: Floats
-    _open: dict[int, _Piece] = field(default_factory=dict[int, _Piece])
+    _pieces: dict[int, _Piece] = field(default_factory=dict[int, _Piece])
 
     def _piece(self, k: int) -> _Piece:
-        if k not in self._open:
+        if k not in self._pieces:
             path = self.folder / f"{self.names[k]}.npy"
             with path.open("rb") as head:
                 version = np.lib.format.read_magic(head)
@@ -141,8 +142,8 @@ class WholeCrops:
             if dtype != np.int8:
                 msg = f"{path}: int8 rows expected, got {dtype}"
                 raise ValueError(msg)
-            self._open[k] = _Piece(os.open(path, os.O_RDONLY), offset, int(shape[1]))
-        return self._open[k]
+            self._pieces[k] = _Piece(path, offset, int(shape[1]))
+        return self._pieces[k]
 
     def rows(self, rows: Ints) -> NDArray[np.int8]:
         """These crop rows, in that order."""
@@ -162,7 +163,11 @@ class WholeCrops:
             at, count = run
             piece = self._piece(int(pieces[at]))
             local = int(ordered[at] - self.starts[pieces[at]])
-            data = os.pread(piece.fd, count * width, piece.offset + local * width)
+            fd = os.open(piece.path, os.O_RDONLY)
+            try:
+                data = os.pread(fd, count * width, piece.offset + local * width)
+            finally:
+                os.close(fd)
             out[at : at + count] = np.frombuffer(data, dtype=np.int8).reshape(count, width)
 
         runs = list(zip(firsts.tolist(), counts.tolist(), strict=True))
