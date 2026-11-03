@@ -276,11 +276,6 @@ class Settings(BaseSettings):
         """Counts of the full build: per base, unique images, buildings and objects."""
         return self.full_pop_dir / "report.json"
 
-    @property
-    def full_fetch_probe_dir(self) -> Path:
-        """Download speed test of the POP bucket: every download and a summary."""
-        return self.full_pop_dir / "fetch-probe"
-
     def full_image_list(self, name: str) -> Path:
         """One `image_id` per line, one per distinct image URL (`unique`, `covers`, ...)."""
         _check_name(name)

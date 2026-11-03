@@ -129,21 +129,6 @@ def records_build_full(
     typer.echo(f"wrote {settings.full_report_json}")
 
 
-@records_app.command("fetch-probe")
-def records_fetch_probe(
-    max_usd: Annotated[float, typer.Option(help="Stop before Modal time passes this.")] = 0.4,
-) -> None:
-    """Time about 1,000 downloads from the POP bucket on Modal CPUs (spec §12, question 2).
-
-    Needs `records build-full` first. Takes about 5 minutes; costs a few cents.
-    """
-    from miroir.jobs.fetch_probe import run  # noqa: PLC0415
-
-    settings = get_settings()
-    summary = run(settings, max_usd, settings.full_fetch_probe_dir)
-    typer.echo(json.dumps(summary, indent=2))
-
-
 @geo_app.command("places")
 def geo_places() -> None:
     """One position per entity: Mérimée or Muséofile point, else the commune centre."""
