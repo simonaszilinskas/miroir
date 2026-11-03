@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from miroir.jobs.objects import listing
+from miroir.jobs.objects import Stored, listing, part_bytes
 from miroir.parallel import bounded_map
 from miroir.web.crops import (
     COORDS_FILE,
@@ -49,7 +49,10 @@ NAME = "pop-all-crops"
 
 def copy_bundle(s3: S3Client, bucket: str, source: str, target: str) -> int:
     """Copy `source/*` to `target/*` inside the bucket (those already there at the same size
-    are kept). Returns how many were copied."""
+    are kept), in parts sized so a 19 GB file stays within Scaleway's 1,000 (`part_bytes`).
+    Returns how many were copied."""
+    from boto3.s3.transfer import TransferConfig  # noqa: PLC0415 (the scaleway extra)
+
     there = {s.key: s.size for s in listing(s3, bucket, f"{target}/")}
     todo = [
         s
@@ -57,11 +60,12 @@ def copy_bundle(s3: S3Client, bucket: str, source: str, target: str) -> int:
         if there.get(f"{target}/{s.key.removeprefix(f'{source}/')}") != s.size
     ]
 
-    def copy(key: str) -> None:
-        name = key.removeprefix(f"{source}/")
-        s3.copy({"Bucket": bucket, "Key": key}, bucket, f"{target}/{name}")
+    def copy(item: Stored) -> None:
+        name = item.key.removeprefix(f"{source}/")
+        config = TransferConfig(multipart_chunksize=part_bytes(item.size))
+        s3.copy({"Bucket": bucket, "Key": item.key}, bucket, f"{target}/{name}", Config=config)
 
-    list(bounded_map(copy, [s.key for s in todo], workers=8))
+    list(bounded_map(copy, todo, workers=8))
     logger.info("copied %d of %s to %s", len(todo), source, target)
     return len(todo)
 
