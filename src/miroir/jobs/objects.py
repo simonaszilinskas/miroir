@@ -144,6 +144,33 @@ def download_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -
     return len(todo)
 
 
+def link_siblings(client: S3Client, bucket: str, root: Path, prefix: str) -> int:
+    """Before `download_tree(client, bucket, root, prefix)`: hard-link into place every file
+    that another folder under `root` already holds under the same name and size (a bundle
+    built as a copy of another, `miroir.index.crop_bundle`), so only what differs comes
+    down and the disk holds the shared files once. Returns how many were linked."""
+    linked = 0
+    folder = prefix.strip("/")
+    siblings = (
+        [p for p in root.iterdir() if p.is_dir() and p.name != folder] if root.exists() else []
+    )
+    for item in listing(client, bucket, prefix):
+        path = root / item.key
+        if _same(path, item.size):
+            continue
+        name = item.key.removeprefix(prefix).lstrip("/")
+        for sibling in siblings:
+            source = sibling / name
+            if _same(source, item.size):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.unlink(missing_ok=True)
+                path.hardlink_to(source)
+                linked += 1
+                break
+    logger.info("%s: %d files linked from %s", prefix, linked, [s.name for s in siblings])
+    return linked
+
+
 def upload_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -> int:
     """Copy every file under `root / prefix` the bucket lacks (or holds at another size)."""
     stored = {s.key: s.size for s in listing(client, bucket, prefix)}

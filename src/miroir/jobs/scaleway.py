@@ -226,6 +226,15 @@ class InstanceApi:
     def delete_server(self, zone: str, server_id: str) -> None:
         self._call("DELETE", f"instance/v1/zones/{zone}/servers/{server_id}")
 
+    def availability(self, zone: str) -> dict[str, str]:
+        """Each commercial type's stock in a zone: "available", "scarce" or "shortage"."""
+        found = self._call(
+            "GET", f"instance/v1/zones/{zone}/products/servers/availability",
+            params={"per_page": 100},
+        )  # fmt: skip
+        servers = cast("dict[str, JSON]", found.get("servers") or {})
+        return {kind: str(info.get("availability", "")) for kind, info in servers.items()}
+
     def servers(self, zone: str) -> list[JSON]:
         params = {"project": self.project, "per_page": 50}
         return list(self._pages(f"instance/v1/zones/{zone}/servers", "servers", params))

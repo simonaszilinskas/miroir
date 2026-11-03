@@ -97,16 +97,28 @@ def top_rows(scores: Floats, size: int) -> Ints:
     return alive[best].astype(np.int64)
 
 
-def shortlist(a7: Floats, reduced: Floats, size: int = SHORTLIST) -> Ints:
-    """Rows on either model's shortlist (filtered images score -inf and stay off)."""
-    return np.union1d(top_rows(a7, size), top_rows(reduced, size)).astype(np.int64)
+def shortlist(
+    a7: Floats, reduced: Floats, size: int = SHORTLIST, extra: Ints | None = None
+) -> Ints:
+    """Rows on either model's shortlist (filtered images score -inf and stay off), and the
+    `extra` rows (those whose crops match best, `miroir.web.crops`)."""
+    rows = np.union1d(top_rows(a7, size), top_rows(reduced, size))
+    if extra is not None:
+        rows = np.union1d(rows, extra)
+    return rows.astype(np.int64)
 
 
 def shortlist_cosines(
-    store: ExactStore, query: Floats, a7: Floats, reduced: Floats, size: int = SHORTLIST
+    store: ExactStore,
+    query: Floats,
+    a7: Floats,
+    reduced: Floats,
+    size: int = SHORTLIST,
+    *,
+    extra: Ints | None = None,
 ) -> Floats:
     """Exact MegaLoc cosines of the shortlisted images; -inf for every other image."""
-    rows = shortlist(a7, reduced, size)
+    rows = shortlist(a7, reduced, size, extra)
     out = np.full(a7.shape, -np.inf, dtype=np.float32)
     out[rows] = store.cosines(query, rows)
     return out
