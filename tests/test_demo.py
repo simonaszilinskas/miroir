@@ -64,7 +64,11 @@ def settings(tmp_path: Path) -> Settings:
         "mistral_api_key": None,
     }
     base = Settings(data_dir=tmp_path / "data", exports_dir=FIXTURE_EXPORTS)
-    return base.model_copy(update=values)
+    settings = base.model_copy(update=values)
+    settings.demo_dir.mkdir(parents=True)
+    (settings.demo_dir / "id_ed25519").write_text("private")
+    (settings.demo_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA demo\n")
+    return settings
 
 
 class Clock:
@@ -108,6 +112,9 @@ class FakeApi:
 
     def set_user_data(self, zone: str, server_id: str, key: str, text: str) -> None:
         assert "ssh-ed25519" in text
+
+    def set_tags(self, zone: str, server_id: str, tags: list[str]) -> None:
+        self.by_id[server_id]["tags"] = tags
 
     def action(self, zone: str, server_id: str, action: str) -> None:
         self.actions.append((server_id, action))
@@ -166,7 +173,8 @@ def test_create_reserves_a_flexible_ip_and_tags_the_machine_as_the_demo(
     assert fake.made_with_ip == "ip1"
     assert machine.state == "running"
     assert machine.url == "https://51-15-1-2.sslip.io"
-    assert set(cast("list[str]", fake.by_id["s1"]["tags"])) == {"miroir", "miroir-demo"}
+    tags = set(cast("list[str]", fake.by_id["s1"]["tags"]))
+    assert tags == {"miroir", "miroir-demo", "AUTHORIZED_KEY=ssh-ed25519_AAAA_test"}
     found = find_demo(_api(fake))
     assert found is not None
     assert found.server_id == "s1"
@@ -214,6 +222,15 @@ def test_a_machine_that_powered_itself_off_is_billed_until_it_stopped(settings: 
     demo.settle(found)
     session = next(line for line in ledger(settings) if line["purpose"] == "demo")
     assert session["minutes"] == 70
+
+
+def test_power_on_adds_the_key_tag_the_boot_needs(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    fake.by_id["s1"]["tags"] = ["miroir", "miroir-demo"]  # made before the tag existed
+    demo.power_on(machine)
+    assert "AUTHORIZED_KEY=ssh-ed25519_AAAA_demo" in cast("list[str]", fake.by_id["s1"]["tags"])
 
 
 def test_power_on_is_refused_past_the_cap(settings: Settings) -> None:

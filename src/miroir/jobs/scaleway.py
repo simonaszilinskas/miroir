@@ -201,6 +201,10 @@ class InstanceApi:
         path = f"instance/v1/zones/{zone}/servers/{server_id}/user_data/{key}"
         self._call("PATCH", path, content=text.encode())
 
+    def set_tags(self, zone: str, server_id: str, tags: Sequence[str]) -> None:
+        path = f"instance/v1/zones/{zone}/servers/{server_id}"
+        self._call("PATCH", path, body={"tags": list(tags)})
+
     def action(self, zone: str, server_id: str, action: str) -> None:
         path = f"instance/v1/zones/{zone}/servers/{server_id}/action"
         self._call("POST", path, body={"action": action})
@@ -278,6 +282,12 @@ class Machine:
     """`time.time()` past which its worker deletes it."""
 
 
+def key_tag(public_key: str) -> str:
+    """The tag Scaleway's images read at every boot to write root's authorized_keys: a key
+    given only through cloud-init is gone after the first reboot."""
+    return f"AUTHORIZED_KEY={public_key.replace(' ', '_')}"
+
+
 def cloud_init(public_key: str) -> str:
     """Lets the Mac in as root with this run's key, whatever the image's own key setup does."""
     return (
@@ -312,7 +322,7 @@ def gpu_machine(
         )
         raise RuntimeError(msg)
     name = f"{TAG}-{datetime.now(UTC):%Y%m%d-%H%M%S}"
-    tags = [TAG, f"AUTHORIZED_KEY={public_key.replace(' ', '_')}"]
+    tags = [TAG, key_tag(public_key)]
     with _signals_raise():
         errors: list[str] = []
         for offer in offers:

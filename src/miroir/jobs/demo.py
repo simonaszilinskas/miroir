@@ -49,6 +49,7 @@ from miroir.jobs.scaleway import (
     Offer,
     ScalewayError,
     cloud_init,
+    key_tag,
 )
 from miroir.jobs.scw_run import Shell, build_image
 
@@ -261,6 +262,7 @@ class Demo:
             msg = f"the demo machine is {machine.state}: wait a minute and try again"
             raise RuntimeError(msg)
         self.check_budget(self.settings.demo_max_hours)
+        self._keep_key(machine)
         try:
             self.api.action(machine.zone, machine.server_id, "poweron")
         except ScalewayError as err:
@@ -275,6 +277,14 @@ class Demo:
             self.state_path, replace(read_state(self.state_path), session_start=self.clock())
         )
         return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
+
+    def _keep_key(self, machine: DemoMachine) -> None:
+        """Make sure the boot writes the Mac's key: machines made before the tag lacked it."""
+        server = self.api.server(machine.zone, machine.server_id) or {}
+        tags = cast("list[str]", server.get("tags") or [])
+        public = demo_key(self.settings).with_suffix(".pub").read_text().strip()
+        if key_tag(public) not in tags:
+            self.api.set_tags(machine.zone, machine.server_id, [*tags, key_tag(public)])
 
     def power_off(self, machine: DemoMachine) -> DemoMachine:
         """Power off, wait until it is off, and write the session to the ledger."""
@@ -319,7 +329,7 @@ def create_demo(demo: Demo, public_key: str) -> DemoMachine:
         msg = "the demo machine exists already (`miroir demo status`)"
         raise RuntimeError(msg)
     demo.check_budget(demo.settings.demo_max_hours)
-    tags = [TAG, DEMO_TAG]
+    tags = [TAG, DEMO_TAG, key_tag(public_key)]
     ip = api.create_ip(zone, tags)
     logger.info("flexible IP %s reserved", ip.get("address"))
     server = api.create_server(DEMO_OFFER, DEMO_NAME, tags, ip_id=str(ip["id"]))

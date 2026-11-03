@@ -2167,7 +2167,9 @@ def demo_up(
     machine = demo.power_on(machine)
     address = _need_running(machine)
     booted = time.monotonic() - start
-    demo_shell(demo.settings, address).run(idle_command(idle_minutes), timeout=60)
+    shell = demo_shell(demo.settings, address)
+    shell.wait()  # "running" comes a little before SSH answers
+    shell.run(idle_command(idle_minutes), timeout=60)
     assert machine.url is not None
     wait_site(machine.url)
     idle = idle_minutes or demo.settings.demo_idle_minutes
