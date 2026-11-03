@@ -35,8 +35,16 @@ On VET (3 Vétheuil images) and PARTS (360 detail → whole pairs from POP, tune
 
 ## Order of work
 
-1. Move the jobs and the query search from Modal to Scaleway. (Running.)
+1. Move the jobs and the query search from Modal to Scaleway. (Jobs done; the site still runs on Modal.)
 2. Build VET and PARTS. (Done: `miroir testsets vet`, `miroir testsets parts`.)
-3. Download and embed everything; build the full index on Scaleway.
+3. Download and embed everything; build the full index on Scaleway. (Done 2026-11-03: bundle `pop-all`, below.)
+
+### What step 3 built (2026-11-03)
+
+- **Images.** 2,156,747 distinct files in the `miroir-images` bucket, 3,798 of them failed (0.18%): 1,700 not an image, 985 missing on POP, 803 unreadable, 303 refused (HTTP 403), 7 that the GPU could not read.
+- **Vectors.** July's 136,731 files kept their vectors; the other 2,016,218 were embedded with A7 and A3 on five L40S machines (one test run, then four side by side for 6 h 10 min each), at 23 images a second per machine. Cost €35.
+- **Bundle `pop-all`.** 27.4 GB in the `miroir-index` bucket under `pop-all/`: 2,257,225 image rows (Commons photos included), 2,135,437 records, 885,596 buildings and objects. A3 is kept as a 1,024-number shortlist (4.6 GB, for the GPU) plus every full vector in int8 (19.1 GB, in memory); A7 3.5 GB.
+- **Coverage.** 2,133,636 of the 2,136,583 records with an image have vectors (99.86%); per collection 99.75% (Rose Valland) to 100% (Museo). Both targets are in: APMH047981 (Vétheuil, PM95000723) and APMH00020986 (Thoisy, PM21002346).
+- **Spend.** €39.95 of the €100 on Scaleway so far, all jobs included. Crops at the same speed would cost about €35 per crop per image for A7 and A3 together, so step 4 must pick fewer crops or A3 alone.
 4. Crop vectors; measures 1 to 3.
 5. One page with Instant and Deeper; deploy on Scaleway.
