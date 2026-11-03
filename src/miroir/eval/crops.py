@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -258,6 +258,9 @@ class QueryCase:
     kind: str
     hidden_rows: Ints
     right: tuple[str, ...]
+    answer_only: bool = False
+    """The right entity counts only through the rows `hidden_rows` leaves it (e.g. the one
+    target photo of VET); its other rows in the index are not seen either."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +347,8 @@ def rank_full(
         )
         hidden = np.isin(picked, case.hidden_rows)
         right = [gallery_row[e] for e in case.right if e in gallery_row]
+        if case.answer_only:
+            full = _answer_only(scores, q, full, groups=groups, hidden=hidden, right=right)
         right = [r for r in right if np.isfinite(full.gallery_e7[r])]
         for variant in variants:
             c7, c3 = _row_scores(scores, q, variant, picked, whole=False)
@@ -360,6 +365,23 @@ def rank_full(
                 )
             )
     return out
+
+
+def _answer_only(
+    scores: Scores, q: int, full: FullScores, *, groups: Groups, hidden: Bools, right: list[int]
+) -> FullScores:
+    """`full` with the right entities' whole scores taken from their rows left in the
+    gallery only. MegaLoc stays out for an entity the site's shortlist left out."""
+    s7 = scores.whole7[q].astype(np.float32)
+    s3 = scores.whole3[q].astype(np.float32)
+    s7[hidden] = -np.inf
+    s3[hidden] = -np.inf
+    e7, e3 = groups.entity_max(s7), groups.entity_max(s3)
+    g7, g3 = full.gallery_e7.copy(), full.gallery_e3.copy()
+    for r in right:
+        g7[r] = e7[r]
+        g3[r] = e3[r] if np.isfinite(g3[r]) else -np.inf
+    return replace(full, gallery_e7=g7, gallery_e3=g3)
 
 
 # --- summaries -------------------------------------------------------------------------------
@@ -499,7 +521,10 @@ def usable_rows(scores: Scores, *, a7: bool = False) -> Ints:
 
 
 def report(scores: Scores, cases: Sequence[QueryCase]) -> dict[str, object]:
-    """Every measure of the test, ready for JSON."""
+    """Every measure of the test, ready for JSON. Cases with `answer_only` are measured
+    apart (`vet_target_photo`)."""
+    target = [c for c in cases if c.answer_only]
+    cases = [c for c in cases if not c.answer_only]
     rows = usable_rows(scores)
     main = rank_slice(scores, cases, VARIANTS, rows=rows)
     out: dict[str, object] = {
@@ -556,9 +581,46 @@ def report(scores: Scores, cases: Sequence[QueryCase]) -> dict[str, object]:
             for i, c in enumerate(cases)
             if c.set_id == "VET"
         }
+    if target:
+        alone = rank_slice(scores, target, VARIANTS, rows=rows)
+        out["vet_target_photo"] = {
+            c.query_id: {v: alone.ranks[v][i] for v in alone.ranks} for i, c in enumerate(target)
+        }
+        if scores.full is not None:
+            far = rank_full(scores, target, VARIANTS)
+            out["vet_target_photo_full"] = {
+                c.query_id: {v: far[v][i] for v in far} for i, c in enumerate(target)
+            }
     out["vet_ranks"] = {
         c.query_id: {v: main.ranks[v][i] for v in main.ranks}
         for i, c in enumerate(cases)
         if c.set_id == "VET"
     }
+    return out
+
+
+def target_photo_cases(
+    scores: Scores,
+    spec: SliceSpec,
+    cases: Sequence[QueryCase],
+    *,
+    set_id: str,
+    ref_of: Mapping[str, str],
+    ref: str,
+) -> list[QueryCase]:
+    """`set_id`'s cases again, their answer seen only through the photos of record `ref`
+    (VET: APMH047981, the photo from before 1896): the entity's other rows are hidden."""
+    out: list[QueryCase] = []
+    for case in cases:
+        if case.set_id != set_id:
+            continue
+        others = [
+            row
+            for row, (image_id, entity) in enumerate(
+                zip(spec.gallery, scores.row_entities, strict=True)
+            )
+            if entity in case.right and ref_of.get(image_id) != ref
+        ]
+        hidden = np.union1d(case.hidden_rows, np.asarray(others, dtype=np.int64))
+        out.append(replace(case, hidden_rows=hidden.astype(np.int64), answer_only=True))
     return out

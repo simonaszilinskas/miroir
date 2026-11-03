@@ -358,6 +358,20 @@ def prepare(
     return spec
 
 
+def vet_refs(settings: Settings, spec: SliceSpec) -> dict[str, str]:
+    """The record of each gallery image of the VET answer (to single out its target photo)."""
+    from miroir.eval.parts import VET_ENTITY  # noqa: PLC0415
+
+    path = settings.scaleway_dir / "pop-all-tables" / "images.parquet"
+    data = pq.read_table(path, columns=["image_id", "ref", "entity_id"]).to_pydict()  # pyright: ignore[reportUnknownMemberType]
+    wanted = set(spec.gallery)
+    return {
+        i: r
+        for i, r, e in zip(data["image_id"], data["ref"], data["entity_id"], strict=True)
+        if e == VET_ENTITY and i in wanted
+    }
+
+
 def _column_map(path: Path, key: str, value: str) -> dict[str, str]:
     data = pq.read_table(path, columns=[key, value]).to_pydict()  # pyright: ignore[reportUnknownMemberType]
     return dict(zip(data[key], data[value], strict=True))

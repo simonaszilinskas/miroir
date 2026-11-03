@@ -308,3 +308,19 @@ def test_full_summary_pads_a_short_ranking() -> None:
     top_in_gallery = np.asarray([0, -1, -1, -1])
     args = {"top_in_gallery": top_in_gallery, "crop7": none, "crop3": none, "a7_weight": 0.2}
     assert full_rank(full, right=[0], **args) == 1
+
+
+def test_target_photo_cases_see_the_answer_through_one_record_only() -> None:
+    from miroir.eval.crops import target_photo_cases  # noqa: PLC0415
+
+    # Rows: A's old photo (ref R1), A's new photo (ref R2), then B.
+    scores = _scores([[0.2, 0.9, 0.5]], [[0.3, 0.9, 0.4]], ("A", "A", "B"))
+    spec = SliceSpec(gallery=("a1", "a2", "b"), files=("f1", "f2", "f3"), a7_files=(), queries=())
+    cases = [QueryCase("q0", "VET", "", np.asarray([], dtype=np.int64), ("A",))]
+    target = target_photo_cases(
+        scores, spec, cases, set_id="VET", ref_of={"a1": "R1", "a2": "R2"}, ref="R1"
+    )
+    assert target[0].hidden_rows.tolist() == [1]
+    assert target[0].answer_only
+    assert rank_slice(scores, cases, VARIANTS).ranks["a-whole"] == [1]
+    assert rank_slice(scores, target, VARIANTS).ranks["a-whole"] == [2]

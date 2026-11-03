@@ -349,14 +349,23 @@ def eval_crops() -> None:
     import json  # noqa: PLC0415
 
     from miroir.config import eval_result_path  # noqa: PLC0415
-    from miroir.eval.crops import cases_of, load_scores, report  # noqa: PLC0415
-    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries  # noqa: PLC0415
+    from miroir.eval.crops import (  # noqa: PLC0415
+        cases_of,
+        load_scores,
+        report,
+        target_photo_cases,
+    )
+    from miroir.eval.parts import VET, VET_TARGET_REF  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries, vet_refs  # noqa: PLC0415
 
     settings = get_settings()
     folder = slice_dir(settings)
     spec = read_spec((folder / "spec.json").read_bytes())
     scores = load_scores(folder, spec)
-    out = report(scores, cases_of(spec, slice_queries(settings)))
+    cases = cases_of(spec, slice_queries(settings))
+    refs = vet_refs(settings, spec)
+    target = target_photo_cases(scores, spec, cases, set_id=VET, ref_of=refs, ref=VET_TARGET_REF)
+    out = report(scores, [*cases, *target])
     path = eval_result_path("R3", "SL", "crop-slice")
     path.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
     typer.echo(json.dumps(out, indent=1, ensure_ascii=False))
