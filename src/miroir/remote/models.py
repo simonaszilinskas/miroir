@@ -185,7 +185,8 @@ class PeCoreEncoder:
 
 
 class SentenceEncoder:
-    """EmbeddingGemma 2 and Qwen3-VL-Embedding through sentence-transformers, in bf16.
+    """EmbeddingGemma 2 and Qwen3-VL-Embedding through sentence-transformers, in bf16 on a
+    GPU and float32 on a CPU.
 
     Images go in as PIL images, with no prompt (EmbeddingGemma 2) or the model's default
     instruction (Qwen3-VL-Embedding). Qwen's pixel budget is capped at resolution².
@@ -202,8 +203,10 @@ class SentenceEncoder:
             side = option.resolution
             kwargs["processor_kwargs"] = {"min_pixels": 28 * 28, "max_pixels": side * side}
         self.option = option
+        # On a CPU without native bfloat16, bf16 took 12 s for one photo: float32 there.
+        dtype = torch.bfloat16 if DEVICE == "cuda" else torch.float32
         self.model = SentenceTransformer(
-            option.model, device=DEVICE, model_kwargs={"torch_dtype": torch.bfloat16}, **kwargs
+            option.model, device=DEVICE, model_kwargs={"torch_dtype": dtype}, **kwargs
         )
 
     def encode(self, images: list[PILImage.Image]) -> NDArray[np.float32]:
