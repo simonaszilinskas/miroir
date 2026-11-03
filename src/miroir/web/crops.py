@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -39,6 +40,8 @@ from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
+
+from miroir.parallel import bounded_map
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,8 @@ WHOLE_SCALE_FILE = "crops_whole_scale.npy"
 RULE_FILE = "crops.json"
 #: Crop rows scored at once on the CPU.
 BLOCK_ROWS = 1 << 20
+#: Reads of whole crop vectors at once.
+READERS = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,34 +105,76 @@ class NumpyCrops:
 
 
 @dataclass(frozen=True, slots=True)
+class _Piece:
+    fd: int
+    offset: int
+    """Where the rows start in the `.npy` file (past its header)."""
+    width: int
+
+
+@dataclass(frozen=True, slots=True)
 class WholeCrops:
-    """The crops' whole vectors in int8, one memory-mapped file per piece of the crop job;
-    only the rows a search rescores are read from disk."""
+    """The crops' whole vectors in int8, one `.npy` file per piece of the crop job; only the
+    rows a search rescores are read, each run of neighbouring rows in one read, `READERS`
+    reads at once: a network disk answers each read in about a millisecond, but serves many
+    at a time."""
 
     folder: Path
     starts: Ints
     """First crop row of each piece, in order."""
     names: tuple[str, ...]
     scale: Floats
-    _open: dict[int, NDArray[np.int8]] = field(default_factory=dict[int, NDArray[np.int8]])
+    _open: dict[int, _Piece] = field(default_factory=dict[int, _Piece])
 
-    def _piece(self, k: int) -> NDArray[np.int8]:
+    def _piece(self, k: int) -> _Piece:
         if k not in self._open:
-            self._open[k] = np.load(self.folder / f"{self.names[k]}.npy", mmap_mode="r")
+            path = self.folder / f"{self.names[k]}.npy"
+            with path.open("rb") as head:
+                version = np.lib.format.read_magic(head)
+                read = (
+                    np.lib.format.read_array_header_1_0
+                    if version == (1, 0)
+                    else np.lib.format.read_array_header_2_0
+                )
+                shape, _, dtype = read(head)
+                offset = head.tell()
+            if dtype != np.int8:
+                msg = f"{path}: int8 rows expected, got {dtype}"
+                raise ValueError(msg)
+            self._open[k] = _Piece(os.open(path, os.O_RDONLY), offset, int(shape[1]))
         return self._open[k]
 
-    def cosines(self, query: Floats, rows: Ints) -> Floats:
-        """Exact cosines of a unit query with these crop rows (in that order)."""
-        out = np.empty(len(rows), dtype=np.float32)
+    def rows(self, rows: Ints) -> NDArray[np.int8]:
+        """These crop rows, in that order."""
         order = np.argsort(rows, kind="stable")
         ordered = rows[order]
         pieces = np.searchsorted(self.starts, ordered, side="right") - 1
-        for k in np.unique(pieces).tolist():
-            at = np.flatnonzero(pieces == k)
-            local = ordered[at] - self.starts[k]
-            block = np.asarray(self._piece(k)[local], dtype=np.float32)
-            out[order[at]] = (block @ query) * self.scale[ordered[at]]
-        return out
+        # Runs of neighbouring rows of one piece: (first position in `ordered`, count).
+        breaks = np.flatnonzero((np.diff(ordered) != 1) | (np.diff(pieces) != 0)) + 1
+        firsts = np.concatenate([[0], breaks]).astype(np.int64)
+        counts = np.diff(np.concatenate([firsts, [len(ordered)]])).astype(np.int64)
+        if not len(ordered):
+            return np.zeros((0, 0), dtype=np.int8)
+        width = self._piece(int(pieces[0])).width
+        out = np.empty((len(ordered), width), dtype=np.int8)
+
+        def read(run: tuple[int, int]) -> None:
+            at, count = run
+            piece = self._piece(int(pieces[at]))
+            local = int(ordered[at] - self.starts[pieces[at]])
+            data = os.pread(piece.fd, count * width, piece.offset + local * width)
+            out[at : at + count] = np.frombuffer(data, dtype=np.int8).reshape(count, width)
+
+        runs = list(zip(firsts.tolist(), counts.tolist(), strict=True))
+        list(bounded_map(read, runs, workers=READERS))
+        back = np.empty_like(out)
+        back[order] = out
+        return back
+
+    def cosines(self, query: Floats, rows: Ints) -> Floats:
+        """Exact cosines of a unit query with these crop rows (in that order)."""
+        block = self.rows(rows).astype(np.float32)
+        return ((block @ query) * self.scale[rows]).astype(np.float32)
 
 
 @dataclass(frozen=True, slots=True)

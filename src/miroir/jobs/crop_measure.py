@@ -165,6 +165,9 @@ class QueryRanks:
     off_ms: float
     on_ms: float
     crops_ms: float
+    on_few: int = 0
+    """The rank with fewer crops rescored (`miroir.remote.crop_measure.FEW`)."""
+    few_crops_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +202,7 @@ def summarize(out: MeasureOut) -> dict[str, dict[str, float]]:
         mine = [r for r in out.ranks if r.set_id == set_id and r.off > 0]
         row: dict[str, float] = {"queries": float(len(mine))}
         for k in HIT_KS:
-            for side in ("off", "on"):
+            for side in ("off", "on", "on_few"):
                 hit = [getattr(r, side) <= k for r in mine]
                 row[f"hit@{k} {side}"] = round(100 * float(np.mean(hit)), 1) if hit else 0.0
         row["first lost"] = float(sum(r.off == 1 and r.on != 1 for r in mine))
@@ -208,6 +211,7 @@ def summarize(out: MeasureOut) -> dict[str, dict[str, float]]:
         row["median ms off"] = round(float(np.median([r.off_ms for r in every])), 1)
         row["median ms on"] = round(float(np.median([r.on_ms for r in every])), 1)
         row["median crops ms"] = round(float(np.median([r.crops_ms for r in every])), 1)
+        row["median few crops ms"] = round(float(np.median([r.few_crops_ms for r in every])), 1)
         table[set_id] = row
     return table
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 #: End-to-end searches of each outside photo, crops off and on (the first warms up).
 REPEATS = 4
+#: Crops rescored in the cheaper variant (the bundle's rule is the other).
+FEW = 5000
 
 
 def run_crop_measure(settings: Settings, index: str) -> None:
@@ -71,38 +74,16 @@ def run_crop_measure(settings: Settings, index: str) -> None:
             msg = f"{index} has no crops"
             raise ValueError(msg)
         report(note="searching", total=len(spec.queries))
+        full = engine.crops
+        few = replace(full, rule=replace(full.rule, rescore=FEW))
+        variants = {"off": None, "on": full, "few": few}
         ranks: list[QueryRanks] = []
         supplied = _supplied(s3, bucket, index)
         for n, query in enumerate(spec.queries):
             a7, a3, chroma = _vectors(
                 s3, bucket, index, engine=engine, query=query, supplied=supplied
             )
-            hidden = np.ones(len(engine.catalog.images), dtype=bool)
-            hidden[
-                [engine.catalog.image_row[i] for i in query.hidden if i in engine.catalog.image_row]
-            ] = False
-            right = [
-                engine.catalog.entity_row[e]
-                for e in query.expected
-                if e in engine.catalog.entity_row
-            ]
-            got: dict[bool, tuple[int, float, float, str]] = {}
-            for crops in (False, True):
-                engine.use_crops = crops
-                timings: dict[str, float] = {}
-                tick = time.monotonic()
-                cosines = engine.vector_cosines(a7, a3, chroma, hidden, timings)
-                fused = ranking.fuse(engine.photo_of(cosines).signals)
-                rank = right_rank(fused, right)
-                ms = 1000 * (time.monotonic() - tick)
-                got[crops] = (rank, ms, timings.get("crops", 0.0), cosines.bucket.name)
-            ranks.append(
-                QueryRanks(
-                    query_id=query.query_id, set_id=query.set_id, bucket=got[True][3],
-                    off=got[False][0], on=got[True][0], off_ms=round(got[False][1], 1),
-                    on_ms=round(got[True][1], 1), crops_ms=round(got[True][2], 1),
-                )
-            )  # fmt: skip
+            ranks.append(_search(engine, query, (a7, a3, chroma), variants))
             if n % 50 == 0:
                 report(done=n + 1)
         photo_ms = _photo_searches(s3, bucket, index, engine, spec)
@@ -115,6 +96,33 @@ def run_crop_measure(settings: Settings, index: str) -> None:
         report(state=JobState.FAILED, note=f"{type(err).__name__}: {err}"[:500])
         raise
     report(state=JobState.DONE, done=len(spec.queries), note="ranks written")
+
+
+def _search(engine: Engine, query, vectors, variants) -> QueryRanks:
+    """One query searched with each crop variant (None: crops off), as the site ranks."""
+    a7, a3, chroma = vectors
+    catalog = engine.catalog
+    shown = np.ones(len(catalog.images), dtype=bool)
+    shown[[catalog.image_row[i] for i in query.hidden if i in catalog.image_row]] = False
+    right = [catalog.entity_row[e] for e in query.expected if e in catalog.entity_row]
+    full = engine.crops
+    got: dict[str, tuple[int, float, float, str]] = {}
+    for name, crops in variants.items():
+        engine.use_crops = crops is not None
+        engine.crops = crops or full
+        timings: dict[str, float] = {}
+        tick = time.monotonic()
+        cosines = engine.vector_cosines(a7, a3, chroma, shown, timings)
+        rank = right_rank(ranking.fuse(engine.photo_of(cosines).signals), right)
+        ms = 1000 * (time.monotonic() - tick)
+        got[name] = (rank, ms, timings.get("crops", 0.0), cosines.bucket.name)
+    engine.crops = full
+    return QueryRanks(
+        query_id=query.query_id, set_id=query.set_id, bucket=got["on"][3],
+        off=got["off"][0], on=got["on"][0], off_ms=round(got["off"][1], 1),
+        on_ms=round(got["on"][1], 1), crops_ms=round(got["on"][2], 1),
+        on_few=got["few"][0], few_crops_ms=round(got["few"][2], 1),
+    )  # fmt: skip
 
 
 def _memory() -> dict[str, float]:
