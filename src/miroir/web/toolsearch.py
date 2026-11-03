@@ -174,8 +174,8 @@ class ToolSearch:
         self._facts: _Facts | None = None
 
     def warm(self) -> None:
-        """Gather each entity's facts for the filters now (about a minute on all of POP), so
-        the first filtered search does not wait for it."""
+        """Gather each entity's facts for the filters now (about 50 s on all of POP), so the
+        first filtered search does not wait for it."""
         self._entity_facts()
 
     def run(self, query: ToolQuery) -> ToolHits:

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import logging
-import threading
 import time
 from pathlib import Path
 
@@ -145,11 +144,12 @@ class SearchService:
         captions = BackgroundCaptions(SITE_CAPTION_MODEL, MODEL_WAIT_S, start=False)
         self.engine = load_search(folder, captions)
         captions.load_now()
+        # The conversation page's filters need every entity's facts (about 50 s on all of
+        # POP). Gathered before the site listens: in a thread beside the first searches, it
+        # held Python's lock and the first photo search took 27 s instead of 0.3 s.
         self._tools = ToolSearch(self.engine)
+        self._tools.warm()
         logger.info("search service ready in %.0f s", time.monotonic() - start)
-        # The conversation page's filters need every entity's facts: gathered beside the
-        # first searches rather than in the first filtered one.
-        threading.Thread(target=self._tools.warm, daemon=True).start()
 
     def detect(self, jpeg: bytes) -> Outlines:
         return self.outlines.find(jpeg)
