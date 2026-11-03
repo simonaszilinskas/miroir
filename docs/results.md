@@ -742,6 +742,66 @@ What the runs show:
 - S2's review leaves the right answer where S1 put it on 8 of 10 photos; it moved it up once (T2, 7 to 2) and down once (T5, 2 to 3). S1's plan lost a T3 crop that G5 had first (rank 219) by adding a text query and a boost on the wrong kind of object.
 - Failure modes: no bad JSON, no loop without end, no invented id in a final answer. The model sends filter keys that do not exist ("description"), and once a garbled one; they are dropped without a word back. The simulated visitor sometimes tacks "je ne sais pas" onto an answer it knows, and said "c'est moi qui ai pris la photo" for an archive print.
 
+## Crop slice test (2026-11-03)
+
+Question: do crop vectors help find a whole from a photo of one of its parts, and by how much? A slice, to decide whether crops of all of POP are worth paying for (docs/search-levels.md, step 4). `uv run miroir scw crop-slice --render --gallery 20000 --t2-queries 100`, then `uv run miroir eval crops`; scores in `eval/results/R3/SL-crop-slice.json`.
+
+Method.
+
+- **Gallery.** 20,000 image rows of the `pop-all` index: every row of the answers of VET (3 queries), PARTS tune (180), T3 tune (99) and 100 T2 tune queries drawn with the project seed (11,661 rows), and 8,339 other rows drawn with the same seed. Query photos are left out. 203 Commons photos have no stored file and keep their whole vectors only.
+- **Crops.** Each stored photo (at most 1,024 px) cut into a 2×2 grid of windows 60% of each side (neighbours share 20%) and a 3×3 grid of 40% (sharing 10%); the overlap keeps a part lying on a grid line whole in one window. Each window shrunk as the whole photos were (512 px JPEG) and embedded with MegaLoc (A3). Whole vectors are the bundle's own (A7 in float16, A3 in int8).
+- **Ranking.** As on the site: each photo routed by the type guess and its colour (archive building: A7 alone; colour building: A3 alone; object: A7 0.2, A3 0.8), an entity takes its best image per model, min-max, weighted sum. With crops an image's A3 score is the best of its whole and crop cosines. hit@k as in R1: the first right entity's rank.
+- **Two measures.** The slice ranks the gallery's 7,930 entities only: easy, since most look-alikes are missing, but each look-alike there has crops too. The full-index estimate ranks all 885,596 entities of `pop-all` as the site does (A7 and A3 shortlists, exact A3 on 4,000 images), the gallery's entities also with their crops; it flatters crops, since none of the other 2.2 million images gets any.
+- **Machine.** Every L4, L40S and H100 in fr-par-1, fr-par-2 and pl-waw-2 was out of stock from 09:30 to 11:00; the run used a RENDER-S (Tesla P100, 16 GB), the one GPU in stock: 257,231 crops in 90 minutes, 48 a second. No A7 crops (no bfloat16 on that GPU and too slow), so the sample with A7 crops planned for VET and PARTS was dropped. Cost €3.10, failed starts included.
+
+Hit@1 / hit@10:
+
+| Set | Queries | a. Today (whole) | b. + 2×2 | c. + 2×2 + 3×3 | d. + 3×3 |
+|---|---|---|---|---|---|
+| **Full-index estimate** | | | | | |
+| VET | 3 | 66.7 / 100 | 66.7 / 100 | 66.7 / 100 | 66.7 / 100 |
+| PARTS | 180 | 42.8 / 58.3 | 50.0 / 66.7 | **61.7 / 78.9** | 61.1 / 76.7 |
+| T2 (100) | 100 | 54.0 / 65.0 | 54.0 / 67.0 | 55.0 / 68.0 | 55.0 / 66.0 |
+| T3 | 99 | 56.6 / 82.8 | 62.6 / 85.9 | 65.7 / 89.9 | 64.6 / 89.9 |
+| **Slice (20,000 images)** | | | | | |
+| VET | 3 | 100 / 100 | 100 / 100 | 100 / 100 | 100 / 100 |
+| PARTS | 180 | 64.4 / 77.2 | 67.8 / 82.8 | 77.8 / 88.3 | 77.8 / 88.9 |
+| PARTS altarpiece | 30 | 53.3 / 70.0 | 63.3 / 80.0 | 76.7 / 90.0 | 76.7 / 90.0 |
+| PARTS statue | 30 | 100 / 100 | 96.7 / 100 | 100 / 100 | 100 / 100 |
+| PARTS painting | 30 | 70.0 / 83.3 | 73.3 / 83.3 | 83.3 / 93.3 | 83.3 / 93.3 |
+| PARTS furniture | 30 | 56.7 / 70.0 | 60.0 / 76.7 | 73.3 / 83.3 | 73.3 / 83.3 |
+| PARTS stained glass | 30 | 46.7 / 63.3 | 53.3 / 76.7 | 70.0 / 83.3 | 70.0 / 83.3 |
+| PARTS building | 30 | 60.0 / 76.7 | 60.0 / 80.0 | 63.3 / 80.0 | 63.3 / 83.3 |
+| T2 (100) | 100 | 68.0 / 75.0 | 68.0 / 77.0 | 69.0 / 78.0 | 68.0 / 78.0 |
+| T3 | 99 | 70.7 / 91.9 | 72.7 / 93.9 | 74.7 / 94.9 | 74.7 / 94.9 |
+
+Today's full-index figures match the bundle's own report within ties (T3 56.6 / 82.8 against 54.5 / 82.8).
+
+Wrong record first (slice; "lost": right first before, wrong first after; "gained": the other way):
+
+| Set | b. lost / gained | c. lost / gained | d. lost / gained |
+|---|---|---|---|
+| PARTS | 4 / 10 | 2 / 26 | 2 / 26 |
+| T2 | 1 / 1 | 1 / 2 | 1 / 1 |
+| T3 | 1 / 3 | 2 / 6 | 2 / 6 |
+
+VET, rank of the altarpiece (PM95000723), any of its photos, then through the photo from before 1896 (APMH047981) alone, its other photos hidden. Today → 2×2 → 2×2 + 3×3:
+
+| Query | Any photo, slice | Any photo, full index | Target photo alone, slice | Target photo alone, full index |
+|---|---|---|---|---|
+| VET-1 sale catalogue, Mise au tombeau | 1 → 1 → 1 | 1 → 1 → 1 | 261 → 485 → 285 | past 2,000 |
+| VET-2 the altarpiece today | 1 → 1 → 1 | 3 → 2 → 2 | 1 → 1 → 1 | 3 → 2 → 2 |
+| VET-3 sale catalogue, Descente de croix | 1 → 1 → 1 | 1 → 1 → 1 | 87 → 93 → 91 | 1,790 → 1,753 → 1,698 |
+
+What the runs show:
+
+- Crops find wholes from their parts. On PARTS, 2×2 + 3×3 lifts hit@10 by 20.6 points over the whole index (estimate) and 11.1 in the slice, where the look-alikes have crops too; 26 queries gain first place, 2 lose it. 3×3 alone does nearly as well (76.7 against 78.9): the 2×2 windows add little once the 3×3 ones are there.
+- Altarpieces, furniture, stained glass and paintings gain 10–20 points of hit@10 in the slice. Statues were already found. Building details barely move: half are black-and-white Mémoire photos, which the site ranks by A7 alone, and A7 had no crops here.
+- Nothing gets worse: T3 gains 7 points of hit@10 (its queries are crops of room photos), T2 3. Crops put a wrong record first for 5 of the 379 queries, and the right one for 34.
+- VET: the altarpiece is found first through its other photos, crops or not. Through the 1896 photo alone, crops do not help: each stolen group fills about 3% of that photo, a 3×3 window 16%, and crops of other photos rise as much as the target's.
+- Not measured: A7 crops, a 50,000-image gallery, all T2 queries, and crops stored shorter than 8,448 numbers.
+- Full run, MegaLoc only, at the L40S speed of 135 images a second (€1.40 an hour): 2×2 is 8.6 million crops, about 18 hours, €25; 3×3 is 19.3 million, about 40 hours, €55; both about €80. Kept whole in int8, 3×3 crops would take 163 GB, which no machine here serves; at 1,024 numbers, 20 GB. The shorter crops need their own test before the full run.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->

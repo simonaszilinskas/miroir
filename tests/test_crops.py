@@ -291,7 +291,7 @@ def test_report_reads_what_the_machine_writes(tmp_path) -> None:
     scores = load_scores(tmp_path, spec)
     out = report(scores, cases_of(spec, queries))
     vet = out["vet_ranks"]["VET-1"]  # type: ignore[index]
-    assert vet == {"a-whole": 2, "b-whole+2x2": 1, "c-whole+2x2+3x3": 1}
+    assert vet == {"a-whole": 2, "b-whole+2x2": 1, "c-whole+2x2+3x3": 1, "d-whole+3x3": 2}
     full = out["full_ranks"]["VET-1"]  # type: ignore[index]
     assert full["a-whole"] == 3  # D and B above A
     assert full["b-whole+2x2"] == 1  # the crop (0.95) passes D (0.9)

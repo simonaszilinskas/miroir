@@ -61,6 +61,7 @@ VARIANTS = (
     Variant("a-whole", ()),
     Variant("b-whole+2x2", ("g2",)),
     Variant("c-whole+2x2+3x3", ("g2", "g3")),
+    Variant("d-whole+3x3", ("g3",)),
 )
 A7_VARIANTS = (
     Variant("a-whole", ()),
@@ -567,7 +568,7 @@ def report(scores: Scores, cases: Sequence[QueryCase]) -> dict[str, object]:
     a7_cases = [c for c in cases if c.set_id in A7_SETS]
     if len(a7_rows):
         sub = rank_slice(scores, a7_cases, A7_VARIANTS, rows=a7_rows)
-        a3_only = rank_slice(scores, a7_cases, VARIANTS[1:], rows=a7_rows)
+        a3_only = rank_slice(scores, a7_cases, VARIANTS[1:3], rows=a7_rows)
         out["a7_sample"] = {
             "gallery_rows": len(a7_rows),
             "both_models": by_group(a7_cases, sub.ranks, "set_id"),

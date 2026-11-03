@@ -1,0 +1,495 @@
+{
+  "gallery_rows": 20000,
+  "gallery_entities": 7930,
+  "slice": {
+    "VET": {
+      "a-whole": {
+        "queries": 3.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      },
+      "b-whole+2x2": {
+        "queries": 3.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 3.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      },
+      "d-whole+3x3": {
+        "queries": 3.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      }
+    },
+    "PARTS": {
+      "a-whole": {
+        "queries": 180.0,
+        "hit@1": 64.4,
+        "hit@10": 77.2
+      },
+      "b-whole+2x2": {
+        "queries": 180.0,
+        "hit@1": 67.8,
+        "hit@10": 82.8
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 180.0,
+        "hit@1": 77.8,
+        "hit@10": 88.3
+      },
+      "d-whole+3x3": {
+        "queries": 180.0,
+        "hit@1": 77.8,
+        "hit@10": 88.9
+      }
+    },
+    "T2": {
+      "a-whole": {
+        "queries": 100.0,
+        "hit@1": 68.0,
+        "hit@10": 75.0
+      },
+      "b-whole+2x2": {
+        "queries": 100.0,
+        "hit@1": 68.0,
+        "hit@10": 77.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 100.0,
+        "hit@1": 69.0,
+        "hit@10": 78.0
+      },
+      "d-whole+3x3": {
+        "queries": 100.0,
+        "hit@1": 68.0,
+        "hit@10": 78.0
+      }
+    },
+    "T3": {
+      "a-whole": {
+        "queries": 99.0,
+        "hit@1": 70.7,
+        "hit@10": 91.9
+      },
+      "b-whole+2x2": {
+        "queries": 99.0,
+        "hit@1": 72.7,
+        "hit@10": 93.9
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 99.0,
+        "hit@1": 74.7,
+        "hit@10": 94.9
+      },
+      "d-whole+3x3": {
+        "queries": 99.0,
+        "hit@1": 74.7,
+        "hit@10": 94.9
+      }
+    },
+    "PARTS altarpiece": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 53.3,
+        "hit@10": 70.0
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 63.3,
+        "hit@10": 80.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 76.7,
+        "hit@10": 90.0
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 76.7,
+        "hit@10": 90.0
+      }
+    },
+    "PARTS statue": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 96.7,
+        "hit@10": 100.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 100.0,
+        "hit@10": 100.0
+      }
+    },
+    "PARTS painting": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 70.0,
+        "hit@10": 83.3
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 73.3,
+        "hit@10": 83.3
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 83.3,
+        "hit@10": 93.3
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 83.3,
+        "hit@10": 93.3
+      }
+    },
+    "PARTS furniture": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 56.7,
+        "hit@10": 70.0
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 60.0,
+        "hit@10": 76.7
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 73.3,
+        "hit@10": 83.3
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 73.3,
+        "hit@10": 83.3
+      }
+    },
+    "PARTS stained-glass": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 46.7,
+        "hit@10": 63.3
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 53.3,
+        "hit@10": 76.7
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 70.0,
+        "hit@10": 83.3
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 70.0,
+        "hit@10": 83.3
+      }
+    },
+    "PARTS building": {
+      "a-whole": {
+        "queries": 30.0,
+        "hit@1": 60.0,
+        "hit@10": 76.7
+      },
+      "b-whole+2x2": {
+        "queries": 30.0,
+        "hit@1": 60.0,
+        "hit@10": 80.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 30.0,
+        "hit@1": 63.3,
+        "hit@10": 80.0
+      },
+      "d-whole+3x3": {
+        "queries": 30.0,
+        "hit@1": 63.3,
+        "hit@10": 83.3
+      }
+    }
+  },
+  "look_alikes": {
+    "T2": {
+      "b-whole+2x2": {
+        "lost_first": 1,
+        "gained_first": 1,
+        "wrong_first_before": 32,
+        "wrong_first_after": 32
+      },
+      "c-whole+2x2+3x3": {
+        "lost_first": 1,
+        "gained_first": 2,
+        "wrong_first_before": 32,
+        "wrong_first_after": 31
+      },
+      "d-whole+3x3": {
+        "lost_first": 1,
+        "gained_first": 1,
+        "wrong_first_before": 32,
+        "wrong_first_after": 32
+      }
+    },
+    "T3": {
+      "b-whole+2x2": {
+        "lost_first": 1,
+        "gained_first": 3,
+        "wrong_first_before": 29,
+        "wrong_first_after": 27
+      },
+      "c-whole+2x2+3x3": {
+        "lost_first": 2,
+        "gained_first": 6,
+        "wrong_first_before": 29,
+        "wrong_first_after": 25
+      },
+      "d-whole+3x3": {
+        "lost_first": 2,
+        "gained_first": 6,
+        "wrong_first_before": 29,
+        "wrong_first_after": 25
+      }
+    },
+    "PARTS": {
+      "b-whole+2x2": {
+        "lost_first": 4,
+        "gained_first": 10,
+        "wrong_first_before": 64,
+        "wrong_first_after": 58
+      },
+      "c-whole+2x2+3x3": {
+        "lost_first": 2,
+        "gained_first": 26,
+        "wrong_first_before": 64,
+        "wrong_first_after": 40
+      },
+      "d-whole+3x3": {
+        "lost_first": 2,
+        "gained_first": 26,
+        "wrong_first_before": 64,
+        "wrong_first_after": 40
+      }
+    },
+    "VET": {
+      "b-whole+2x2": {
+        "lost_first": 0,
+        "gained_first": 0,
+        "wrong_first_before": 0,
+        "wrong_first_after": 0
+      },
+      "c-whole+2x2+3x3": {
+        "lost_first": 0,
+        "gained_first": 0,
+        "wrong_first_before": 0,
+        "wrong_first_after": 0
+      },
+      "d-whole+3x3": {
+        "lost_first": 0,
+        "gained_first": 0,
+        "wrong_first_before": 0,
+        "wrong_first_after": 0
+      }
+    }
+  },
+  "buckets": {
+    "PARTS": {
+      "object": 161,
+      "archive-building": 15,
+      "colour-building": 4
+    },
+    "T2": {
+      "object": 60,
+      "colour-building": 40
+    },
+    "T3": {
+      "object": 99
+    },
+    "VET": {
+      "object": 3
+    }
+  },
+  "full_index_estimate": {
+    "VET": {
+      "a-whole": {
+        "queries": 3.0,
+        "hit@1": 66.7,
+        "hit@10": 100.0
+      },
+      "b-whole+2x2": {
+        "queries": 3.0,
+        "hit@1": 66.7,
+        "hit@10": 100.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 3.0,
+        "hit@1": 66.7,
+        "hit@10": 100.0
+      },
+      "d-whole+3x3": {
+        "queries": 3.0,
+        "hit@1": 66.7,
+        "hit@10": 100.0
+      }
+    },
+    "PARTS": {
+      "a-whole": {
+        "queries": 180.0,
+        "hit@1": 42.8,
+        "hit@10": 58.3
+      },
+      "b-whole+2x2": {
+        "queries": 180.0,
+        "hit@1": 50.0,
+        "hit@10": 66.7
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 180.0,
+        "hit@1": 61.7,
+        "hit@10": 78.9
+      },
+      "d-whole+3x3": {
+        "queries": 180.0,
+        "hit@1": 61.1,
+        "hit@10": 76.7
+      }
+    },
+    "T2": {
+      "a-whole": {
+        "queries": 100.0,
+        "hit@1": 54.0,
+        "hit@10": 65.0
+      },
+      "b-whole+2x2": {
+        "queries": 100.0,
+        "hit@1": 54.0,
+        "hit@10": 67.0
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 100.0,
+        "hit@1": 55.0,
+        "hit@10": 68.0
+      },
+      "d-whole+3x3": {
+        "queries": 100.0,
+        "hit@1": 55.0,
+        "hit@10": 66.0
+      }
+    },
+    "T3": {
+      "a-whole": {
+        "queries": 99.0,
+        "hit@1": 56.6,
+        "hit@10": 82.8
+      },
+      "b-whole+2x2": {
+        "queries": 99.0,
+        "hit@1": 62.6,
+        "hit@10": 85.9
+      },
+      "c-whole+2x2+3x3": {
+        "queries": 99.0,
+        "hit@1": 65.7,
+        "hit@10": 89.9
+      },
+      "d-whole+3x3": {
+        "queries": 99.0,
+        "hit@1": 64.6,
+        "hit@10": 89.9
+      }
+    }
+  },
+  "full_ranks": {
+    "VET-1": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    },
+    "VET-2": {
+      "a-whole": 3,
+      "b-whole+2x2": 2,
+      "c-whole+2x2+3x3": 2,
+      "d-whole+3x3": 3
+    },
+    "VET-3": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    }
+  },
+  "vet_target_photo": {
+    "VET-1": {
+      "a-whole": 261,
+      "b-whole+2x2": 485,
+      "c-whole+2x2+3x3": 285,
+      "d-whole+3x3": 230
+    },
+    "VET-2": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    },
+    "VET-3": {
+      "a-whole": 87,
+      "b-whole+2x2": 93,
+      "c-whole+2x2+3x3": 91,
+      "d-whole+3x3": 77
+    }
+  },
+  "vet_target_photo_full": {
+    "VET-1": {
+      "a-whole": 2005,
+      "b-whole+2x2": 2279,
+      "c-whole+2x2+3x3": 2056,
+      "d-whole+3x3": 1999
+    },
+    "VET-2": {
+      "a-whole": 3,
+      "b-whole+2x2": 2,
+      "c-whole+2x2+3x3": 2,
+      "d-whole+3x3": 3
+    },
+    "VET-3": {
+      "a-whole": 1790,
+      "b-whole+2x2": 1753,
+      "c-whole+2x2+3x3": 1698,
+      "d-whole+3x3": 1670
+    }
+  },
+  "vet_ranks": {
+    "VET-1": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    },
+    "VET-2": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    },
+    "VET-3": {
+      "a-whole": 1,
+      "b-whole+2x2": 1,
+      "c-whole+2x2+3x3": 1,
+      "d-whole+3x3": 1
+    }
+  }
+}
