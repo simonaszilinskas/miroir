@@ -190,7 +190,8 @@ uv run miroir scw crop-measure                # tune sets, crops off and on, on 
   shared, at any time.
 - Files are read on 64 threads (Object Storage answers each in about half a second) and cut
   on 7 processes (cutting holds Python's lock: on threads it ran on one core).
-- Speeds: an L40S about 550 crops a second, an L4 about 200.
+- Speeds on all of POP: an L40S about 370 crops a second, an L4 about 190 (reading the files,
+  not the GPU, held them back). The whole run: 3 h 50 min on one L40S and six L4, €23.39.
 - `crop-bundle` runs on the Mac: it downloads the coordinates (10 GB), writes the crop files,
   copies `pop-all` and the whole vectors into `pop-all-crops/` bucket to bucket, and sends
   the crop files.

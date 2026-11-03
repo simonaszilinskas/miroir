@@ -108,7 +108,7 @@ class GpuCrops:
     never holds them whole."""
 
     #: Crop rows turned to float32 at once on the GPU.
-    BLOCK = 1 << 20
+    BLOCK = 1 << 19
 
     def __init__(self, directory: Path) -> None:
         start = time.monotonic()

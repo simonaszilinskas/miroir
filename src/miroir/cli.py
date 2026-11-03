@@ -1981,9 +1981,7 @@ def scw_crop_embed_spec(
 @scw_app.command("crop-bundle")
 def scw_crop_bundle(
     dims: Annotated[int, typer.Option(help="PCA axes per crop to pick crops with.")] = 128,
-    rescore: Annotated[
-        int, typer.Option(help="Crops picked and scored whole per search.")
-    ] = 20_000,
+    rescore: Annotated[int, typer.Option(help="Crops picked and scored whole per search.")] = 5_000,
     shortlist: Annotated[
         int, typer.Option(help="Image rows by best crop on the shortlist.")
     ] = 2000,

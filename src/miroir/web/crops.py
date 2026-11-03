@@ -66,7 +66,7 @@ READERS = 64
 class CropRule:
     per_file: int = 9
     """Windows per file (a 3x3 grid)."""
-    rescore: int = 20_000
+    rescore: int = 5_000
     """Crops picked by their short vectors and scored whole, per search."""
     shortlist: int = 2000
     """Image rows, by best crop, that join the MegaLoc shortlist."""
