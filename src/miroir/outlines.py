@@ -1,11 +1,11 @@
 """Object outlines (F4, experiments.md step C): the detectors we compare, and which of their
 boxes the photo view shows.
 
-A detector (`miroir.remote.detect`, Modal only) returns raw boxes: every box it is at least a
+A detector (`miroir.remote.detect`, GPU machine only) returns raw boxes: every box it is at least a
 little sure of, in shares of the photo's width and height. `pick_outlines` keeps the ones worth
 drawing (sure enough, not twice the same object, not the whole photo, at most `ALL_OUTLINES`)
 and puts first the ones a visitor most likely means: big and near the photo's centre.
-The same rule runs in the GPU container for the website and on the Mac when scoring T3, so the
+The same rule runs on the GPU machine for the website and on the Mac when scoring T3, so the
 outlines scored are the outlines shown.
 """
 

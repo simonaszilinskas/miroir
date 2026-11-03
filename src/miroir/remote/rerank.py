@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Keypoint re-ranking for the website's object searches (step E1). Runs only inside Modal.
+"""Keypoint re-ranking for the website's object searches (step E1). Runs only on a GPU machine.
 
 For one query photo and the best image of each of its top entities: read the images from the
 `miroir-images` volume (512 px, as the gallery was embedded), ALIKED keypoints on each, then

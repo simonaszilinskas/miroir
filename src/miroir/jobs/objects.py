@@ -1,14 +1,14 @@
-"""Scaleway Object Storage (S3): the buckets that replace the Modal volumes.
+"""Scaleway Object Storage (S3): the buckets the GPU machines and the website read.
 
-| Bucket | Modal volume | What it holds |
+| Bucket | Was, on Modal (before 2026-11-03) | What it holds |
 |---|---|---|
 | `<prefix>-weights` | `miroir-weights` | Hugging Face and torch hub caches (`hf/`, `torch/`) |
 | `<prefix>-benchmarks` | `miroir-benchmarks` | AmsterTime |
 | `<prefix>-images` | `miroir-images` | POP images at 512 px, `<id[:2]>/<id>.jpg` |
 | `<prefix>-index` | `miroir-web-index` | The website's index bundles, `<name>/<file>` |
 
-The GPU machine mirrors a bucket into a local folder at the old mount path (`/weights`, ...),
-so the model code reads files as it did on Modal, and sends new files back when a call ends.
+The GPU machine mirrors a bucket into a local folder (`config.WEIGHTS_MOUNT`, ...), so the
+model code reads plain files, and sends new files back when a call ends.
 Used on the Mac (bucket creation, index upload) and on the machine (`miroir.remote.worker`).
 """
 

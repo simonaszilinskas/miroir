@@ -1,8 +1,8 @@
-"""What the step C and site re-rank runs send to Modal and get back (`miroir.remote.rooms`,
-`miroir.remote.rerank`).
+"""What the step C and site re-rank runs send to the GPU machine and get back
+(`miroir.remote.rooms`, `miroir.remote.rerank`).
 
 Kept apart from the scoring (`miroir.eval.detect`, `miroir.eval.site_rerank`) so the
-containers import only these dataclasses.
+GPU machine imports only these dataclasses.
 """
 
 from __future__ import annotations
@@ -75,9 +75,9 @@ class SiteMatchTask:
     query_id: str
     candidates: tuple[str, ...]
     image_id: str | None = None
-    """A POP image, read from the image volume."""
+    """A POP image, read from the machine's image folder."""
     jpeg: bytes | None = None
-    """Or the photo itself (a Commons photo, which the volume does not hold)."""
+    """Or the photo itself (a Commons photo, which the image folder does not hold)."""
 
 
 @dataclass(frozen=True, slots=True)

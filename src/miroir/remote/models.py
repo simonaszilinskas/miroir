@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Load a model and turn PIL images into vectors. Runs only inside Modal containers.
+"""Load a model and turn PIL images into vectors. Runs only on a Scaleway GPU machine.
 
 Type-checked in basic mode: torch and the model libraries are not installed on the Mac.
 """
@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 DEVICE = "cuda"
 GEM_P = 3.0
-#: Parallel image reads per container (volume, else POP), running ahead of the GPU.
+#: Parallel image reads on the machine (image folder, else POP), running ahead of the GPU.
 FETCH_CONCURRENCY = 32
-#: Parallel file reads from a Modal volume.
+#: Parallel file reads from the machine's image folder.
 VOLUME_READERS = 32
 
 
@@ -270,7 +270,7 @@ def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, in
 
 
 def embed_files(option: ModelOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
-    """Embed images read from disk (a benchmark on a Modal volume), keyed by the given ids."""
+    """Embed images read from disk (a benchmark in the machine's folder), keyed by the given ids."""
     model, load_s = encoder(option)
     start = time.monotonic()
     # Volume files load lazily and one read waits on the network: read many at once.

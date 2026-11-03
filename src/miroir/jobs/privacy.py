@@ -1,6 +1,7 @@
 """Which images may leave the Mac (technical spec §9, CLAUDE.md rule 8).
 
-Only images of `publishable` records go to an outside service: OpenRouter, Modal, any other.
+Only images of `publishable` records go to an outside service (OpenRouter, any other) or to
+the GPU machine; the full-sample index is the one exception (`miroir.jobs.gpu_run`).
 Commons photos (test queries T2, T2b, T8c) are openly licensed, so they may go to any service.
 Runners load the record store through `PublishableImages` and check every id before sending.
 """

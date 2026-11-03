@@ -25,7 +25,7 @@ from miroir.records.model import Image
 
 logger = logging.getLogger(__name__)
 
-#: Each option and the stored run its vectors must match (Modal L4, July).
+#: Each option and the stored run its vectors must match (made on a Modal L4 in July).
 SMOKE_RUNS = {
     "A7-embeddinggemma-2-512": "A7-embeddinggemma-2-512-screening-20k-publishable",
     "A3-megaloc-322": "A3-megaloc-322-screening-20k-publishable",

@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Step C on the Jeu de Paume room photos. Runs only inside Modal containers.
+"""Step C on the Jeu de Paume room photos. Runs only on a Scaleway GPU machine.
 
 - `detect_rooms`: one detector on each room photo (at the size the page sends), then every
   raw box cut from the photo and embedded as the site embeds a query (`prepare_photo`, then

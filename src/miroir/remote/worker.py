@@ -1,13 +1,12 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
 """The job server on a Scaleway GPU machine (`miroir scw serve`, inside the job image).
 
-The Modal functions of `miroir.jobs.modal_app` and the website's search class, behind one HTTP
+The GPU jobs (embedding, matching, detection, captions) and the website's search, behind one HTTP
 port on the machine's loopback; the Mac reaches it through an SSH tunnel
 (`miroir.jobs.scw_run`). A call is a pickle of (name, arguments) and its answer the pickled
-result, or HTTP 500 with the traceback. Calls run one at a time, as on Modal's single
-container per function.
+result, or HTTP 500 with the traceback. Calls run one at a time on the one GPU.
 
-Files: Object Storage buckets stand in for the Modal volumes (`miroir.jobs.objects`). The
+Files: Object Storage buckets, mirrored into the machine's folders (`miroir.jobs.objects`). The
 weights bucket is copied down at start and new weights go back after a call that loaded a
 model; a call's POP images come from the images bucket when it has them, and those fetched
 from POP go back after the call. The machine deletes itself past its deadline, so a Mac that
@@ -122,7 +121,7 @@ class Worker:
         weights = upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
         return {"weights": weights}
 
-    # --- the jobs (as in miroir.jobs.modal_app) -------------------------------------------
+    # --- the jobs ----------------------------------------------------------------------------
 
     def embed(
         self, option: ModelOption, images: list[Image], supplied: list[SuppliedImage]
@@ -205,7 +204,7 @@ class Worker:
         self._save_weights(1.0)
         return result
 
-    # --- the website's search (as `Search` in miroir.web.modal_app) ------------------------
+    # --- the website's search (`miroir web dev --scw`) ---------------------------------------
 
     def _service(self, index: str) -> SearchService:
         from miroir.remote.search import SearchService  # noqa: PLC0415

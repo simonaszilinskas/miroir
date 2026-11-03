@@ -3,7 +3,7 @@
 A photo of a Mémoire print glued on a card with a typed caption (results.md, T1 archive):
 
 1. `miroir.images.mount.find_picture` finds the print on the card (no model, a few ms).
-2. Only then does the GPU container's small open vision model read the caption
+2. Only then does a small open vision model on the GPU read the caption
    (`miroir.remote.caption`); a photo without a mount costs nothing more.
 3. The caption's words join the photo search, as typed words do but at the photo's weight.
 

@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Read an archive print's caption with a small open vision model. Runs only inside Modal.
+"""Read an archive print's caption with a small open vision model. Runs only on a GPU machine.
 
 Qwen3-VL Instruct is asked to copy the caption line that names the place
 (`miroir.caption.CAPTION_QUESTION`), greedy, at most `CAPTION_TOKENS` tokens.

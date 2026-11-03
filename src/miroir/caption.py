@@ -3,12 +3,12 @@ it names.
 
 Mémoire prints sit on a card whose typed or written caption names the commune, its
 département in brackets, then the building ("BEAUNE (Côte d'Or) Eglise Notre-Dame"). The
-model (`miroir.remote.caption`, on Modal) copies that line; `Gazetteer.find` looks the
+model (`miroir.remote.caption`, on a GPU machine) copies that line; `Gazetteer.find` looks the
 commune up among the communes the index knows, and gives it a position: the median of the
 positions held for that commune's buildings and objects. The site then uses that position
 as it uses the visitor's own (step H2's soft prior), and the line as words.
 
-Pure Python and NumPy: the Mac, the tests and the web container import this module.
+Pure Python and NumPy: the Mac, the tests and the site import this module.
 """
 
 from __future__ import annotations

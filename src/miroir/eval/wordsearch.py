@@ -1,7 +1,7 @@
 """Step B on T7: word search scored with the website's own ranking, on its own index.
 
 Each T7 tune query's words go through `miroir.web.engine.word_signals`, as on the site: the
-EmbeddingGemma 2 text vector (embedded on Modal with the site's prompt, `TEXT_PROMPT`)
+EmbeddingGemma 2 text vector (embedded on a GPU with the site's prompt, `TEXT_PROMPT`)
 against every image vector of the index bundle, and BM25 over the bundle's record text. The
 query's hidden images leave the index first. The two signals are then mixed:
 

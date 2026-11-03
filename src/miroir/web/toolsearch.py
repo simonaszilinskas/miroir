@@ -1,8 +1,8 @@
 """The searches the conversation page's model calls (step H5), run where the engine runs.
 
 Step H4 gave a vision model tools over saved vectors. Here the same tools search the live
-index with a visitor's new photo, so they run beside the models: in the GPU container when
-deployed (`miroir.web.modal_app.Search.tool_search`), with fake models on the Mac.
+index with a visitor's new photo, so they run beside the models: on the GPU machine
+(`miroir.remote.search`), with fake models on the Mac.
 
 - image search: the photo's cosines from both models (`Engine.photo_cosines`), mixed per
   entity as the site mixes them (`ranking.fuse`), at G5's routed weight or the one asked for;

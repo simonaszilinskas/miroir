@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Keypoint matching for re-ranking (step E1). Runs only inside Modal containers.
+"""Keypoint matching for re-ranking (step E1). Runs only on a Scaleway GPU machine.
 
 ALIKED keypoints (BSD-3; SuperPoint's weights are non-commercial), LightGlue matching,
 then RANSAC (OpenCV MAGSAC) for a homography and a fundamental matrix. Images come from the
