@@ -4,7 +4,7 @@ Status: PoC. Written as the plan, updated 2026-10-19. Sections 1, 2, 5, 6, 8 and
 
 ## 1. Overview
 
-> **Built (2026-10-19): not as drawn below.** Modal GPUs embed every image with EmbeddingGemma 2 (A7) and MegaLoc (A3); the vectors come back as NumPy files (§7.1, §7.3). `miroir web build-index` packs them, the records and the routing weights into a bundle on a Modal volume. The search runs on one Modal L4 (§8): it embeds the query, scores every image exactly with NumPy, and mixes in a BM25 word score. There is no OpenSearch, no tile index, no Docker and no caption of collection images. Grounding DINO tiny draws the outlines; Qwen3-VL 4B reads an archive print's caption at search time. Each result card shows a level instead of a "not found" flag.
+> **Built (2026-10-19): not as drawn below.** Since 2026-11-03 every GPU job runs on a Scaleway machine; before, on Modal. GPUs embed every image with EmbeddingGemma 2 (A7) and MegaLoc (A3); the vectors come back as NumPy files (§7.1, §7.3). `miroir web build-index` packs them, the records and the routing weights into a bundle in the index bucket. The search runs on one L4 (§8; the demo machine since 2026-11-03): it embeds the query, scores every image exactly with NumPy, and mixes in a BM25 word score. There is no OpenSearch, no tile index, no Docker and no caption of collection images. Grounding DINO tiny draws the outlines; Qwen3-VL 4B reads an archive print's caption at search time. Each result card shows a level instead of a "not found" flag.
 
 ```mermaid
 flowchart LR
@@ -37,11 +37,11 @@ Everything runs in Docker so the stack can move to the Ministry's cloud unchange
 |---|---|---|
 | Language | Python 3.12 for pipeline, API and evaluation | As planned |
 | API | FastAPI | As planned (`miroir.web.app`) |
-| Models | PyTorch with Hugging Face `transformers` | As planned, only inside Modal containers (`src/miroir/remote/`) |
+| Models | PyTorch with Hugging Face `transformers` | As planned, only on a Scaleway GPU machine (`src/miroir/remote/`) |
 | Search | OpenSearch with the k-NN plugin (Faiss HNSW) and a hybrid search pipeline | Dropped: exact cosine search over the vectors on the GPU, ranking and BM25 in NumPy (`miroir.web.engine`, `miroir.eval.bm25`) |
 | Website | SvelteKit with Tailwind, phone-first | Dropped: one static page in plain JavaScript with the State design system (DSFR 1.15.4), served by FastAPI (`src/miroir/web/static/`) |
-| Captions | A vision model through OpenRouter, picked in week 1 on cost and French quality | Dropped for collection images (option B3 never ran). Qwen3-VL 4B on Modal reads archive print captions at search time |
-| Deployment | Docker Compose: `opensearch`, `api`, `web`, `worker`. A GPU machine runs the indexing jobs | Dropped: Modal (`miroir web deploy`), a GPU class for search and a CPU container for the page, both asleep when idle. Indexing jobs also run on Modal |
+| Captions | A vision model through OpenRouter, picked in week 1 on cost and French quality | Dropped for collection images (option B3 never ran). Qwen3-VL 4B on the site's GPU reads archive print captions at search time |
+| Deployment | Docker Compose: `opensearch`, `api`, `web`, `worker`. A GPU machine runs the indexing jobs | Dropped: until 2026-11-03 the site ran on Modal and so did the indexing jobs. Since then jobs run on Scaleway GPU machines that live one command, and the site on one Scaleway machine powered on for demos (prototype.md, section Hosting) |
 
 ## 3. Data
 
@@ -101,7 +101,7 @@ Every mapper turns a POP record into this shape:
   | `main` | anything else | 10,597 |
 
   The order puts what the image shows (a label, an inscription) before where it is (the back) and how it is framed (a detail): "detail-etiquette-au-revers" is a `label`. Joconde has 2 `back` images; Mémoire has none. The first `main` image of a record is its cover; a record with no `main` image uses its first image.
-- **Storage.** No local image store. Model work runs remotely (OpenRouter where it has the model, else Modal), and those jobs read images from their URLs in `images.parquet`, resized to 512 px on the longest side. Vectors come back to `MIROIR_DATA_DIR/vectors/`, keyed by `image_id`.
+- **Storage.** No local image store. Model work runs remotely (OpenRouter where it has the model, else a Scaleway GPU machine; Modal before 2026-11-03), and those jobs read images from their URLs in `images.parquet`, resized to 512 px on the longest side. Vectors come back to `MIROIR_DATA_DIR/vectors/`, keyed by `image_id`.
 
 ### 3.4 Full export
 
@@ -153,19 +153,19 @@ Vectors are L2-normalised, so we score with inner product. Their size depends on
 
 **OpenRouter.** `uv run miroir embed openrouter --option A9 --gallery screening-20k-publishable [--probe]` sends images, resized to 512 px on the long side as base64 JPEG, to the standard `/embeddings` endpoint. `--queries T1` does the same for a set's tune-half query images; repeat it (`--queries T2 --queries T2b --queries T8c`) to put several sets' queries in one run, named after them (`A9-gemini-embedding-2-512-T2-T2b-T8c-tune-queries`). Images come from their bucket URL; when that answers 404, from the IIIF image service for the same file. A bounded cache keeps the resized copies in `MIROIR_DATA_DIR/cache/images`. The embedder refuses image ids from records that are not `publishable`. The Batch API halves the price but, tested on 2026-10-12, it takes images only in chat calls: an image sent to `google/gemini-embedding-2:batch` comes back "Multimodal embedding inputs are not supported", while `google/gemini-3.5-flash-lite:batch` described an image given by URL. So image embeddings pay the standard price; text embeddings (T6, T7 queries, captions) and captions go through `:batch`. `google/gemini-embedding-2:batch` works for text although OpenRouter's model lists leave it out. Chat batches take an image only as a public http(s) URL, never a data URL; Google timed out fetching IIIF URLs, which resize on demand, so `miroir vlm ask` (step H1) sends the asset bucket URL. A batch just created can answer 404 for a minute or two: the client waits that out, and the describer keeps unfinished batch ids in a `.pending` file next to its answers so a stopped run collects them instead of paying again.
 
-**Modal.** Open models run on [Modal](https://modal.com) GPUs (`src/miroir/jobs/modal_app.py`). `uv run miroir embed modal --option <id> --gallery screening-20k-publishable [--probe]` sends the gallery's image ids and URLs, 500 per call, to one Modal function per model family (DINOv2/v3, SigLIP 2, PE-Core, EmbeddingGemma 2, Qwen3-VL-Embedding). The container fetches each image itself (512 px, IIIF fallback, the same code as above), embeds it, and sends the vectors back; the Mac writes the run (§7.1). Every function runs on an L4 (24 GB): the cheapest GPU that holds every model, with bf16 and more compute per dollar than a T4. DINO models run in float32 with the DINOv2 eval transform (shorter side 256, centre crop 224) and give the CLS token or GeM (p = 3) over patch tokens; the others use their own preprocessing and pooling, in bf16 (never float16: EmbeddingGemma 2 returns NaN in it). Weights are cached in the `miroir-weights` volume; gated weights (DINOv3) read `HF_TOKEN` from the `huggingface` Modal secret. Only `publishable` images go to Modal (§9), except for the full-sample index (§7.3). Option ids are listed in `src/miroir/jobs/remote_spec.py`. `--queries <set>` (repeatable) embeds test sets' tune query images instead of a gallery.
+**GPU machine.** Open models run on a Scaleway GPU machine (`src/miroir/jobs/scw_run.py`, `gpu_run.py`); until 2026-11-03 they ran on [Modal](https://modal.com), one function per model family. `uv run miroir embed scw --option <id> --gallery screening-20k-publishable [--probe]` starts a machine, sends the gallery's image ids and URLs, 500 per call, to its worker (DINOv2/v3, SigLIP 2, PE-Core, EmbeddingGemma 2, Qwen3-VL-Embedding), then deletes the machine. The machine fetches each image itself (512 px, IIIF fallback, the same code as above), embeds it, and sends the vectors back; the Mac writes the run (§7.1). The machine is an L4 (24 GB): the cheapest GPU that holds every model, with bf16 and more compute per dollar than a T4. DINO models run in float32 with the DINOv2 eval transform (shorter side 256, centre crop 224) and give the CLS token or GeM (p = 3) over patch tokens; the others use their own preprocessing and pooling, in bf16 (never float16: EmbeddingGemma 2 returns NaN in it). Weights are cached in the weights bucket; gated weights (DINOv3) read `HF_TOKEN`, sent to the machine from `.env`. Only `publishable` images go to the machine (§9), except for the full-sample index (§7.3). Option ids are listed in `src/miroir/jobs/remote_spec.py`. `--queries <set>` (repeatable) embeds test sets' tune query images instead of a gallery.
 
-**Commons photos.** Both routes embed Commons query photos (T2, T2b, T8c). The Mac fetches each one's 960 px thumbnail through the same polite client that built the sets (one request at a time, at most 4 a second, a User-Agent naming the GitHub repository), shrinks it to 512 px and keeps it in `MIROIR_DATA_DIR/cache/commons/thumbs/`, so a second model sends no request. OpenRouter gets the JPEG as for POP images; Modal gets the bytes in the call, since its containers never fetch from Wikimedia. Commons photos are openly licensed, so the privacy check lets them through.
+**Commons photos.** Both routes embed Commons query photos (T2, T2b, T8c). The Mac fetches each one's 960 px thumbnail through the same polite client that built the sets (one request at a time, at most 4 a second, a User-Agent naming the GitHub repository), shrinks it to 512 px and keeps it in `MIROIR_DATA_DIR/cache/commons/thumbs/`, so a second model sends no request. OpenRouter gets the JPEG as for POP images; the GPU machine gets the bytes in the call, since it never fetches from Wikimedia. Commons photos are openly licensed, so the privacy check lets them through.
 
 **Growing a gallery.** A run on `screening-20k-publishable` plus a run on `screening-v2-publishable-delta` make the `screening-v2-publishable` run, with nothing embedded twice: `uv run miroir eval merge-vectors --run <20k run> --run <delta run> --out <v2 run> --gallery screening-v2-publishable`. `uv run miroir testsets fetched --gallery screening-v2-publishable --vectors <run> ...` then writes `screening-v2-publishable-fetched`, the images every run holds (a few cannot be fetched), so all models are scored on one gallery.
 
-Cost is counted on the Mac: each call's wall time times Modal's published price for its GPU, CPU and memory, written to the project ledger as `modal`. Before each call, total spend plus the call's worst case (its 20-minute timeout at full price) must fit the usable budget. A full run needs a 100-image probe of the same model and size, and stops at 1.5 times its projection plus $0.25. Model code lives only in `src/miroir/remote/`, imported inside the Modal functions; `tests/test_no_models_on_the_mac.py` imports the CLI and every other module with model imports refused.
+Cost is counted on the Mac: each call's wall time times the machine's price, written to the project ledger as `scaleway` (as `modal` before 2026-11-03). The machine's whole life also goes to the Scaleway ledger, in euros, under its own cap. Before each call, total spend plus the call's worst case (its 20-minute timeout at full price) must fit the usable budget. A full run needs a 100-image probe of the same model and size, and stops at 1.5 times its projection plus $0.25. Model code lives only in `src/miroir/remote/`, imported only on the machine; `tests/test_no_models_on_the_mac.py` imports the CLI and every other module with model imports refused.
 
 Captions are written only for records where `publishable` is true. During experiments, test queries come from the collections and Commons, so they can go to closed models. Testers' photos go to a closed model only if one wins a place in the stack and the testers agreed in writing.
 
 ## 5. Indexes
 
-> **Not built.** No OpenSearch index exists. The site reads a bundle of files that `miroir web build-index` writes to `~/miroir-data/web/<index>/` and `miroir web upload` copies to the `miroir-web-index` Modal volume: `a7.npy` and `a3.npy` (vectors), `ids.txt`, `catalog.json.gz` (records), `guess.npz` (building or object), `routing.json` (weights per bucket, G5), `levels.json` (card levels), `places.npz` (positions, H2), `publishable.txt.gz` (images that may go to an outside model), `report.json` (scores). `WEB_INDEX` in `src/miroir/config.py` names the bundle served (`full-f2`). Tiles (5.2) were never built: step D did not run. The fixed weights of 5.3 became G5's weights per bucket.
+> **Not built.** No OpenSearch index exists. The site reads a bundle of files that `miroir web build-index` writes to `~/miroir-data/web/<index>/` and `miroir web upload` copies to the index bucket: `a7.npy` and `a3.npy` (vectors), `ids.txt`, `catalog.json.gz` (records), `guess.npz` (building or object), `routing.json` (weights per bucket, G5), `levels.json` (card levels), `places.npz` (positions, H2), `publishable.txt.gz` (images that may go to an outside model), `report.json` (scores). `DEMO_INDEX` in `src/miroir/config.py` names the bundle the demo machine serves; `WEB_INDEX` the one the Mac reads (`full-f2`). Tiles (5.2) were never built: step D did not run. The fixed weights of 5.3 became G5's weights per bucket.
 
 ### 5.1 `images`: one document per image
 
@@ -352,10 +352,10 @@ For each query we keep the rank of the first right entity and its average precis
 | `miroir eval route3 --round R2 --option G5-router3-A7+A3 --vectors <A7> --vectors <A3> --query-vectors <A7 q> --query-vectors <A3 q> --set T1 --set T2 --set T3 --set T5 --gallery <list>` | G5: one A7 weight per bucket (archive building, colour building, object), black and white read from the query's pixels; `--weights a,c,o` fixes them. Prints G1, G4, G5 and each model alone, with split-half checks |
 | `miroir eval views <result.json> --set T2 --gallery <list>` | A Commons set's tune score split by the view each photo shows (exterior, interior, detail) |
 | `miroir eval summary` | Rebuild the generated table in `docs/results.md` from every result file |
-| `miroir rerank modal --vectors <run> --set T1 --max-usd <usd>` | Step E1: each tune query's top 50 entities (best image each), matched against the query with ALIKED and LightGlue on a Modal GPU; matches and inliers saved per query in `MIROIR_DATA_DIR/matches/` |
+| `miroir rerank run --vectors <run> --set T1 --max-usd <usd>` | Step E1: each tune query's top 50 entities (best image each), matched against the query with ALIKED and LightGlue on a Scaleway GPU; matches and inliers saved per query in `MIROIR_DATA_DIR/matches/` |
 | `miroir eval rerank --round R2 --label <label> --vectors <run> --set T1` | Score those shortlists re-ranked by inliers, and by cosine + inliers / 100; one result file each, `E-E1-<label>-inliers.json` and `-mix.json` |
 | `miroir eval viewer --out <file.html>` | One self-contained page: for 20 seeded tune queries per set (T1, T5, T3; publishable images only), the query, a right answer and each model's top 5 records as thumbnails, marked right or wrong, with filters for misses and disagreements. Every model searches the publishable screening gallery |
-| `miroir r0 run [--model dinov2-giant-224]` | Set T9 (R0) on Modal: AmsterTime is downloaded into a Modal volume and embedded there; only the vectors come back |
+| `miroir r0 run [--model dinov2-giant-224]` | Set T9 (R0) on a Scaleway GPU: AmsterTime is downloaded on the machine (and kept in the benchmarks bucket) and embedded there; only the vectors come back |
 | `miroir eval amstertime score --run <run>` | Score an AmsterTime run in its three directions (NumPy only) |
 
 **Not found (T8, T8c).** A query's confidence is its top entity's score (after fusion, the models' own weighted cosines for the entity fusion put first). Two numbers: the share of T8 queries at or above the cut-off that lets 50% of in-index queries (T1 and T5 tune; T2 and T2b tune for T8c) match, and the share of in-index queries that match at the lowest cut-off keeping T8 matches under 5% (§6.3). Both with 95% bootstrap intervals.
@@ -393,21 +393,20 @@ Phone photos (T2) suffer most: the axes fitted on archive and museum images do n
 
 **Cost.** $7.53 on Modal: image fill $0.24, EmbeddingGemma 2 $5.08, MegaLoc $2.14, probes $0.08. Wall time about 40 minutes per model, eight L4s for EmbeddingGemma 2 and three for MegaLoc.
 
-**Rebuild.**
+**Rebuild.** The July run used Modal, eight GPUs at once. On Scaleway one machine runs one call at a time, so each model takes longer:
 
 ```sh
-uv run miroir embed modal-images --gallery full --all-images
-uv run miroir embed modal --option A7-embeddinggemma-2-512 --gallery full --all-images --probe
-uv run miroir embed modal --option A7-embeddinggemma-2-512 --gallery full --all-images \
-  --workers 8 --reuse A7-embeddinggemma-2-512-screening-v2-publishable --max-usd 7.5
-uv run miroir embed modal --option A3-megaloc-322 --gallery full --all-images \
-  --workers 3 --reuse A3-megaloc-322-screening-v2-publishable --max-usd 2
+uv run miroir embed images --gallery full --all-images
+uv run miroir embed scw --option A7-embeddinggemma-2-512 --gallery full --all-images --probe
+uv run miroir embed scw --option A7-embeddinggemma-2-512 --gallery full --all-images \
+  --reuse A7-embeddinggemma-2-512-screening-v2-publishable --max-usd 7.5 --max-hours 8
+uv run miroir embed scw --option A3-megaloc-322 --gallery full --all-images \
+  --reuse A3-megaloc-322-screening-v2-publishable --max-usd 2 --max-hours 4
 uv run miroir index guess --vectors A7-embeddinggemma-2-512-full
-uv run miroir index upload --run A7-embeddinggemma-2-512-full --run A3-megaloc-322-full
 uv run miroir index pca --fit <gallery run> --dims 1024 --apply <run>   # the PCA test
 ```
 
-`--workers` sends that many 500-image chunks at once, each to its own GPU container. `--reuse` takes vectors of an earlier run only when model, size, pooling and number type match. A stopped run resumes from its checkpoint.
+`--reuse` takes vectors of an earlier run only when model, size, pooling and number type match (runs made on Modal before 2026-11-03 count). On Modal, `--workers` sent several 500-image chunks at once, each to its own GPU; one Scaleway machine takes them one after another. A stopped run resumes from its checkpoint.
 
 ### 7.4 Step H4: a vision model leads the search
 
@@ -466,7 +465,7 @@ An experiment beside the usual search, at `#/agentique` (`/chat` and the old `#/
 
 Words alone work too: the model then has text search, thumbnails and questions, no image search and no framing.
 
-**Tools** (`miroir.web.chat_tools`: name, description, JSON schema and handler of each, in one table, so they could be served as an MCP server unchanged). The searches run where the engine runs (`miroir.web.toolsearch`; in the GPU container, `Search.tool_search`).
+**Tools** (`miroir.web.chat_tools`: name, description, JSON schema and handler of each, in one table, so they could be served as an MCP server unchanged). The searches run where the engine runs (`miroir.web.toolsearch`; on the GPU, `SearchService.tool_search`).
 
 | Tool | Does |
 |---|---|
@@ -491,13 +490,13 @@ Filters (base, département, commune, domain, period, `near`) favour by default:
 4. Keep a best-so-far and stop. The model names its closest ids in `best`; each search or look result repeats them, with the searches used. The best-so-far starts as the first look's top 3. A search counts as stale when the model's next search names nothing from it as new in `best`. After 3 searches in one message without a sure match (a first-look card rated "Très proche"), or 2 stale searches in a row, only `ask_visitor`, `show_results` and `ask_region` run; the model is told why and must call one. `more_like` counts as a search. The count starts again with each visitor message.
 5. Honest end. `show_results` needs `found`. `exact` needs a first pick the model has looked at, or one the site rated "Très proche". `close` and `none` need a summary for the visitor; `none` always starts "Je ne trouve pas cet objet précis dans les collections." and may show no cards. The page heads the cards by `found` ("Les plus proches dans les collections :"), and does not repeat the model's words when a summary says the same thing.
 
-**Logs.** Each conversation is written as JSON lines (`miroir.web.chatlog`), one file per conversation under `<day>/<id>.jsonl`: the visitor's words, each model reply (words, its thinking on Mistral's API, tool calls, cost, tokens, time), each tool call (arguments, `why`, ids listed, refusals, time), the first look's ids, and each turn's end (searches, lock, best-so-far, spending). No photo, framed part or thumbnail, no key, no position (a `near` point is written "(position)"). On the Mac they go to `~/miroir-data/chat-logs/`; on Modal to `chat-logs/` on the `miroir-web-index` volume, committed at the end of each turn. `miroir web chat-logs` copies the hosted ones to `~/miroir-data/chat-logs/hosted/`.
+**Logs.** Each conversation is written as JSON lines (`miroir.web.chatlog`), one file per conversation under `<day>/<id>.jsonl`: the visitor's words, each model reply (words, its thinking on Mistral's API, tool calls, cost, tokens, time), each tool call (arguments, `why`, ids listed, refusals, time), the first look's ids, and each turn's end (searches, lock, best-so-far, spending). No photo, framed part or thumbnail, no key, no position (a `near` point is written "(position)"). On the Mac they go to `~/miroir-data/chat-logs/`; on the demo machine to its state folder. `miroir demo chat-logs` copies the hosted ones to `~/miroir-data/chat-logs/hosted/`.
 
-**Streaming.** A turn runs as a task on the web container and writes events: a step per tool call (a line such as "Recherche par image (MegaLoc), en priorité : Morbihan · 15 résultats", which opens to its thumbnails), the model's words, a question, a request to frame, results, a spending stop, the end of the turn. The page reads them as JSON lines (`POST /api/chat/events`); a stream ends after 110 s (Modal cuts requests at 150 s) and the page asks again from where it stopped.
+**Streaming.** A turn runs as a task in the site's process and writes events: a step per tool call (a line such as "Recherche par image (MegaLoc), en priorité : Morbihan · 15 résultats", which opens to its thumbnails), the model's words, a question, a request to frame, results, a spending stop, the end of the turn. The page reads them as JSON lines (`POST /api/chat/events`); a stream ends after 110 s (so no request stays open for long) and the page asks again from where it stopped.
 
 **Privacy.** The visitor's own photo, and the part they frame, go to the model: through OpenRouter, or on Mistral's own API when only its key is set (see Model). The page says so in one line and names OpenRouter. Record thumbnails go only for publishable images and Commons photos: `miroir web publishable` runs the `PublishableImages` rule on the Mac and writes the allowed ids into the bundle (`publishable.txt.gz`); every thumbnail id is checked against it before its bytes are read, and again before each request leaves. A bundle without the file sends no record image. Positions are used, never logged.
 
-**Money.** Each conversation stops at `MIROIR_CHAT_CONVERSATION_USD` (default $0.10) and all conversations of a UTC day at `MIROIR_CHAT_DAY_USD` (default $2). A call is refused when it could pass a cap, guessing its cost from the last call's; the page then says so and offers the usual search. Each paid call is logged with its cost, the conversation's total and the day's (never the key). Mistral's answers carry no price, so the cost is worked out from the tokens at the prices typed into `miroir.jobs.mistral.PRICES` ($2 per million input tokens, $0.20 cached, $6 output: the highest quoted on release day, since Mistral's price page did not list the model yet). Check them against the bill in Mistral's console and lower them; a model with no price there is refused. The day's total lives in the `miroir-chat-spend` Modal Dict, so a restarted container keeps it; on the Mac in `~/miroir-data/spend/chat-days.json`, and each paid call also goes to the project ledger.
+**Money.** Each conversation stops at `MIROIR_CHAT_CONVERSATION_USD` (default $0.10) and all conversations of a UTC day at `MIROIR_CHAT_DAY_USD` (default $2). A call is refused when it could pass a cap, guessing its cost from the last call's; the page then says so and offers the usual search. Each paid call is logged with its cost, the conversation's total and the day's (never the key). Mistral's answers carry no price, so the cost is worked out from the tokens at the prices typed into `miroir.jobs.mistral.PRICES` ($2 per million input tokens, $0.20 cached, $6 output: the highest quoted on release day, since Mistral's price page did not list the model yet). Check them against the bill in Mistral's console and lower them; a model with no price there is refused. The day's total lives in a file on the demo machine's disk (`chat-days.json`), so a restarted site keeps it; on the Mac in `~/miroir-data/spend/chat-days.json`, and each paid call also goes to the project ledger.
 
 **Model.** Mistral Large 4 through OpenRouter (`mistralai/mistral-large-4-0`) as H4, reasoning off, 800 output tokens, when `OPENROUTER_API_KEY` is set (the owner's choice, 2026-11-02); otherwise on Mistral's own API (`mistral-large-4`, `miroir.jobs.mistral`). `miroir.web.chat.chat_model` makes that choice for the site and for `miroir web dev`. On Mistral's API the model always reasons before it answers (it refuses "none"): reasoning "low" keeps a turn quick, temperature 0 with top_p 1, and 3,000 output tokens leave room for the thinking. The answer comes back as a thinking part, then the text; only the text counts as the answer, and the thinking goes to the logs. Open, takes images and tools. Older thumbnails are replaced by a note after the last 12, to keep each request small. A smoke test against the fake engine (2026-10-16, 3 conversations, 17 calls, $0.082) showed the tool calls work as written; it also led to the reminder, the separate thumbnail cap, the French-only rule for anything the visitor reads, and the commune article fix. A turn cost about $0.02-0.04 through OpenRouter. A second smoke test after the method (2026-10-16, words only, fake engine, 3 conversations, 18 calls, $0.062): the model looked before it searched, gave a why at every step, ran `more_like` from a vase it had looked at, hit the 3-search stop and the stale stop, and ended a "gold Roman dish with coins" search with `found: none` and the closest coins and dishes.
 
@@ -505,7 +504,7 @@ Filters (base, département, commune, domain, period, `near`) favour by default:
 
 - **What we log:** each search's query (image hash, box, text, filters), returned refs and timing. Query images are stored only for logged-in testers who agreed in writing.
 - **Deletion:** test photos and logs are deleted at the end of the PoC.
-- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own Modal account embed every image for the full-sample index (§7.3, `--all-images`), publishable or not; approved by the project owner on 2026-10-13. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies. *Exception: the agentic search (§8.1) sends the visitor's photo, and thumbnails of publishable images, to Mistral Large 4 through OpenRouter (on Mistral's own API when only that key is set); the page says so before the visitor starts.*
+- **Third parties:** only `publishable` collection images, Commons photos and test-set queries go to outside model services. One exception: open models on our own GPU machines (Modal until 2026-11-03, Scaleway since) embed every image for the full-sample index (§7.3, `--all-images`), publishable or not; approved by the project owner on 2026-10-13. OpenRouter never gets them. Testers' photos stay on our machines unless the rule in §4 applies. *Exception: the agentic search (§8.1) sends the visitor's photo, and thumbnails of publishable images, to Mistral Large 4 through OpenRouter (on Mistral's own API when only that key is set); the page says so before the visitor starts.*
 
 ## 10. Repository layout
 
@@ -513,7 +512,7 @@ As it stands on 2026-10-19. The plan also had `api/`, a SvelteKit `web/` and `do
 
 ```
 miroir/
-  pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only), `api` (FastAPI), `openrouter`, `modal`, `scaleway`
+  pyproject.toml   one uv project, Python 3.12; extras `jobs` (torch…, for remote jobs only), `api` (FastAPI), `openrouter`, `scaleway`
   Makefile         `make check` (ruff, pyright strict, pytest), `make fmt`
   LICENSE          Licence Ouverte 2.0 (Etalab)
   CLAUDE.md        contributor rules; CODING_STANDARDS.md
@@ -526,11 +525,11 @@ miroir/
     images/        image helpers (fetch, colour, perceptual hash, finding a print on its card); no local image store
     commons/       Wikimedia Commons photos for T2, T2b, T8c and the F2 gallery
     geo/           positions of records and photos (H2)
-    jobs/          remote model work: OpenRouter and Mistral calls, the Modal app and its runner, Scaleway machines and buckets, spend and privacy checks
-    remote/        model code run inside Modal containers or on a Scaleway GPU machine; the one place torch may be imported
-    index/         the type guess, PCA test, vector upload (no OpenSearch)
+    jobs/          remote model work: OpenRouter and Mistral calls, the GPU runner, Scaleway machines and buckets, the demo machine, spend and privacy checks
+    remote/        model code run only on a Scaleway GPU machine; the one place torch may be imported
+    index/         the type guess, PCA test, the pop-all bundle (no OpenSearch)
     eval/          test set builders, scoring, every step's experiment code
-    web/           the website: FastAPI app, ranking, card levels, agentic search, Modal app, static/ page
+    web/           the website: FastAPI app, ranking, card levels, agentic search, static/ page
   tests/           unit tests; fixtures/ holds real export lines
   eval/            results/ (committed). Test sets live in MIROIR_DATA_DIR
 ``` Data and images live outside the repository, in `MIROIR_DATA_DIR` (default `~/miroir-data`). The exports are read from `MIROIR_EXPORTS_DIR` and never written to.
@@ -552,8 +551,9 @@ Measured 2026-10-13 for an investment decision. Every figure below comes from th
 ```sh
 uv run miroir records build-full              # exports-full -> full-pop/ tables and counts, about 2 minutes
 uv run miroir records build-full --count-only # recount only, 40 s
-uv run miroir records fetch-probe --max-usd 0.4   # download test on Modal, 2 minutes, $0.02
 ```
+
+The download test ran on Modal (`miroir records fetch-probe`, removed on 2026-11-03 with the rest of the Modal code).
 
 `build-full` writes `MIROIR_DATA_DIR/full-pop/records.parquet` and `images.parquet` (same schema as the July tables, which it leaves alone), `report.json` with every count below, and `lists/<name>.txt`, one `image_id` per distinct file, for each option: `unique`, `covers`, `entity-covers`, `buildings`, `objects`, `unlinked`. An embedding run takes a list as its gallery.
 
@@ -629,7 +629,7 @@ The $7.54 of §7.3 covered 137,775 images, but 21,785 of them reused earlier vec
 - (c) step 1: 13.4 GB in fp16. Fits an L4 only if the caption reader leaves the GPU; else an L40S (48 GB, about twice the L4's price).
 - Records: 2.1 million instead of 101,000 for the record pages and the BM25 word index; the tables take 330 MB on disk.
 
-**What these figures assume.** Modal prices of 2026-10-12 (`jobs/remote_spec.py`). The same models, sizes and code as July; a GPU that ran faster or slower changes cost in step. Image mix: the July run held the same kinds of images, but more large Rose Valland scans (12% of images against 1%), which slow the fill; the models read 512 px copies, so file size does not change what they cost. Download speed from 14 minutes of July fill, not from hours; a slower bucket over hours lengthens the fill, not the cost (CPU time costs $1.74 per million). One percent of images will fail and get no vector.
+**What these figures assume.** Modal prices of 2026-10-12 (they were in `jobs/modal_spec.py`, removed on 2026-11-03). The same models, sizes and code as July; a GPU that ran faster or slower changes cost in step. Image mix: the July run held the same kinds of images, but more large Rose Valland scans (12% of images against 1%), which slow the fill; the models read 512 px copies, so file size does not change what they cost. Download speed from 14 minutes of July fill, not from hours; a slower bucket over hours lengthens the fill, not the cost (CPU time costs $1.74 per million). One percent of images will fail and get no vector.
 
 **Compressed search vectors (results.md "Storage for all of POP").** Raw, (a) needs 39 GB of GPU. Stored as `full-f2-shortlist` is (`IndexSpec.a3_shortlist_dims`, `miroir.web.store`), for the 2.14 million files of (a): EmbeddingGemma 2 (3.3 GB, float16) and MegaLoc reduced by PCA to 1,024 dims (4.4 GB in float16, 2.2 GB in int8) on the GPU; every MegaLoc vector whole in int8 (18 GB) in host memory. A photo search shortlists the 2,000 closest images by each model, then scores the shortlist exactly: every tune set within 1 point of today. On an L4 at 3 million images (a ceiling) the vector step takes 87 ms and today's NumPy ranking 236 ms. So all of POP should run on the site's L4 (24 GB): 7.7 GB of vectors beside the models (about 12 GB with the caption reader; not yet measured together, and int8 on the GPU would save 2.2 GB more), with 48 GB of host memory: about $1.37 an hour while awake, against $1.18 today.
 

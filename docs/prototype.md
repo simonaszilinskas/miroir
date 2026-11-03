@@ -4,9 +4,8 @@ A working version of the product in [functional-spec.md](functional-spec.md) §5
 
 ## Use it
 
-- **Address:** https://simonaszilinskas--miroir.us-east.modal.run
-- **Access:** one shared password, created with `miroir web secret` and kept out of the repository (in `.env` as `MIROIR_APP_PASSWORD` and in the `miroir-app` Modal secret as `APP_PASSWORD`). Ask the project owner for it. A login lasts a week.
-- **First search of the day:** the GPU sleeps when nobody searches. The first search wakes it, which takes one to two minutes; the page says so and waits. Opening a photo or the text box wakes it in advance. Once awake, a search takes about a second; the GPU goes back to sleep after 10 minutes without a search.
+- **Address:** the site runs on a Scaleway GPU machine, powered on for demos (since 2026-11-03; before, on Modal). Address and how it runs: see "Hosting" below.
+- **Access:** one shared password, created with `miroir web secret` and kept out of the repository (in `.env` as `MIROIR_APP_PASSWORD`; `miroir demo install` sends it to the machine as `APP_PASSWORD`). Ask the project owner for it. A login lasts a week.
 
 What a person can do:
 
@@ -27,16 +26,16 @@ Light and dark themes: "Affichage" in the header or footer.
 
 | Part | What runs |
 |---|---|
-| `Search` (Modal GPU class, L4) | EmbeddingGemma 2 (A7) and MegaLoc (A3) embed the photo with the same code and preprocessing as the R1 gallery runs (`miroir.remote.search` reuses `miroir.remote.models`); words go through EmbeddingGemma 2's "SearchQuery" prompt. Gallery vectors sit on the GPU. At most one container; it sleeps after 10 minutes |
-| `web` (Modal CPU container) | FastAPI: the page, login, record pages, example photos. At most one container |
+| Search (`miroir.remote.search`, on the machine's L4 GPU) | EmbeddingGemma 2 (A7) and MegaLoc (A3) embed the photo with the same code and preprocessing as the R1 gallery runs (`miroir.remote.search` reuses `miroir.remote.models`); words go through EmbeddingGemma 2's "SearchQuery" prompt. Gallery vectors sit on the GPU. One GPU call at a time |
+| Site (`miroir.remote.site`, same process) | FastAPI: the page, login, record pages, example photos |
 | Ranking (`miroir.web.engine`, NumPy) | The evaluation's steps: cosine per image, best image per entity, min-max per model, G4 weights. A logistic regression on the photo's A7 vector guesses building or object; buildings use A7 alone, objects 0.2 A7 + 0.8 A3 (R2 G4). Words: A7 text vector against the image vectors (0.9), mixed with French BM25 over record text (0.1), weights from T7 (results.md, step B); words refining a photo count half. When no record holds any of the words, the page says so and shows the closest images |
-| Archive prints | `miroir.images.mount.find_picture` (NumPy, about 6 ms) looks for a grey print on a plain card with writing around it. Only then does Qwen3-VL 4B Instruct (open, same GPU container, loaded in a thread) copy the caption line that names the place; its words join the photo search at the photo's weight (`SITE_ARCHIVE` in `miroir.web.archive`), searched with their own mix, text vector 0.3 and BM25 0.7 (`caption_a7`, `caption_bm25` in `routing.json`), since captions are mostly place names. The page can send the caption back corrected or empty (`caption` in `POST /api/search`), and the model is not asked again |
-| Outlines (F4) | Grounding DINO tiny (step C winner) in the same GPU container, loaded in a thread beside the search models so it never delays a search. It sees the photo at 1,024 px with step C's prompts; `miroir.outlines.pick_outlines` keeps sure boxes, drops repeats and the whole photo, sends the 40 surest, biggest and most central first, boxes around several works last, and none when the surest box covers 40% of the photo. `POST /api/detect` |
+| Archive prints | `miroir.images.mount.find_picture` (NumPy, about 6 ms) looks for a grey print on a plain card with writing around it. Only then does Qwen3-VL 4B Instruct (open, same GPU, loaded in a thread) copy the caption line that names the place; its words join the photo search at the photo's weight (`SITE_ARCHIVE` in `miroir.web.archive`), searched with their own mix, text vector 0.3 and BM25 0.7 (`caption_a7`, `caption_bm25` in `routing.json`), since captions are mostly place names. The page can send the caption back corrected or empty (`caption` in `POST /api/search`), and the model is not asked again |
+| Outlines (F4) | Grounding DINO tiny (step C winner) on the same GPU, loaded in a thread beside the search models so it never delays a search. It sees the photo at 1,024 px with step C's prompts; `miroir.outlines.pick_outlines` keeps sure boxes, drops repeats and the whole photo, sends the 40 surest, biggest and most central first, boxes around several works last, and none when the surest box covers 40% of the photo. `POST /api/detect` |
 | Card levels | `miroir.web.levels`: the first card's score (photo: the routed mix of its raw cosines; words: the fused score) and its gap to the best other card of the top 30, against two pairs of thresholds per route in the bundle's `levels.json` (`miroir web levels`). Every other card is "Ressemblance". A bundle without `levels.json` falls back on the older sure rule (`routing.json` cut-off, `sure.json` margin) for the first card |
-| Agentic search (H5) | `miroir.web.chat` on the web container: Mistral Large 4 on Mistral's API (through OpenRouter when only that key is set), with the tools of `miroir.web.chat_tools`, `read_record` among them; the searches run in the GPU container (`Search.tool_search`). Technical spec §8.1 |
-| Index | A bundle built on the Mac (`miroir web build-index`), stored in the `miroir-web-index` Modal volume. Which bundle is served is one line: `WEB_INDEX` in `src/miroir/config.py` |
+| Agentic search (H5) | `miroir.web.chat` in the site's process: Mistral Large 4 on Mistral's API (through OpenRouter when only that key is set), with the tools of `miroir.web.chat_tools`, `read_record` among them; the searches run on the GPU (`SearchService.tool_search`). Technical spec §8.1 |
+| Index | A bundle built on the Mac (`miroir web build-index`) or on a Scaleway machine (`pop-all`), stored in the index bucket (`miroir web upload`). Which bundle the demo machine serves is one line: `DEMO_INDEX` in `src/miroir/config.py`; `WEB_INDEX` is the one the Mac reads |
 
-Images on the cards come straight from the POP bucket (Rose Valland scans through the IIIF service, scaled, since some files weigh 20 MB). Query photos go to our Modal container only, never to an outside model; they are not stored. The logs keep a hash of each photo, the words, the filters and the records returned (technical spec §9).
+Images on the cards come straight from the POP bucket (Rose Valland scans through the IIIF service, scaled, since some files weigh 20 MB). Query photos go to our own GPU machine only, never to an outside model; they are not stored. The logs keep a hash of each photo, the words, the filters and the records returned (technical spec §9).
 
 Weights, cut-offs and buckets are data (`routing.json`), not code: a third bucket (archive building, colour building, object) needs only a new entry with `greyscale: true` or `false`; the server already measures each photo's chroma spread (`images.colour`, the statistic G5 routes on). Extra gallery photos of an entity from Commons (image ids `commons-…` in the vector runs) are picked up by `build-index`; they count in the ranking but are never shown.
 
@@ -116,45 +115,45 @@ Both first searches met a sleeping engine and took over a minute.
 
 ## Run and deploy
 
-**Order when code and bundle change together.** Deploy first, then upload: `miroir web deploy`, then `miroir web upload`. New code reads older bundles (a bundle without `levels.json` falls back on the older sure rule; a `routing.json` without `caption_a7` and `caption_bm25` takes the caption weights from `miroir.web.routing`, 0.3 / 0.7), but older code refuses a `routing.json` that holds the caption weights. After a deploy, check one photo search on the site. The first wake-up after a deploy that adds a model downloads its weights into the weights volume once (Qwen3-VL 4B: about 9 GB).
+How the site is deployed: see "Hosting" in this file.
+
+**Bundles and code.** New code reads older bundles (a bundle without `levels.json` falls back on the older sure rule; a `routing.json` without `caption_a7` and `caption_bm25` takes the caption weights from `miroir.web.routing`, 0.3 / 0.7), but older code refuses a `routing.json` that holds the caption weights.
 
 **Card levels.** To set them again after a rebuild or on another index: `miroir web levels` (writes `levels.json` into the bundle and a copy `~/miroir-data/index/levels-<index>.json` that `build-index` puts back), then `miroir web upload`.
 
-**Position (H2).** The `full-f2` bundle holds `places.npz` (one position per entity), so the site uses the photo's GPS position or the visitor's. To add positions to another built bundle without rebuilding: `miroir web places --index <name> --upload`, then `miroir web deploy`. A bundle without `places.npz` ignores positions.
+**Position (H2).** The `full-f2` bundle holds `places.npz` (one position per entity), so the site uses the photo's GPS position or the visitor's. To add positions to another built bundle without rebuilding: `miroir web places --index <name> --upload`, then `miroir demo install`. A bundle without `places.npz` ignores positions.
 
 **Caption reader.** It loads in a thread after the search models and resets torch's default dtype afterwards; loading it beside EmbeddingGemma 2 without that reset left the default at bfloat16 and broke every photo search ("expected mat1 and mat2 to have the same dtype").
 
 ```sh
 uv sync
 uv run miroir web build-index   # NumPy on the Mac, about 3 minutes for the full index: writes ~/miroir-data/web/<index>/
-uv run miroir web upload        # copies the bundle to the miroir-web-index volume
-uv run miroir web secret        # once: password in .env and in the miroir-app secret (--rotate for a new one)
-uv run miroir web deploy        # deploys the miroir-web app and prints the address
+uv run miroir web upload        # copies the bundle to the index bucket
+uv run miroir web secret        # once: password in .env (--rotate for a new one); `miroir demo install` sends it
 uv run miroir web dev           # http://localhost:8000 with fake models (no model runs on the Mac)
-uv run miroir web dev --real    # the same page searching with the deployed GPU (costs GPU time)
+uv run miroir web dev --scw     # the same page searching on a Scaleway GPU started for it (costs GPU time)
 ```
 
-To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `WEB_INDEX` in `src/miroir/config.py`, then build-index, upload and deploy.
+To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `DEMO_INDEX` (the demo machine) or `WEB_INDEX` (the Mac) in `src/miroir/config.py`, then build-index, upload and `miroir demo install`.
 
-**Agentic search (H5, `#/agentique`).** Needs the Mistral key (or the OpenRouter key) in its own Modal secret and the list of images that may go to the model in the bundle:
+**Agentic search (H5, `#/agentique`).** Needs the Mistral key (or the OpenRouter key) on the machine and the list of images that may go to the model in the bundle:
 
 ```sh
-uv run miroir web publishable --upload   # writes publishable.txt.gz into the bundle, copies it to the volume
-uv run miroir web chat-secret            # copies MISTRAL_API_KEY and OPENROUTER_API_KEY from .env into the miroir-openrouter secret
-uv run miroir web deploy
+uv run miroir web publishable --upload   # writes publishable.txt.gz into the bundle, copies it to the index bucket
+uv run miroir demo install               # sends the keys from .env and restarts the site
 ```
 
-Each conversation is logged as JSON lines with no images (technical spec §8.1). To read the deployed site's logs on the Mac:
+Each conversation is logged as JSON lines with no images (technical spec §8.1). To read the demo site's logs on the Mac:
 
 ```sh
-uv run miroir web chat-logs   # copies chat-logs/ from the miroir-web-index volume to ~/miroir-data/chat-logs/hosted/
+uv run miroir demo chat-logs   # copies the machine's chat logs to ~/miroir-data/chat-logs/hosted/
 ```
 
-The deploy fails until the `miroir-openrouter` secret exists. Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment; to change them on Modal, add them to the `miroir-openrouter` secret. The secret keeps its old name; when it holds both keys, OpenRouter wins. Locally, `miroir web dev` runs the agentic search through OpenRouter when `OPENROUTER_API_KEY` is in `.env`, else on Mistral's API when `MISTRAL_API_KEY` is (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
+Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment. When both keys are set, OpenRouter wins. Locally, `miroir web dev` runs the agentic search through OpenRouter when `OPENROUTER_API_KEY` is in `.env`, else on Mistral's API when `MISTRAL_API_KEY` is (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
 
 ## Cost
 
-An L4 with 4 CPUs and 24 GB costs about $1.18 an hour while awake. Each wake-up costs about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Nothing runs when nobody uses the site. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
+On Modal, until 2026-11-03 (the demo machine's costs: see "Hosting"): an L4 with 4 CPUs and 24 GB cost about $1.18 an hour while awake. Each wake-up cost about 12 minutes of it (start plus 10 idle minutes), about $0.22; the web container about $0.06 an hour while awake. Searches are limited to 30 a minute per session, logins to 5 a minute per address.
 
 The agentic search also pays for the model: a turn cost about $0.02–0.04 through OpenRouter. Mistral sends no price with its answers, so the site works out each call's cost from its tokens at prices typed into `miroir.jobs.mistral.PRICES` ($2 per million input tokens, $6 output). Check them against Mistral's console. It stops at $0.10 a conversation and $2 a day for all visitors (`MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD`).
 
@@ -169,5 +168,5 @@ The agentic search also pays for the model: a turn cost about $0.02–0.04 throu
 - **Period filter** for Mémoire reads the date of the photo, not of the building.
 - **Outlines on a crowded wall.** On the Jeu de Paume room photos the right record is in the top 5 for 87% of works when every outline is shown, 78% with the 20 shown first (it was 52% with the 12 surest; results.md, step C): on the densest walls the visitor still needs "Afficher les N autres". Outlines' names come from the detector's prompts and are often wrong (it calls a statue a stained glass window); the page only uses them in labels for screen readers.
 - **Keypoint re-ranking (E1) is not on the site:** it lifts T3 hit@1 by 12 points but adds 3 s per search (6 s at the 95th percentile), mostly reading candidate images.
-- **Cold start** of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
+- **Cold start** (on Modal, until 2026-11-03) of about two minutes after 10 idle minutes. A longer idle window or one warm container would remove it, at about $27 a day.
 - **Type guess** trained on the full-sample index (`miroir.index.guess`). It calls more than half of phone photos of buildings objects (it partly learned colour); they then get 0.2 A7 + 0.8 A3, close to what a colour building gets.

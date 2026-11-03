@@ -10,16 +10,17 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 - `src/miroir/config.py`: every setting and path. Ask it for paths; never build one by hand.
 - `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
-- `src/miroir/remote/`: model code that runs only inside Modal containers or on a Scaleway GPU
-  machine (`worker.py`). The one place torch may be imported.
+- `src/miroir/remote/`: model code that runs only on a Scaleway GPU machine (the job worker
+  `worker.py`, the demo site `site.py`). The one place torch may be imported.
 - `src/miroir/images/`: image helpers. No local image store: remote jobs read images from their URLs.
-- `src/miroir/jobs/`: paid model work: OpenRouter calls, the Modal app, Scaleway machines and
-  buckets (`scaleway.py`, `scw_run.py`, `objects.py`), spend and privacy checks.
+- `src/miroir/jobs/`: paid model work: OpenRouter calls, the GPU runner (`gpu_run.py`) and
+  model options (`remote_spec.py`), Scaleway machines and buckets (`scaleway.py`, `scw_run.py`,
+  `objects.py`), the demo machine (`demo.py`), spend and privacy checks.
 - `src/miroir/commons/`, `src/miroir/geo/`, `src/miroir/index/`: Wikimedia Commons photos,
   positions, and the type guess and vector upload.
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to
   `eval/results/`.
-- `src/miroir/web/`: the prototype website (FastAPI on Modal): ranking, card levels, the agentic
+- `src/miroir/web/`: the prototype website (FastAPI, on the demo machine): ranking, card levels, the agentic
   search (`chat.py`, `chat_tools.py`) and the page in `static/`.
 - `scripts/pop_full_export.py`: builds the full POP export from public sources.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
@@ -38,8 +39,9 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 ## Rules
 
 1. Never load or run an ML model on the development machine, not even a smoke test or a short
-   timing. Models run on hosted services: OpenRouter when it serves the model, otherwise Modal
-   or a Scaleway GPU machine (open models; model code only in `src/miroir/remote/`). The development machine builds tables
+   timing. Models run on hosted services: OpenRouter when it serves the model, otherwise a
+   Scaleway GPU machine (open models; model code only in `src/miroir/remote/`). Until
+   2026-11-03 they ran on Modal. The development machine builds tables
    and test sets and scores the vectors that come back. Do not install the `jobs` extra there.
 2. Never write into the exports directory.
 3. Never commit data, images, Parquet files, test sets or model weights. Only small text fixtures.
