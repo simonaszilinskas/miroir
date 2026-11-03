@@ -102,6 +102,9 @@ class CropSpec:
     """Images-bucket key of an `.npz` with `mean` (8,448) and `components` (dims x 8,448,
     largest axis first), for `Form.PROJECTED`."""
     dims: int = 0
+    keep_whole: bool = False
+    """`Form.PROJECTED` only: also keep every vector whole in int8 (`whole_key`), for the
+    site to rescore the crops the short coordinates shortlist."""
     queries: tuple[SliceQueryInput, ...] = ()
     trial: int = 0
     """Crops timed in every precision before the run, against float32 (`trial.json`)."""
@@ -137,6 +140,12 @@ def spec_key(name: str) -> str:
 
 def piece_key(name: str, piece: str) -> str:
     return f"{PREFIX}/{name}/pieces/{piece}.npz"
+
+
+def whole_key(name: str, piece: str) -> str:
+    """A piece's whole vectors: int8 rows in the piece's order, a plain `.npy` that the site
+    memory-maps; their scales are the piece's `whole_scale`."""
+    return f"{PREFIX}/{name}/whole/{piece}.npy"
 
 
 def queries_key(name: str) -> str:
@@ -244,6 +253,8 @@ def slice_spec(slice_spec_path: Path, index_ids: Sequence[str]) -> CropSpec:
 
 
 def full_spec(precision: Precision, projection_key: str, dims: int) -> CropSpec:
+    """Every stored file: PCA coordinates to shortlist, whole int8 vectors to rescore (the
+    short ones alone lose T2 and T3 queries to look-alikes: docs/results.md, "Short crops")."""
     return CropSpec(
         name=FULL_NAME,
         grid=GRID,
@@ -251,7 +262,8 @@ def full_spec(precision: Precision, projection_key: str, dims: int) -> CropSpec:
         form=Form.PROJECTED,
         projection_key=projection_key,
         dims=dims,
-        note=f"3x3 crops of every stored POP file, {precision} MegaLoc, PCA {dims}",
+        keep_whole=True,
+        note=f"3x3 crops of every stored POP file, {precision} MegaLoc, PCA {dims} and whole int8",
     )
 
 
@@ -269,13 +281,17 @@ def crops_dir(settings: Settings, name: str) -> Path:
 
 
 def fetch_job(settings: Settings, s3: S3Client, name: str) -> list[Path]:
-    """Copy the job's pieces, queries and trial to `crops_dir` (those already there kept)."""
-    from miroir.jobs.objects import download_tree  # noqa: PLC0415
+    """Copy the job's pieces, queries, trial and projection to `crops_dir` (those already
+    there are kept). The whole vectors of the full run (`whole_key`) stay in the bucket."""
+    from miroir.jobs.objects import download_keys, download_tree  # noqa: PLC0415
 
     folder = crops_dir(settings, name)
     folder.mkdir(parents=True, exist_ok=True)
     bucket = bucket_name(settings, Bucket.IMAGES)
-    download_tree(s3, bucket, folder.parent.parent, prefix=f"{PREFIX}/{name}/")
+    root = folder.parent.parent
+    download_tree(s3, bucket, root, prefix=f"{PREFIX}/{name}/pieces/")
+    singles = (queries_key(name), trial_key(name), f"{PREFIX}/{name}/projection.npz")
+    download_keys(s3, bucket, root, singles)
     return sorted(folder.rglob("*.npz"))
 
 

@@ -1,10 +1,18 @@
-"""Run a function over many items on a few threads, holding only a few results at a time."""
+"""Run a function over many items on a few threads or processes, holding only a few results
+at a time."""
 
 from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Executor,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 
 
 def bounded_map[T, R](
@@ -18,15 +26,29 @@ def bounded_map[T, R](
     if workers <= 1:
         yield from map(fn, items)
         return
-    limit = window or 2 * workers
-    pending: deque[Future[R]] = deque()
     with ThreadPoolExecutor(workers) as pool:
-        for item in items:
-            pending.append(pool.submit(fn, item))
-            if len(pending) >= limit:
-                yield pending.popleft().result()
-        while pending:
+        yield from _ordered(pool, fn, items, window or 2 * workers)
+
+
+def process_map[T, R](
+    fn: Callable[[T], R], items: Iterable[T], *, workers: int, window: int | None = None
+) -> Iterator[R]:
+    """`bounded_map` on processes: for work that holds Python's lock (decoding and cutting
+    images in Python). `fn` must be a module-level function; items and results are pickled."""
+    with ProcessPoolExecutor(workers) as pool:
+        yield from _ordered(pool, fn, items, window or 2 * workers)
+
+
+def _ordered[T, R](
+    pool: Executor, fn: Callable[[T], R], items: Iterable[T], limit: int
+) -> Iterator[R]:
+    pending: deque[Future[R]] = deque()
+    for item in items:
+        pending.append(pool.submit(fn, item))
+        if len(pending) >= limit:
             yield pending.popleft().result()
+    while pending:
+        yield pending.popleft().result()
 
 
 def unordered_map[T, R](

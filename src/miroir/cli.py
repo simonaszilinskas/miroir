@@ -402,6 +402,7 @@ def eval_crop_short() -> None:
     answer_files = {
         f for f, e in zip(spec.files, scores.row_entities, strict=True) if f and e in right
     }
+    short_path = mine / "gallery-a3-pca1024.npy"
     out = run_measure(
         scores,
         cases,
@@ -410,6 +411,7 @@ def eval_crop_short() -> None:
         columns=columns,
         pop_pca=pop_pca,
         answer_files=answer_files,
+        gallery_short=np.load(short_path) if short_path.exists() else None,
     )
     trial = mine / "trial.json"
     if trial.exists():
@@ -1972,7 +1974,10 @@ def scw_crop_embed_spec(
 
 @scw_app.command("crop-bundle")
 def scw_crop_bundle(
-    dims: Annotated[int, typer.Option(help="PCA axes served per crop.")] = 128,
+    dims: Annotated[int, typer.Option(help="PCA axes per crop to pick crops with.")] = 128,
+    rescore: Annotated[
+        int, typer.Option(help="Crops picked and scored whole per search.")
+    ] = 20_000,
     shortlist: Annotated[
         int, typer.Option(help="Image rows by best crop on the shortlist.")
     ] = 2000,
@@ -1986,6 +1991,7 @@ def scw_crop_bundle(
         NAME,
         SOURCE,
         copy_bundle,
+        copy_whole,
         crop_file_paths,
         piece_paths,
         write_crop_files,
@@ -2013,10 +2019,11 @@ def scw_crop_bundle(
         file_of=file_of,
         projection=folder / "projection.npz",
         dims=dims,
-        rule=CropRule(shortlist=shortlist, weight=weight),
+        rule=CropRule(rescore=rescore, shortlist=shortlist, weight=weight),
     )
     typer.echo(json.dumps(facts))
     copied = copy_bundle(s3, index, SOURCE, NAME)
+    copy_whole(s3, bucket_name(settings, Bucket.IMAGES), FULL_NAME, index, NAME)
     upload_files(s3, index, out.parent, crop_file_paths(out))
     typer.echo(f"{NAME}: {copied} file(s) of {SOURCE} copied, crop files sent")
 

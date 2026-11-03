@@ -3,6 +3,7 @@ tables (no network)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ from miroir.eval.crop_short import (
     Projection,
     aligned,
     best_per_file,
+    crop_two_stage,
     other_rows,
     projected,
     short_form,
@@ -43,15 +45,18 @@ from miroir.jobs.objects import link_siblings
 from miroir.jobs.scaleway import Offer
 from miroir.web.crops import (
     COORDS_FILE,
-    MEAN_DOT_FILE,
     PROJECTION_FILE,
     ROW_FILE,
     SCALE_FILE,
-    CropQuery,
+    WHOLE_DIR,
+    WHOLE_SCALE_FILE,
     CropRule,
     NumpyCrops,
     read_crops,
+    read_numpy_crops,
+    read_whole,
     write_rule,
+    write_whole_index,
 )
 from miroir.web.store import ExactStore, quantize_rows
 from tests import web_helpers as h
@@ -194,26 +199,32 @@ def test_storage_counts_the_two_numbers_beside_each_crop() -> None:
 
 
 def _crop_bundle(folder: Path, crops: np.ndarray, rows_file: list[int], rule: CropRule) -> None:
-    """A bundle's crop files with an identity PCA (every axis kept, mean 0): exact cosines."""
+    """A bundle's crop files with an identity PCA (every axis kept, mean 0): the short
+    vectors are the whole ones, the whole ones in two pieces."""
     dim = crops.shape[1]
     coords, scale = quantize_rows(crops)
     np.save(folder / COORDS_FILE, coords)
     np.save(folder / SCALE_FILE, scale)
-    np.save(folder / MEAN_DOT_FILE, np.zeros(len(crops), dtype=np.float32))
     np.save(folder / ROW_FILE, np.asarray(rows_file, dtype=np.int32))
     np.savez(
         folder / PROJECTION_FILE,
         mean=np.zeros(dim, dtype=np.float32),
         components=np.eye(dim, dtype=np.float32),
     )
+    (folder / WHOLE_DIR).mkdir()
+    half = len(crops) // 2
+    np.save(folder / WHOLE_DIR / "000.npy", coords[:half])
+    np.save(folder / WHOLE_DIR / "001.npy", coords[half:])
+    np.save(folder / WHOLE_SCALE_FILE, scale)
+    write_whole_index(folder, ["000", "001"], [half, len(crops) - half])
     write_rule(folder, rule)
 
 
-def test_each_image_takes_its_files_best_crop(tmp_path: Path) -> None:
+def test_each_image_takes_its_files_best_rescored_crop(tmp_path: Path) -> None:
     matrix = h.unit_rows(6, 8)
     crops = h.unit_rows(12, 8, seed=3)  # 6 files of 2 crops
     crops[11] = matrix[0]
-    _crop_bundle(tmp_path, crops, [0, 1, 2, 3, 4, 5], CropRule(per_file=2, shortlist=2))
+    _crop_bundle(tmp_path, crops, [0, 1, 2, 3, 4, 5], CropRule(per_file=2, rescore=12))
     index = read_crops(tmp_path)
     assert index is not None
     mask = np.ones(6, dtype=bool)
@@ -223,18 +234,32 @@ def test_each_image_takes_its_files_best_crop(tmp_path: Path) -> None:
     assert np.isneginf(scores[1])
     want = (crops @ matrix[0]).reshape(6, 2).max(axis=1)
     assert np.allclose(scores[mask], want[mask], atol=0.02)
+    # Rescoring 1 crop: only the file of the best short crop gets a score.
+    few = read_crops(tmp_path)
+    assert few is not None
+    one = replace(few, rule=CropRule(per_file=2, rescore=1)).row_scores(matrix[0], mask)
+    assert np.isfinite(one).tolist() == [False, False, False, False, False, True]
     assert read_crops(tmp_path / "none") is None
 
 
-def test_the_cpu_scores_crops_in_blocks_as_in_one(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_whole_crops_read_rows_across_pieces_in_the_order_asked(tmp_path: Path) -> None:
+    crops = h.unit_rows(10, 8, seed=6)
+    _crop_bundle(tmp_path, crops, [0], CropRule(per_file=2))
+    whole = read_whole(tmp_path)
+    rows = np.asarray([9, 0, 6, 4], dtype=np.int64)
+    got = whole.cosines(crops[6], rows)
+    assert np.allclose(got, crops[rows] @ crops[6], atol=0.02)
+
+
+def test_the_cpu_picks_crops_in_blocks_as_in_one(monkeypatch: pytest.MonkeyPatch) -> None:
     crops = h.unit_rows(90, 8, seed=4)
     coords, scale = quantize_rows(crops)
-    store = NumpyCrops(coords, scale, np.zeros(90, dtype=np.float32), per_file=9)
-    query = CropQuery(h.unit_rows(1, 8)[0], 0.25)
-    whole = store.best_per_file(query)
+    store = NumpyCrops(coords, scale)
+    query = h.unit_rows(1, 8)[0]
+    whole = store.top_crops(query, 7)
     monkeypatch.setattr("miroir.web.crops.BLOCK_ROWS", 20)
-    assert np.allclose(store.best_per_file(query), whole, atol=1e-6)
-    assert whole.shape == (10,)
+    assert store.top_crops(query, 7).tolist() == whole.tolist()
+    assert set(whole.tolist()) == set(np.argsort(-(crops @ query))[:7].tolist())
 
 
 def test_a_crop_of_an_image_lifts_its_megaloc_score_and_brings_it_on_the_shortlist(
@@ -244,7 +269,8 @@ def test_a_crop_of_an_image_lifts_its_megaloc_score_and_brings_it_on_the_shortli
     matrix = h.unit_rows(6, 8)
     crops = h.unit_rows(12, 8, seed=3)
     crops[11] = matrix[0]  # a window of image 5 shows what photo 0 shows
-    _crop_bundle(tmp_path, crops, [0, 1, 2, 3, 4, 5], CropRule(per_file=2, shortlist=1))
+    rule = CropRule(per_file=2, rescore=4, shortlist=1)
+    _crop_bundle(tmp_path, crops, [0, 1, 2, 3, 4, 5], rule)
     engine.crops = read_crops(tmp_path)
     rows, scale = quantize_rows(matrix)
     engine.exact = ExactStore(rows=rows, scale=scale)
@@ -308,6 +334,7 @@ def test_crop_files_follow_the_index_rows_and_keep_the_first_axes(tmp_path: Path
         (pieces / f"{name}.npz").write_bytes(
             write_piece(files, 9, {
                 "coords": rows.astype(np.float16), "mean_dot": np.zeros(18, np.float32),
+                "whole_scale": np.ones(18, np.float32),
                 "failed": np.array(["fx"]), "reasons": np.array(["read: X"]),
             })
         )  # fmt: skip
@@ -321,13 +348,13 @@ def test_crop_files_follow_the_index_rows_and_keep_the_first_axes(tmp_path: Path
     assert facts["crops"] == 36
     assert facts["failed_files"] == 2
     assert np.load(out / ROW_FILE).tolist() == [2, 0, -1]
-    index = read_crops(out)
-    assert index is not None
-    assert index.components.shape == (4, 8)
-    query = np.zeros(8, dtype=np.float32)
-    query[:4] = crops[20, :4] / np.linalg.norm(crops[20, :4])
-    scores = index.row_scores(query, np.ones(3, dtype=bool))
-    assert int(np.argmax(scores)) == 0  # row i1, file fc, holds crop 20
+    whole = read_whole(out)
+    assert whole.starts.tolist() == [0, 18]
+    assert whole.names == ("000", "001")
+    short = read_numpy_crops(out)
+    assert short.coords.shape == (36, 4)
+    query = crops[20, :4] / np.linalg.norm(crops[20, :4])
+    assert 20 in short.top_crops(query, 1).tolist()
 
 
 def test_measure_queries_say_where_their_vectors_come_from() -> None:
@@ -360,3 +387,13 @@ def test_the_summary_counts_hits_and_first_places_per_set() -> None:
     assert row["first lost"] == 1
     assert row["first gained"] == 1
     assert row["median crops ms"] == 15.0
+
+
+def test_a_crop_two_stage_rescores_only_the_crops_the_short_score_picks() -> None:
+    short = np.asarray([[0.9], [0.1], [0.8], [0.7]], dtype=np.float32)  # 2 files of 2 crops
+    whole = np.asarray([[0.3], [0.99], [0.6], [0.5]], dtype=np.float32)
+    got = crop_two_stage(short, whole, 2, 2, [np.zeros(0, np.int64)])
+    assert got[0].tolist() == [np.float32(0.3), np.float32(0.6)]  # crop 1 never rescored
+    hidden_first = crop_two_stage(short, whole, 2, 2, [np.asarray([0], np.int64)])
+    assert np.isneginf(hidden_first[0, 0])
+    assert hidden_first[0, 1] == np.float32(0.6)

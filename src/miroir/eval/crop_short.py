@@ -58,6 +58,8 @@ BLOCK = 16_384
 #: Files whose crops the site would score, out of the slice's files (`SHORTLISTS`).
 SHORTLISTS = (20, 100)
 LENGTHS = (1024, 512, 256, 128)
+#: Crop weights tried: an image scores max(whole, weight * crop).
+WEIGHTS = (0.95, 0.9, 0.85, 0.8)
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +264,128 @@ def storage_gb(crops: int, dims: int, *, int8: bool) -> float:
 
 #: Crops of all of POP at 3x3 (2.157 million stored files, 9 each), for the storage column.
 POP_CROPS = 19_400_000
+#: Crops the site would rescore whole, out of all of POP's, for `crop_two_stage`.
+RESCORED = (5_000, 20_000, 50_000)
+
+
+def per_crop(form: Form) -> Floats:
+    """(crops, queries): every crop's score."""
+    return np.concatenate(
+        [form.score(slice(a, min(a + BLOCK, form.rows))) for a in range(0, form.rows, BLOCK)]
+    )
+
+
+def crop_two_stage(
+    short: Floats, whole: Floats, size: int, per_file: int, hidden: Sequence[NDArray[np.int64]]
+) -> Floats:
+    """(queries, files): each query's `size` best crops by `short` (its hidden files' crops
+    left out) scored by `whole`; a file none of whose crops is kept scores -inf."""
+    files = short.shape[0] // per_file
+    out = np.full((short.shape[1], files), -np.inf, dtype=np.float32)
+    for q in range(short.shape[1]):
+        col = short[:, q].copy()
+        for f in hidden[q].tolist():
+            col[f * per_file : (f + 1) * per_file] = -np.inf
+        best = np.argpartition(-col, size)[:size]
+        np.maximum.at(out[q], best // per_file, whole[best, q])
+    return out
+
+
+@dataclass(frozen=True, slots=True)
+class SliceMeasure:
+    """Every variant of the module doc over one slice (`run`)."""
+
+    scores: Scores
+    cases: Sequence[QueryCase]
+    crops: SliceCrops
+    queries: Floats
+    columns: Sequence[str]
+    pop_pca: Projection
+    hidden: list[NDArray[np.int64]]
+    tables: dict[str, Halves]
+    variants: dict[str, dict[str, object]]
+
+    def table(self, form: Form) -> Halves:
+        if form.name not in self.tables:
+            best = best_per_file(form, self.crops.per_file)
+            self.tables[form.name] = aligned(best, self.crops.files, self.columns)
+            logger.info("table %s", form.name)
+        return self.tables[form.name]
+
+    def add(self, name: str, table: Halves, weight: float = 1.0) -> None:
+        self.variants[name] = measure(self.scores, table, self.cases, weight=weight)
+
+    def whole_and_short(self, answer_files: set[str]) -> None:
+        for precision, vectors in self.crops.vectors.items():
+            name = f"whole-{precision}"
+            self.add(name, self.table(whole_form(name, vectors, self.queries)))
+        reference = self.crops.vectors["fp32"]
+        coords, mean_dot = projected(reference, self.pop_pca, LENGTHS[0])
+        for dims in LENGTHS:
+            for scale in ("approx", "norm"):
+                for int8 in (False, True):
+                    name = f"pop-pca{dims}-{scale}" + ("-int8" if int8 else "")
+                    form = short_form(
+                        name, coords[:, :dims], mean_dot, self.queries, self.pop_pca,
+                        scale=scale, int8=int8,
+                    )  # fmt: skip
+                    self.add(name, self.table(form))
+        if "bf16" in self.crops.vectors:
+            b_coords, b_dot = projected(self.crops.vectors["bf16"], self.pop_pca, 256)
+            name = "pop-pca256-norm-int8-bf16"
+            form = short_form(
+                name, b_coords, b_dot, self.queries, self.pop_pca, scale="norm", int8=True
+            )
+            self.add(name, self.table(form))
+        crop_pca = fit_crop_pca(reference, other_rows(self.crops, answer_files), 256)
+        c_coords, c_dot = projected(reference, crop_pca, 256)
+        for dims in (256, 128):
+            name = f"crop-pca{dims}-norm-int8"
+            form = short_form(
+                name, c_coords[:, :dims], c_dot, self.queries, crop_pca, scale="norm", int8=True
+            )
+            self.add(name, self.table(form))
+
+    def weights_and_shortlists(self) -> None:
+        norms = [f"pop-pca{d}-norm-int8" for d in LENGTHS]
+        for base in ("whole-fp32", *norms):
+            for weight in WEIGHTS:
+                self.add(f"{base} weight {weight}", self.tables[base], weight)
+        whole = self.tables["whole-fp32"]
+        for size in SHORTLISTS:
+            self.add(f"whole-fp32 top {size}", shortlisted(whole, whole, size, self.hidden))
+            for pick in norms[1:]:
+                kept = shortlisted(self.tables[pick], self.tables[pick], size, self.hidden)
+                for weight in (1.0, *WEIGHTS):
+                    self.add(f"{pick} weight {weight} top {size}", kept, weight)
+                kept = shortlisted(self.tables[pick], whole, size, self.hidden)
+                self.add(f"two-stage {pick} -> whole, top {size}", kept)
+
+    def crop_level_two_stage(self) -> None:
+        """Short coordinates pick crops (not files), whole vectors rescore them: what the
+        site can afford to read from disk, `RESCORED` crops of all of POP per search."""
+        reference = self.crops.vectors["fp32"]
+        whole = per_crop(whole_form("whole", reference, self.queries))
+        coords, mean_dot = projected(reference, self.pop_pca, 256)
+        for dims in (256, 128):
+            form = short_form(
+                f"pca{dims}", coords[:, :dims], mean_dot, self.queries, self.pop_pca,
+                scale="norm", int8=True,
+            )  # fmt: skip
+            short = per_crop(form)
+            for rescored in RESCORED:
+                size = max(1, round(rescored * len(reference) / POP_CROPS))
+                table = crop_two_stage(short, whole, size, self.crops.per_file, self.hidden)
+                kept = aligned(table, self.crops.files, self.columns)
+                self.add(f"crop two-stage pca{dims}, {rescored:,} of POP's crops ({size})", kept)
+
+    def shift(self, gallery_short: NDArray[np.float16]) -> None:
+        rows = column_rows(self.scores, len(self.columns))
+        exact = self.scores.whole3[:, rows].astype(np.float32)
+        for dims in LENGTHS[1:]:
+            short = whole_short(self.queries, gallery_short[rows], self.pop_pca, dims)
+            moved = shifted(self.tables[f"pop-pca{dims}-norm-int8"], short, exact)
+            self.add(f"shift pca{dims}", moved)
 
 
 def run_measure(
@@ -273,91 +397,67 @@ def run_measure(
     columns: Sequence[str],
     pop_pca: Projection,
     answer_files: set[str],
+    gallery_short: NDArray[np.float16] | None = None,
 ) -> dict[str, object]:
     """Every variant of the module doc. `queries`: unit MegaLoc vectors in `scores.query_ids`
     order; `columns`: the slice test's crop columns."""
-    per_file = crops.per_file
-    hidden: list[NDArray[np.int64]] = []
     by_id = {c.query_id: c for c in cases}
+    hidden: list[NDArray[np.int64]] = []
     for query_id in scores.query_ids:
         case = by_id.get(query_id)
         cols = scores.row_file[case.hidden_rows] if case is not None else np.zeros(0, np.int64)
         hidden.append(cols[cols >= 0])
-
-    tables: dict[str, Halves] = {}
-
-    def table(form: Form) -> Halves:
-        if form.name not in tables:
-            tables[form.name] = aligned(best_per_file(form, per_file), crops.files, columns)
-            logger.info("table %s", form.name)
-        return tables[form.name]
-
+    run = SliceMeasure(scores, cases, crops, queries, columns, pop_pca, hidden, {}, {})
     out: dict[str, object] = {"baseline": baseline(scores, cases)}
-    variants: dict[str, dict[str, object]] = {}
-    for precision, vectors in crops.vectors.items():
-        variants[f"whole-{precision}"] = measure(
-            scores, table(whole_form(f"whole-{precision}", vectors, queries)), cases
-        )
-    reference = crops.vectors["fp32"]
+    run.whole_and_short(answer_files)
     old = scores.crops3["g3"].astype(np.float32)
-    new = tables["whole-fp32"].astype(np.float32)
+    new = run.tables["whole-fp32"].astype(np.float32)
     both = np.isfinite(old) & np.isfinite(new)
     out["check_against_slice_test"] = {
         "max_abs_diff": float(np.abs(old[both] - new[both]).max()),
         "cells": int(both.sum()),
     }
-
-    coords, mean_dot = projected(reference, pop_pca, LENGTHS[0])
-    for dims in LENGTHS:
-        for scale in ("approx", "norm"):
-            name = f"pop-pca{dims}-{scale}"
-            form = short_form(
-                name, coords[:, :dims], mean_dot, queries, pop_pca, scale=scale, int8=False
-            )
-            variants[name] = measure(scores, table(form), cases)
-    for dims in (256, 128):
-        name = f"pop-pca{dims}-approx-int8"
-        form = short_form(
-            name, coords[:, :dims], mean_dot, queries, pop_pca, scale="approx", int8=True
-        )
-        variants[name] = measure(scores, table(form), cases)
-    if "bf16" in crops.vectors:
-        b_coords, b_mean_dot = projected(crops.vectors["bf16"], pop_pca, 256)
-        name = "pop-pca256-approx-int8-bf16"
-        form = short_form(name, b_coords, b_mean_dot, queries, pop_pca, scale="approx", int8=True)
-        variants[name] = measure(scores, table(form), cases)
-        del b_coords
-    del coords
-
-    crop_pca = fit_crop_pca(reference, other_rows(crops, answer_files), 256)
-    c_coords, c_mean_dot = projected(reference, crop_pca, 256)
-    for dims in (256, 128):
-        name = f"crop-pca{dims}-approx-int8"
-        form = short_form(
-            name, c_coords[:, :dims], c_mean_dot, queries, crop_pca, scale="approx", int8=True
-        )
-        variants[name] = measure(scores, table(form), cases)
-    del c_coords
-
-    for base in ("whole-fp32", "pop-pca256-approx-int8", "pop-pca128-approx-int8"):
-        for weight in (0.95, 0.9):
-            variants[f"{base} weight {weight}"] = measure(
-                scores, tables[base], cases, weight=weight
-            )
-
-    for size in SHORTLISTS:
-        for base in ("whole-fp32", "pop-pca256-approx-int8", "pop-pca128-approx-int8"):
-            kept = shortlisted(tables[base], tables[base], size, hidden)
-            variants[f"{base} top {size}"] = measure(scores, kept, cases)
-        for pick in ("pop-pca256-approx-int8", "pop-pca128-approx-int8"):
-            kept = shortlisted(tables[pick], tables["whole-fp32"], size, hidden)
-            variants[f"two-stage {pick} -> whole, top {size}"] = measure(scores, kept, cases)
-
-    out["variants"] = variants
+    run.weights_and_shortlists()
+    run.crop_level_two_stage()
+    if gallery_short is not None:
+        run.shift(gallery_short)
+    out["variants"] = run.variants
     out["storage_gb_all_pop"] = {
         "whole int8": storage_gb(POP_CROPS, 8448, int8=True),
         **{f"pca{d} int8": storage_gb(POP_CROPS, d, int8=True) for d in LENGTHS},
         **{f"pca{d} float16": storage_gb(POP_CROPS, d, int8=False) for d in LENGTHS},
     }
-    out["crops"] = {"files": len(crops.files), "per_file": per_file}
+    out["crops"] = {"files": len(crops.files), "per_file": crops.per_file}
     return out
+
+
+# --- crops judged against their own photo in the short space ------------------------------------
+
+
+def column_rows(scores: Scores, columns: int) -> NDArray[np.int64]:
+    """One gallery row of each crop column's file (rows sharing a file share its vectors)."""
+    out = np.full(columns, -1, dtype=np.int64)
+    for row, col in enumerate(scores.row_file.tolist()):
+        if col >= 0 and out[col] < 0:
+            out[col] = row
+    return out
+
+
+def whole_short(
+    queries: Floats, gallery: NDArray[np.floating], projection: Projection, dims: int
+) -> Floats:
+    """(queries, rows): the cosine of the whole photos on the first `dims` PCA axes, as the
+    site's shortlist holds them (`a3.npy`, unit rows on 1,024 axes, cut and renormalised)."""
+    g = np.asarray(gallery[:, :dims], dtype=np.float32)
+    g /= np.linalg.norm(g, axis=1, keepdims=True)
+    q = (queries - projection.mean) @ projection.components[:dims].T
+    q /= np.linalg.norm(q, axis=1, keepdims=True)
+    return (q @ g.T).astype(np.float32)
+
+
+def shifted(crop: Halves, short_whole: Floats, exact_whole: Floats) -> Halves:
+    """A crop's short cosine moved by its own photo's gap between the exact and the short
+    whole cosine: crop_short - whole_short + whole_exact. The short space judges whether the
+    crop matches better than its photo; the exact cosine gives the scale."""
+    moved = crop.astype(np.float32) - short_whole + exact_whole
+    return moved.astype(np.float16)

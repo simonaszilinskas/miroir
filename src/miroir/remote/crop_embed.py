@@ -29,7 +29,7 @@ import numpy as np
 import torch
 from PIL import Image as PILImage
 
-from miroir.config import WEIGHTS_MOUNT, Settings
+from miroir.config import WEIGHTS_MOUNT, Settings, get_settings
 from miroir.jobs.bulk import FULL_PREFIX, JobState, JobStatus, full_key, status_key
 from miroir.jobs.crop_embed import (
     CropSpec,
@@ -41,24 +41,27 @@ from miroir.jobs.crop_embed import (
     read_crop_spec,
     spec_key,
     trial_key,
+    whole_key,
     write_piece,
     written_pieces,
 )
-from miroir.jobs.crop_slice import SUPPLIED_KEY, QuerySource, crop_boxes, outside_key
+from miroir.jobs.crop_slice import SUPPLIED_KEY, Grid, QuerySource, crop_boxes, outside_key
 from miroir.jobs.objects import Bucket, bucket_name, download_tree, listing, s3_client
 from miroir.jobs.remote_spec import OPTIONS
-from miroir.parallel import bounded_map
+from miroir.parallel import bounded_map, process_map
 from miroir.remote.crop_slice import as_gallery_crop
 from miroir.remote.models import DEVICE
 from miroir.remote.preprocess import IMAGENET_MEAN, IMAGENET_STD, squash
 from miroir.web.engine import prepare_photo
+from miroir.web.store import quantize_rows
 
 logger = logging.getLogger(__name__)
 
 A3 = OPTIONS["A3-megaloc-322"]
 SIDE = A3.resolution
 BATCH = 128
-READERS = 16
+#: Processes that read and cut files (cutting holds Python's lock: threads ran on one core).
+READERS = 12
 STATUS_EVERY_S = 30.0
 INDEX = "pop-all"
 EXACT_KEY = f"{INDEX}/a3_exact.npy"
@@ -66,7 +69,7 @@ EXACT_SCALE_KEY = f"{INDEX}/a3_exact_scale.npy"
 DIM = 8448
 
 
-def file_pixels(s3, bucket: str, file_id: str, spec: CropSpec) -> np.ndarray | str:
+def file_pixels(s3, bucket: str, file_id: str, grid: Grid) -> np.ndarray | str:
     """Every window of the file, as uint8 (windows, 322, 322, 3), or why it cannot be read."""
     try:
         data = s3.get_object(Bucket=bucket, Key=full_key(file_id))["Body"].read()
@@ -77,11 +80,25 @@ def file_pixels(s3, bucket: str, file_id: str, spec: CropSpec) -> np.ndarray | s
             image = opened.convert("RGB")
         windows = [
             as_gallery_crop(image.crop(box)).resize((SIDE, SIDE), PILImage.Resampling.BILINEAR)
-            for box in crop_boxes(image.width, image.height, spec.grid)
+            for box in crop_boxes(image.width, image.height, grid)
         ]
         return np.stack([np.asarray(w, dtype=np.uint8) for w in windows])
     except Exception as err:
         return f"unreadable: {type(err).__name__}"
+
+
+_CLIENT: list[object] = []
+
+
+def load_file(job: tuple[str, str, str, Grid]) -> tuple[str, str, np.ndarray | str | None]:
+    """`file_pixels` in a worker process, with that process's own Object Storage client;
+    an empty file id (a piece's end) passes through."""
+    piece, file_id, bucket, grid = job
+    if not file_id:
+        return piece, file_id, None
+    if not _CLIENT:
+        _CLIENT.append(s3_client(get_settings()))
+    return piece, file_id, file_pixels(_CLIENT[0], bucket, file_id, grid)
 
 
 class Megaloc:
@@ -160,6 +177,7 @@ class Piece:
         self.failed: list[str] = []
         self.reasons: list[str] = []
         self.parts: dict[str, list[np.ndarray]] = {}
+        self.whole: list[np.ndarray] = []
         self.pending: list[np.ndarray] = []
 
     def add(self, file_id: str, pixels: np.ndarray | str) -> None:
@@ -189,6 +207,10 @@ class Piece:
                 coords, mean_dot = projector.apply(vectors)
                 self.parts.setdefault("coords", []).append(coords)
                 self.parts.setdefault("mean_dot", []).append(mean_dot)
+                if self.spec.keep_whole:
+                    rows, scale = quantize_rows(vectors)
+                    self.whole.append(rows)
+                    self.parts.setdefault("whole_scale", []).append(scale)
                 break  # the full run keeps its first precision only
         return len(pixels)
 
@@ -201,6 +223,12 @@ class Piece:
         arrays["failed"] = np.array(self.failed, dtype=str)
         arrays["reasons"] = np.array(self.reasons, dtype=str)
         return write_piece(self.files, per_file, arrays)
+
+    def whole_body(self) -> bytes:
+        rows = np.concatenate(self.whole) if self.whole else np.zeros((0, DIM), np.int8)
+        buffer = io.BytesIO()
+        np.save(buffer, rows, allow_pickle=False)
+        return buffer.getvalue()
 
 
 class Reporter:
@@ -281,19 +309,20 @@ def _run(
             yield from ((piece, f) for f in _files_of(s3, bucket, spec, piece))
             yield piece, ""  # the piece ends here
 
-    def load(item: tuple[str, str]) -> tuple[str, str, np.ndarray | str | None]:
-        piece, file_id = item
-        return piece, file_id, (file_pixels(s3, bucket, file_id, spec) if file_id else None)
-
     started = time.monotonic()
     crops = written = 0
     current: Piece | None = None
-    for piece, file_id, pixels in bounded_map(load, work(), workers=READERS, window=4 * READERS):
+    jobs = ((piece, file_id, bucket, spec.grid) for piece, file_id in work())
+    loaded = process_map(load_file, jobs, workers=READERS, window=4 * READERS)
+    for piece, file_id, pixels in loaded:
         if current is None:
             current = Piece(piece, spec)
         if pixels is None:
             crops += current.embed(model, projector)
             body = current.body(per_file)
+            if spec.keep_whole:  # first: a piece counts as done once its coordinates are in
+                whole = current.whole_body()
+                s3.put_object(Bucket=bucket, Key=whole_key(spec.name, piece), Body=whole)
             s3.put_object(Bucket=bucket, Key=piece_key(spec.name, piece), Body=body)
             written += 1
             current = None
@@ -314,7 +343,9 @@ def _trial(s3, bucket: str, spec: CropSpec, model: Megaloc, piece: str) -> None:
     """Time `spec.trial` crops in every precision; cosines against float32 (`trial_key`)."""
     files = _files_of(s3, bucket, spec, piece)
     stacks: list[np.ndarray] = []
-    for pixels in bounded_map(lambda f: file_pixels(s3, bucket, f, spec), files, workers=READERS):
+    for pixels in bounded_map(
+        lambda f: file_pixels(s3, bucket, f, spec.grid), files, workers=READERS
+    ):
         if not isinstance(pixels, str):
             stacks.append(pixels)
         if sum(len(s) for s in stacks) >= spec.trial:

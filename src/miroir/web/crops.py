@@ -1,20 +1,30 @@
 """Crop vectors in an index bundle: a photo of a part finds the whole it stands in.
 
-Each stored POP file is cut into a 3x3 grid of overlapping windows (`miroir.jobs.crop_embed`),
-each embedded with MegaLoc and kept short (`ProjectedCrops`): the first `dims` axes of a PCA,
-in int8 with one scale per crop, and the crop's dot with the PCA's mean. A query's MegaLoc
-vector meets every crop at once (`CropStore.best_per_file`); each image row takes the best
-crop of its file (`row_scores`). The `CropRule.shortlist` best rows join the MegaLoc
-shortlist (`miroir.web.store`), and there an image's MegaLoc score becomes
-max(whole, weight * best crop): one number per image, so routing and fusion are unchanged.
+Each stored POP file is cut into a 3x3 grid of overlapping windows (`miroir.jobs.crop_embed`)
+and each window embedded with MegaLoc. A search uses them in two stages, as the crop slice
+measured (docs/results.md, "Short crops"): short vectors alone let look-alike crops pass the
+right answer, short vectors to pick and whole ones to score do not.
+
+1. **Pick.** Every crop is kept short: its first `dims` PCA axes, renormalised, in int8 with
+   one scale per crop (on the GPU, `CropStore.top_crops`). The query meets all of them; the
+   `CropRule.rescore` best crops go on.
+2. **Score.** Those crops' whole vectors (8,448 numbers in int8, memory-mapped from disk,
+   `WholeCrops`) give their exact cosine. Each image row takes the best rescored crop of its
+   file (`row_scores`).
+
+The `CropRule.shortlist` best rows join the MegaLoc shortlist (`miroir.web.store`); there an
+image's MegaLoc score becomes max(whole, weight * best crop): one number per image, so routing
+and fusion are unchanged.
 
 | File | Holds |
 |---|---|
-| `crops_coords.npy` | int8 (crops, dims): the crops' PCA coordinates, file by file |
-| `crops_scale.npy` | float32 (crops,): each row's scale |
-| `crops_mean_dot.npy` | float32 (crops,): each crop's dot with the PCA mean |
+| `crops_coords.npy` | int8 (crops, dims): unit PCA coordinates, file by file, 9 crops each |
+| `crops_scale.npy` | float32 (crops,): each row's int8 scale |
 | `crops_row_file.npy` | int32 (image rows,): each image row's crop file, -1 for none |
 | `crops_projection.npz` | `mean` (8,448) and `components` (dims, 8,448) |
+| `crops_whole/<piece>.npy` | int8 (crops of the piece, 8,448): the whole vectors |
+| `crops_whole.json` | each piece's name and first crop row; the whole rows' scales are in |
+| `crops_whole_scale.npy` | float32 (crops,) |
 | `crops.json` | `CropRule` |
 """
 
@@ -22,7 +32,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -36,9 +47,11 @@ Ints = NDArray[np.int64]
 
 COORDS_FILE = "crops_coords.npy"
 SCALE_FILE = "crops_scale.npy"
-MEAN_DOT_FILE = "crops_mean_dot.npy"
 ROW_FILE = "crops_row_file.npy"
 PROJECTION_FILE = "crops_projection.npz"
+WHOLE_DIR = "crops_whole"
+WHOLE_INDEX_FILE = "crops_whole.json"
+WHOLE_SCALE_FILE = "crops_whole_scale.npy"
 RULE_FILE = "crops.json"
 #: Crop rows scored at once on the CPU.
 BLOCK_ROWS = 1 << 20
@@ -48,48 +61,73 @@ BLOCK_ROWS = 1 << 20
 class CropRule:
     per_file: int = 9
     """Windows per file (a 3x3 grid)."""
+    rescore: int = 20_000
+    """Crops picked by their short vectors and scored whole, per search."""
     shortlist: int = 2000
     """Image rows, by best crop, that join the MegaLoc shortlist."""
     weight: float = 1.0
     """An image scores max(whole, weight * best crop)."""
 
 
-@dataclass(frozen=True, slots=True)
-class CropQuery:
-    """A query's side of `ProjectedCrops`: C (q - m), and m . q - m . m."""
-
-    coords: Floats
-    offset: float
-
-
 class CropStore(Protocol):
-    def best_per_file(self, query: CropQuery) -> Floats:
-        """Each crop file's best crop score (approximate whole cosine)."""
+    def top_crops(self, query: Floats, count: int) -> Ints:
+        """The `count` crop rows whose short vectors best meet the unit short query."""
         ...
 
 
 @dataclass(frozen=True, slots=True)
 class NumpyCrops:
-    """The crops in host memory, scored on the CPU in blocks (the Mac's tests, and the demo
-    machine without a GPU)."""
+    """The short crops in host memory, picked on the CPU in blocks (the Mac's tests, and the
+    demo machine without a GPU)."""
 
     coords: NDArray[np.int8]
     scale: Floats
-    mean_dot: Floats
-    per_file: int
 
-    def best_per_file(self, query: CropQuery) -> Floats:
-        out = np.empty(len(self.coords) // self.per_file, dtype=np.float32)
-        step = BLOCK_ROWS - BLOCK_ROWS % self.per_file
-        for start in range(0, len(self.coords), step):
-            stop = min(start + step, len(self.coords))
-            block = np.asarray(self.coords[start:stop], dtype=np.float32)
-            sims = (block @ query.coords) * self.scale[start:stop] + self.mean_dot[start:stop]
-            at = start // self.per_file
-            out[at : at + (stop - start) // self.per_file] = sims.reshape(-1, self.per_file).max(
-                axis=1
-            )
-        return out + np.float32(query.offset)
+    def top_crops(self, query: Floats, count: int) -> Ints:
+        rows: list[Ints] = []
+        sims: list[Floats] = []
+        for start in range(0, len(self.coords), BLOCK_ROWS):
+            stop = min(start + BLOCK_ROWS, len(self.coords))
+            block = np.asarray(self.coords[start:stop], dtype=np.float32) @ query
+            block *= self.scale[start:stop]
+            keep = min(count, len(block))
+            best = np.argpartition(-block, keep - 1)[:keep]
+            rows.append(best.astype(np.int64) + start)
+            sims.append(block[best])
+        every, scores = np.concatenate(rows), np.concatenate(sims)
+        keep = min(count, len(every))
+        return np.sort(every[np.argpartition(-scores, keep - 1)[:keep]])
+
+
+@dataclass(frozen=True, slots=True)
+class WholeCrops:
+    """The crops' whole vectors in int8, one memory-mapped file per piece of the crop job;
+    only the rows a search rescores are read from disk."""
+
+    folder: Path
+    starts: Ints
+    """First crop row of each piece, in order."""
+    names: tuple[str, ...]
+    scale: Floats
+    _open: dict[int, NDArray[np.int8]] = field(default_factory=dict[int, NDArray[np.int8]])
+
+    def _piece(self, k: int) -> NDArray[np.int8]:
+        if k not in self._open:
+            self._open[k] = np.load(self.folder / f"{self.names[k]}.npy", mmap_mode="r")
+        return self._open[k]
+
+    def cosines(self, query: Floats, rows: Ints) -> Floats:
+        """Exact cosines of a unit query with these crop rows (in that order)."""
+        out = np.empty(len(rows), dtype=np.float32)
+        order = np.argsort(rows, kind="stable")
+        ordered = rows[order]
+        pieces = np.searchsorted(self.starts, ordered, side="right") - 1
+        for k in np.unique(pieces).tolist():
+            at = np.flatnonzero(pieces == k)
+            local = ordered[at] - self.starts[k]
+            block = np.asarray(self._piece(k)[local], dtype=np.float32)
+            out[order[at]] = (block @ query) * self.scale[ordered[at]]
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,17 +137,21 @@ class CropIndex:
     components: Floats
     row_file: NDArray[np.int32]
     store: CropStore
+    whole: WholeCrops
 
-    def query(self, a3_full: Floats) -> CropQuery:
-        """A unit MegaLoc query vector (whole, 8,448 numbers) on the crops' axes."""
-        coords = (a3_full - self.mean) @ self.components.T
-        return CropQuery(
-            coords.astype(np.float32), float(a3_full @ self.mean - self.mean @ self.mean)
-        )
+    def short_query(self, a3_full: Floats) -> Floats:
+        """A unit MegaLoc query (8,448 numbers) on the crops' axes, renormalised."""
+        coords = ((a3_full - self.mean) @ self.components.T).astype(np.float32)
+        return coords / np.float32(np.linalg.norm(coords))
 
     def row_scores(self, a3_full: Floats, mask: NDArray[np.bool_]) -> Floats:
-        """Each image row's best crop score; -inf for a row with no crops or filtered out."""
-        best = self.store.best_per_file(self.query(a3_full))
+        """Each image row's best rescored crop's exact cosine; -inf for a row with no crop
+        rescored, or filtered out."""
+        picked = self.store.top_crops(self.short_query(a3_full), self.rule.rescore)
+        sims = self.whole.cosines(a3_full, picked)
+        files = len(self.whole.scale) // self.rule.per_file
+        best = np.full(files, -np.inf, dtype=np.float32)
+        np.maximum.at(best, picked // self.rule.per_file, sims)
         has = (self.row_file >= 0) & mask
         out = np.full(len(self.row_file), -np.inf, dtype=np.float32)
         out[has] = best[self.row_file[has]]
@@ -128,6 +170,26 @@ def write_rule(directory: Path, rule: CropRule) -> None:
     (directory / RULE_FILE).write_text(json.dumps(asdict(rule), indent=1) + "\n")
 
 
+def write_whole_index(directory: Path, names: Sequence[str], counts: Sequence[int]) -> None:
+    starts: list[int] = []
+    total = 0
+    for count in counts:
+        starts.append(total)
+        total += count
+    pieces = [{"piece": n, "start": s} for n, s in zip(names, starts, strict=True)]
+    (directory / WHOLE_INDEX_FILE).write_text(json.dumps(pieces) + "\n")
+
+
+def read_whole(directory: Path) -> WholeCrops:
+    pieces = json.loads((directory / WHOLE_INDEX_FILE).read_text())
+    return WholeCrops(
+        folder=directory / WHOLE_DIR,
+        starts=np.asarray([p["start"] for p in pieces], dtype=np.int64),
+        names=tuple(p["piece"] for p in pieces),
+        scale=np.load(directory / WHOLE_SCALE_FILE).astype(np.float32),
+    )
+
+
 def read_projection(directory: Path) -> tuple[Floats, Floats]:
     with np.load(directory / PROJECTION_FILE, allow_pickle=False) as data:
         return (
@@ -137,30 +199,25 @@ def read_projection(directory: Path) -> tuple[Floats, Floats]:
 
 
 def read_numpy_crops(directory: Path, *, mmap: bool = False) -> NumpyCrops:
-    rule = read_rule(directory)
     coords = np.load(directory / COORDS_FILE, mmap_mode="r" if mmap else None)
-    return NumpyCrops(
-        coords=coords,
-        scale=np.load(directory / SCALE_FILE).astype(np.float32),
-        mean_dot=np.load(directory / MEAN_DOT_FILE).astype(np.float32),
-        per_file=rule.per_file,
-    )
+    return NumpyCrops(coords=coords, scale=np.load(directory / SCALE_FILE).astype(np.float32))
 
 
 def read_crops(directory: Path, store: CropStore | None = None) -> CropIndex | None:
-    """The bundle's crops, scored by `store` (host memory and the CPU by default); None for
+    """The bundle's crops, picked by `store` (host memory and the CPU by default); None for
     a bundle without crops."""
     if not has_crops(directory):
         return None
     rule = read_rule(directory)
     mean, components = read_projection(directory)
     row_file = np.load(directory / ROW_FILE).astype(np.int32)
-    store = store or read_numpy_crops(directory)
+    whole = read_whole(directory)
     logger.info(
-        "crops: %d axes, %d image rows with crops, shortlist %d, weight %.2f",
+        "crops: %d axes to pick %d, %d image rows with crops, shortlist %d, weight %.2f",
         components.shape[0],
+        rule.rescore,
         int((row_file >= 0).sum()),
         rule.shortlist,
         rule.weight,
     )
-    return CropIndex(rule, mean, components, row_file, store)
+    return CropIndex(rule, mean, components, row_file, store or read_numpy_crops(directory), whole)
