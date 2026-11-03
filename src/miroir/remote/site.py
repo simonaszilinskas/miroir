@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 class InProcessBackend:
     """The search backend (`miroir.web.app.SearchBackend`) with the models in this process.
 
-    One GPU call at a time, as one Modal container answered one call at a time: a search, an
-    outline or a conversation's search waits for the one before it."""
+    One GPU call at a time: a search, an outline or a conversation's search waits for the one
+    before it, so two visitors never load the GPU's memory twice."""
 
     def __init__(self, service: SearchService) -> None:
         self._service = service

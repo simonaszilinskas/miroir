@@ -84,7 +84,7 @@ class LoginBody(BaseModel):
 
 
 class FiltersBody(BaseModel):
-    collections: list[str] = Field(default_factory=list[str], max_length=5)
+    collections: list[str] = Field(default_factory=list[str], max_length=6)
     region: str | None = Field(default=None, max_length=100)
     departement: str | None = Field(default=None, max_length=100)
     domain: str | None = Field(default=None, max_length=100)

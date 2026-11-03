@@ -696,3 +696,23 @@ def test_read_record_of_ids_never_seen_is_an_error_the_model_can_read() -> None:
     read = tool_messages(rig.model.bodies[1])[-1]
     assert read == "error: none of these ids came from a search: NEVER"
     assert card_ids(events) == ["OBJ1"]
+
+
+def test_openrouter_asks_mistral_to_reason_a_little_never_none() -> None:
+    """Mistral refuses reasoning "none" through OpenRouter (HTTP 400 on the live site)."""
+    from pydantic import SecretStr  # noqa: PLC0415
+
+    from miroir.web.chat import OpenRouterModel  # noqa: PLC0415
+
+    sent: list[Mapping[str, JSON]] = []
+    model = OpenRouterModel(SecretStr("sk-or-test"))
+
+    def chat(name: str, body: Mapping[str, JSON]) -> ChatAnswer:
+        assert name == model.model
+        sent.append(body)
+        return ChatAnswer("ok", 0.0, 1, 1, "stop")
+
+    model._client.chat = chat  # type: ignore[method-assign]
+    asyncio.run(model.complete({"messages": [], "max_tokens": 800}))
+    assert sent[0]["reasoning"] == {"effort": "low"}
+    assert sent[0]["max_tokens"] == 3000

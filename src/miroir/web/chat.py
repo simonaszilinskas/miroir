@@ -76,10 +76,11 @@ from miroir.web.toolsearch import THUMB_SIDE, Hit, ToolHits, ToolQuery
 
 logger = logging.getLogger(__name__)
 
-#: The model through OpenRouter, as in H4: open, takes images and tools; reasoning off,
-#: temperature 0.
+#: The model through OpenRouter: open, takes images and tools; temperature 0. Its provider
+#: now refuses reasoning "none" (HTTP 400, seen 2026-11-03), so it reasons a little, as on
+#: Mistral's own API, with the same room for that thinking.
 MODEL = "mistralai/mistral-large-4-0"
-MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "reasoning": {"effort": "none"}}
+MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "top_p": 1.0, "reasoning": {"effort": "low"}}
 MAX_TOKENS = 800
 #: Searches per visitor message; then the model must show results or ask.
 MAX_TOOL_CALLS = 8
@@ -138,7 +139,8 @@ class OpenRouterModel:
         return self._model
 
     async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
-        return await asyncio.to_thread(self._client.chat, self._model, {**body, **MODEL_FIELDS})
+        fields = {**body, **MODEL_FIELDS, "max_tokens": MISTRAL_MAX_TOKENS}
+        return await asyncio.to_thread(self._client.chat, self._model, fields)
 
 
 #: Mistral Large 4 on Mistral's own API (released 2026-10-29). It always reasons; "low" keeps

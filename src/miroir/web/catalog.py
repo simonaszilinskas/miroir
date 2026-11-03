@@ -35,15 +35,23 @@ PAGE_IMAGES = 24
 Ints = NDArray[np.int64]
 Bools = NDArray[np.bool_]
 
+#: Every POP base the index may hold: the July exports had the first three, all of POP
+#: (`pop-all`) adds the last three.
 COLLECTION_LABELS = {
     "joconde": "Joconde",
     "memoire": "Mémoire",
     "rose-valland": "Rose Valland",
+    "merimee": "Mérimée",
+    "palissy": "Palissy",
+    "museo": "Muséofile",
 }
 COLLECTION_HINTS = {
     "joconde": "Collections des musées de France",
     "memoire": "Photographies du patrimoine",
     "rose-valland": "Œuvres récupérées après 1945 (MNR)",
+    "merimee": "Patrimoine architectural",
+    "palissy": "Patrimoine mobilier",
+    "museo": "Répertoire des musées",
 }
 #: How a card names the matched image when it is not the record's cover.
 MATCHED_LABELS = {
