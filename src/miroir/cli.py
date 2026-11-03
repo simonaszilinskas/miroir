@@ -337,6 +337,35 @@ def eval_run(
     _echo_scores([scored])
 
 
+@eval_app.command("crops")
+def eval_crops() -> None:
+    """Score the crop slice test from the tables `miroir scw crop-slice` brought back."""
+    import json  # noqa: PLC0415
+
+    from miroir.config import eval_result_path  # noqa: PLC0415
+    from miroir.eval.crops import (  # noqa: PLC0415
+        cases_of,
+        load_scores,
+        report,
+        target_photo_cases,
+    )
+    from miroir.eval.parts import VET, VET_TARGET_REF  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries, vet_refs  # noqa: PLC0415
+
+    settings = get_settings()
+    folder = slice_dir(settings)
+    spec = read_spec((folder / "spec.json").read_bytes())
+    scores = load_scores(folder, spec)
+    cases = cases_of(spec, slice_queries(settings))
+    refs = vet_refs(settings, spec)
+    target = target_photo_cases(scores, spec, cases, set_id=VET, ref_of=refs, ref=VET_TARGET_REF)
+    out = report(scores, [*cases, *target])
+    path = eval_result_path("R3", "SL", "crop-slice")
+    path.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+    typer.echo(json.dumps(out, indent=1, ensure_ascii=False))
+    typer.echo(f"written to {path}")
+
+
 @eval_app.command("compare")
 def eval_compare(
     a: Annotated[Path, typer.Argument(help="Result file of run a.")],
@@ -1729,6 +1758,57 @@ def scw_pop_embed(
             typer.echo(
                 f"{option_id}: {count} July files again, cosine min {low:.4f}, median {median:.4f}"
             )
+
+
+@scw_app.command("crop-slice-run", hidden=True)
+def scw_crop_slice_run() -> None:
+    """The crop slice test, in the job image on a GPU machine. Never run on the Mac."""
+    from miroir.remote.crop_slice import run_crop_slice  # noqa: PLC0415 (machine only)
+
+    run_crop_slice(get_settings())
+
+
+@scw_app.command("crop-slice")
+def scw_crop_slice(
+    max_hours: MaxHours = 3.4,
+    *,
+    l4: Annotated[bool, typer.Option("--l4", help="An L4 when no L40S is free.")] = False,
+    a7_others: Annotated[
+        int, typer.Option(help="Files of the sample of others that get EmbeddingGemma 2 crops.")
+    ] = 3000,
+    render: Annotated[
+        bool, typer.Option("--render", help="A RENDER-S (P100), MegaLoc crops only.")
+    ] = False,
+    gallery: Annotated[int, typer.Option(help="Gallery images.")] = 50_000,
+    t2_queries: Annotated[int, typer.Option(help="T2 queries kept (0: all).")] = 0,
+) -> None:
+    """Crop slice test (docs/search-levels.md): crops of a 50,000-image gallery on an L40S,
+    scored against VET, PARTS, T2 and T3; the score tables land in the Scaleway folder."""
+    from miroir.jobs.crop_slice import (  # noqa: PLC0415
+        RENDER_OFFER,
+        crop_launch,
+        fetch_outputs,
+        prepare,
+    )
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    if render:
+        a7_others = 0
+    spec = prepare(settings, s3, a7_others=a7_others, size=gallery, t2_queries=t2_queries)
+    typer.echo(spec.note)
+    offers = (
+        [RENDER_OFFER] if render else [o for o in OFFERS if ("L40S" in o.commercial_type) != l4]
+    )
+    launch = crop_launch(settings, torch_tag="cu126" if render else "")
+    try:
+        run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
+    finally:
+        for path in fetch_outputs(settings, s3):
+            typer.echo(f"got {path}")
 
 
 @scw_app.command("build-pop-index", hidden=True)
