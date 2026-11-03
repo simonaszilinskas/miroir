@@ -241,8 +241,6 @@ main { min-height: 60vh; }
 .miroir-card__place { font-size: 0.8125rem; color: var(--text-mention-grey); margin: 0; }
 .miroir-card__foot { margin-top: auto; padding-top: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; position: relative; z-index: 1; }
 .miroir-card__noimage { margin: 0; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-mention-grey); }
-.miroir-level { align-self: flex-start; }
-.miroir-legend .fr-badge { vertical-align: baseline; }
 @media (max-width: 36em) {
   .miroir-card__body { padding: 0.625rem; }
   .miroir-card__title { font-size: 0.875rem; }
@@ -422,11 +420,6 @@ main { min-height: 60vh; }
 .miroir-mix-legend__b::before { background: var(--background-action-high-green-archipel); }
 .miroir-mix__a + .miroir-mix__b { border-left: 2px solid var(--background-alt-grey); }
 
-.miroir-levels { margin: 0; display: grid; gap: 0.875rem; }
-.miroir-levels > div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.75rem; align-items: baseline; }
-.miroir-levels dt, .miroir-levels dd { margin: 0; }
-.miroir-levels dd { font-size: 0.875rem; }
-@media (max-width: 30em) { .miroir-levels > div { grid-template-columns: 1fr; gap: 0.25rem; } }
 
 /* The two modes, side by side. */
 .miroir-modes { display: grid; gap: 1.5rem; grid-template-columns: 1fr; margin-top: 1.5rem; }

@@ -4,7 +4,7 @@
 
 import { exifPosition } from './exif.js';
 import {
-  $, $$, api, COLLECTION_NAMES, el, fill, grid, img, levelBadge,
+  $, $$, api, COLLECTION_NAMES, el, fill, grid, img,
 } from './ui.js';
 import { setupChat } from './chat.js';
 import { floatPhotos } from './hero.js';
@@ -786,17 +786,8 @@ function renderResults(response) {
     el('div', { class: 'miroir-section-title' },
       el('h2', { class: 'fr-h4', text: `Résultats${filtered ? ' filtrés' : ''}` }),
       el('p', { class: 'fr-text--sm miroir-muted fr-mb-1w', text: photo ? 'Du plus proche de votre photo au moins proche.' : 'Du plus proche de votre description au moins proche.' })),
-    levelLegend(),
     cards[0].level !== 'tres-proche' ? buildingTip(response) : null,
     grid(cards));
-}
-
-/** What each level means, in a line the visitor reads once. */
-function levelLegend() {
-  return el('p', { class: 'fr-text--xs miroir-muted fr-mb-2w miroir-legend' },
-    levelBadge('tres-proche', 'Très proche'), ' sans doute la bonne notice · ',
-    levelBadge('proche', 'Proche'), ' peut-être elle · ',
-    levelBadge('ressemblance', 'Ressemblance'), ' à comparer avec votre photo');
 }
 
 /** After a weak building search: what helps most, in the visitor's terms. */

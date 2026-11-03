@@ -62,27 +62,12 @@ export async function api(path, { method = 'GET', body } = {}) {
   return response.json();
 }
 
-const LEVEL_TITLES = {
-  'tres-proche': 'Très proche : sans doute la bonne notice',
-  proche: 'Proche : peut-être la bonne notice, à vérifier',
-  ressemblance: 'Ressemblance : une image qui ressemble, à comparer avec votre photo',
-};
-const LEVEL_CLASSES = {
-  'tres-proche': 'fr-badge--success',
-  proche: 'fr-badge--info',
-  ressemblance: '',
-};
-
-export function levelBadge(level, label) {
-  return el('span', { class: `fr-badge fr-badge--sm fr-badge--no-icon miroir-level ${LEVEL_CLASSES[level] ?? ''}`, title: LEVEL_TITLES[level] || '', text: label });
-}
-
 export function grid(cards) {
   return el('ul', { class: 'miroir-grid' }, cards.map((c) => el('li', {}, card(c))));
 }
 
-/** One result card. `c.level` may be missing (the conversation's picks); `c.reason` is the
- * model's reason for a pick. */
+/** One result card. `c.reason` is the conversation model's reason for a pick, when it made
+ * one. */
 export function card(c) {
   const href = `#/fiche/${encodeURIComponent(c.entity_id)}`;
   return el('article', { class: 'miroir-card' },
@@ -93,7 +78,6 @@ export function card(c) {
       c.matched ? el('p', { class: 'fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon miroir-card__matched', title: 'L’image qui ressemble le plus n’est pas l’image principale de la notice', text: `Correspond : ${c.matched.toLowerCase()}` }) : null,
       c.photo_count > 1 ? el('span', { class: 'miroir-card__count', text: `${c.photo_count} photos` }) : null),
     el('div', { class: 'miroir-card__body' },
-      c.level ? levelBadge(c.level, c.level_label) : null,
       el('h3', { class: 'miroir-card__title' }, el('a', { href, text: c.title })),
       c.place ? el('p', { class: 'miroir-card__place', text: c.place }) : null,
       c.reason ? el('p', { class: 'miroir-card__reason fr-text--sm', text: c.reason }) : null,

@@ -211,7 +211,7 @@
           <div class="miroir-step">
             <span class="fr-icon-file-text-line miroir-step__icon" aria-hidden="true"></span>
             <h3 class="fr-h6 fr-mb-1v">3. La notice</h3>
-            <p class="fr-text--sm fr-mb-0">Vous obtenez les notices officielles les plus proches, chacune marquée «&nbsp;Très proche&nbsp;», «&nbsp;Proche&nbsp;» ou «&nbsp;Ressemblance&nbsp;».</p>
+            <p class="fr-text--sm fr-mb-0">Vous obtenez les notices officielles les plus proches, de la plus proche à la moins proche.</p>
           </div>
         </div>
       </div>
@@ -510,26 +510,6 @@
                 <p class="fr-text--xs miroir-muted fr-mb-0">Une vieille photo collée sur son carton&nbsp;: un troisième modèle, Qwen3-VL, lit la légende, et ses mots (souvent un nom de lieu) rejoignent la recherche.</p>
               </div>
             </div>
-            <div class="fr-col-12 fr-col-lg-6">
-              <div class="miroir-doc__box">
-                <h3 class="fr-h6"><span class="miroir-doc__tag">Étape 6</span> Trois niveaux</h3>
-                <p class="fr-text--sm">Seule la première carte peut être «&nbsp;Très proche&nbsp;» ou «&nbsp;Proche&nbsp;»&nbsp;: Miroir regarde son score et son avance sur les suivantes.</p>
-                <dl class="miroir-levels">
-                  <div>
-                    <dt><span class="fr-badge fr-badge--sm fr-badge--no-icon fr-badge--success">Très proche</span></dt>
-                    <dd>Sans doute la bonne notice&nbsp;: juste environ 8 fois sur 10. Les mots seuls ne l’obtiennent jamais.</dd>
-                  </div>
-                  <div>
-                    <dt><span class="fr-badge fr-badge--sm fr-badge--no-icon fr-badge--info">Proche</span></dt>
-                    <dd>Peut-être la bonne notice, à vérifier&nbsp;: juste 4 à 6 fois sur 10.</dd>
-                  </div>
-                  <div>
-                    <dt><span class="fr-badge fr-badge--sm fr-badge--no-icon">Ressemblance</span></dt>
-                    <dd>Une image qui ressemble. Comparez avec votre photo&nbsp;: la bonne notice est parfois dans la liste.</dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -671,7 +651,6 @@
             <li><strong>Les bâtiments au téléphone.</strong> Façades d’une même rue, intérieurs, détails&nbsp;: activez «&nbsp;Utiliser ma position&nbsp;» ou ajoutez la commune avec des mots.</li>
             <li><strong>Ce qui n’est pas dans l’index.</strong> Une œuvre absente des trois bases exportées ne sera pas trouvée&nbsp;: Miroir montre alors des ressemblances.</li>
             <li><strong>Les descriptions.</strong> «&nbsp;Une église&nbsp;», «&nbsp;une pièce de monnaie&nbsp;» répondent à trop de notices.</li>
-            <li><strong>Des niveaux prudents.</strong> Environ une recherche par photo sur trois reçoit «&nbsp;Très proche&nbsp;»&nbsp;; la bonne notice se cache parfois sous «&nbsp;Ressemblance&nbsp;».</li>
           </ul>
         </section>
 
@@ -694,7 +673,7 @@
               <div class="miroir-trial__body">
                 <h3 class="fr-h6 fr-mb-1w">Notre-Dame-la-Grande, Poitiers</h3>
                 <ul class="miroir-trial__runs">
-                  <li><span class="miroir-trial__mode">Simple</span> La bonne notice en tête, <span class="fr-badge fr-badge--sm fr-badge--no-icon fr-badge--success">Très proche</span>, puis 23 églises romanes de la région en «&nbsp;Ressemblance&nbsp;».</li>
+                  <li><span class="miroir-trial__mode">Simple</span> La bonne notice en tête, puis 23 églises romanes de la région.</li>
                   <li><span class="miroir-trial__mode">Agentique</span> La même notice, seule, en une trentaine de secondes, après avoir regardé 4 vignettes. Il nomme l’église et le XII<sup>e</sup> siècle, mais prend la mandorle sculptée pour une rosace.</li>
                 </ul>
                 <p class="miroir-trial__credit">Photo&nbsp;: <a href="https://commons.wikimedia.org/wiki/File:Poitiers_-_%C3%89glise_Notre-Dame_la_Grande_-_02.jpg" target="_blank" rel="noopener" title="La photo sur Wikimedia Commons, nouvelle fenêtre">Benjism89, 2025</a>, CC BY-SA 4.0, Wikimedia Commons. Image de la notice&nbsp;: <a href="https://pop.culture.gouv.fr/notice/memoire/APMH00284730" target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">Mémoire, POP</a>.</p>
@@ -716,7 +695,7 @@
                 <h3 class="fr-h6 fr-mb-1w">Corot, <i>Château de Wagnonville</i></h3>
                 <p class="fr-text--sm fr-mb-1w">Seul un détail est parti&nbsp;: le pavillon et le pont, un quart de la toile environ, sans le cadre.</p>
                 <ul class="miroir-trial__runs">
-                  <li><span class="miroir-trial__mode">Simple</span> La bonne notice en tête, <span class="fr-badge fr-badge--sm fr-badge--no-icon fr-badge--success">Très proche</span>, puis des paysages de Douai et de Saint-Omer.</li>
+                  <li><span class="miroir-trial__mode">Simple</span> La bonne notice en tête, puis des paysages de Douai et de Saint-Omer.</li>
                   <li><span class="miroir-trial__mode">Agentique</span> La même notice, seule, après trois recherches (l’image, «&nbsp;plus comme celle-ci&nbsp;», des mots). Il répond Corot, troisième quart du XIX<sup>e</sup> siècle, musée de la Chartreuse.</li>
                 </ul>
                 <p class="miroir-trial__credit">Photo&nbsp;: <a href="https://commons.wikimedia.org/wiki/File:Douai_(Nord)_-_Mus%C3%A9e_de_la_Chartreuse_-_%22Le_ch%C3%A2teau_de_Wagnonville%22_(Jean-Baptiste_Camille_Corot,_1796-1875).jpg" target="_blank" rel="noopener" title="La photo sur Wikimedia Commons, nouvelle fenêtre">Edelseider</a>, CC BY-SA 2.0, Wikimedia Commons. Notice&nbsp;: <a href="https://pop.culture.gouv.fr/notice/joconde/06190026809" target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">Joconde, POP</a>.</p>
