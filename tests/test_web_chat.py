@@ -775,3 +775,31 @@ def test_openrouter_asks_mistral_to_reason_a_little_never_none() -> None:
     asyncio.run(model.complete({"messages": [], "max_tokens": 800}))
     assert sent[0]["reasoning"] == {"effort": "low"}
     assert sent[0]["max_tokens"] == 3000
+
+
+# --- transformed image searches ---------------------------------------------------------------
+
+
+def test_the_model_reads_the_outlines_and_sees_the_image_it_searched() -> None:
+    """A crop to an outline in black and white: the step says so in French, the search gets
+    the transformed photo, and the model sees that image in its next call."""
+    crop = searching("image_search", {"transform": {"outline": 2, "grayscale": True}})
+    with Rig([LOOK, crop, shown("OBJ1")]) as rig:
+        cid = rig.start(oneshot=True)
+        events = rig.send(cid, "goal", EXACT)
+    opening = body_text(rig.model.bodies[0])
+    assert "Outlines the detector found in the photo" in opening
+    assert "2. painting [" in opening
+    labels = [str(s["label"]) for s in of(events, "step") if s.get("state") != "running"]
+    assert any(
+        label.startswith("Recadre sur le contour 2 (tableau), passe en noir et blanc")
+        for label in labels
+    )
+    image_queries = [q for q in rig.backend.queries if q.kind is SearchKind.IMAGE]
+    assert image_queries[0].image != base64.b64decode(PHOTO)
+    after = rig.model.bodies[2]["messages"]
+    assert isinstance(after, list)
+    last = json.dumps(after[-1], ensure_ascii=False)
+    assert "The image searched: cropped to outline 2 (painting)" in last
+    assert "data:image/jpeg;base64," in last
+    assert card_ids(events) == ["OBJ1"]
