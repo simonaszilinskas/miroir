@@ -12,6 +12,7 @@ Requirements: Python 3.12 and [uv](https://docs.astral.sh/uv/).
 uv sync                  # base, dev tools and the api, openrouter, scaleway extras (no torch)
 cp .env.example .env     # then set the two directories below
 make check               # ruff format check, ruff lint, pyright strict, pytest
+make ui                  # the site's page (web-ui/, needs Node 20+): built into src/miroir/web/ui/
 ```
 
 `make check` is what CI runs (`.github/workflows/check.yml`) and must pass before every commit.
