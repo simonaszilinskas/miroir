@@ -39,7 +39,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 ## Ce que fait le prototype
 
-Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : **<https://51-159-130-27.sslip.io>**. Mot de passe : demandez-le au porteur du projet. La machine s'allume avec `uv run miroir demo up` (environ COLD_START) et s'éteint seule après une heure sans visiteur ; le détail est dans [docs/prototype.md](docs/prototype.md), section Hosting. Elle cherche dans tout POP : 2,1 millions de notices avec image. Une recherche prend moins d'une seconde.
+Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : **<https://51-159-130-27.sslip.io>**. Mot de passe : demandez-le au porteur du projet. La machine s'allume avec `uv run miroir demo up` (environ 5 minutes) et s'éteint seule après une heure sans visiteur ; le détail est dans [docs/prototype.md](docs/prototype.md), section Hosting. Elle cherche dans tout POP : 2,1 millions de notices avec image. Une recherche prend moins d'une seconde.
 
 La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
 
