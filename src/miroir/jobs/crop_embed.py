@@ -332,7 +332,7 @@ def in_stock(api: InstanceApi, offers: Sequence[Offer]) -> list[Offer]:
 
 
 def crop_launch(
-    settings: Settings, name: str, first: int, last: int, torch_tag: str = ""
+    settings: Settings, name: str, first: int, last: int, *, reverse: bool = False
 ) -> Launch:
     """`miroir scw crop-embed-run` for pieces `first`..`last` in the job image."""
     from miroir.jobs.scw_bulk import Launch  # noqa: PLC0415
