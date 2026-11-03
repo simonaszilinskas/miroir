@@ -54,8 +54,9 @@ def endpoint(settings: Settings) -> str:
     return f"https://s3.{settings.scw_region}.scw.cloud"
 
 
-def s3_client(settings: Settings) -> S3Client:
-    """A boto3 client for the project's region. Keys come from the settings, never the shell."""
+def s3_client(settings: Settings, connections: int = TRANSFERS) -> S3Client:
+    """A boto3 client for the project's region, `connections` requests at once. Keys come
+    from the settings, never the shell."""
     import boto3  # noqa: PLC0415 (the scaleway extra)
     from botocore.config import Config  # noqa: PLC0415
 
@@ -64,7 +65,7 @@ def s3_client(settings: Settings) -> S3Client:
         raise RuntimeError(msg)
     # Scaleway does not take the checksums newer boto3 adds to every upload.
     config = Config(
-        max_pool_connections=TRANSFERS,
+        max_pool_connections=connections,
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
         retries={"max_attempts": 5, "mode": "standard"},

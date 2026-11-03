@@ -2496,14 +2496,37 @@ def demo_create(index: DemoIndex = DEMO_INDEX) -> None:
 @demo_app.command("install")
 def demo_install(index: DemoIndex = DEMO_INDEX) -> None:
     """Send this checkout's code to the running machine, rebuild, restart the site."""
-    from miroir.jobs.demo import demo_shell, install, wait_site  # noqa: PLC0415
+    from miroir.jobs.demo import demo_shell, install, served, wait_site  # noqa: PLC0415
 
     demo, machine = _need_demo()
     address = _need_running(machine)
     install(demo_shell(demo.settings, address), demo.settings, machine, index)
+    served(demo, index)
     assert machine.url is not None
     waited = wait_site(machine.url)
     typer.echo(f"site up at {machine.url} ({waited:.0f} s to load)")
+
+
+@demo_app.command("crops")
+def demo_crops(
+    index: DemoIndex = "pop-all-crops",
+    gb: Annotated[int, typer.Option(help="Size of the volume for the whole crop vectors.")] = 200,
+) -> None:
+    """Serve a bundle with crops on the running demo machine: a Block Storage volume for its
+    whole crop vectors (made, attached and mounted the first time, about €19 a month), then
+    `install` with that bundle. Back to the bundle without crops: `demo install`."""
+    from miroir.jobs.demo import add_crops, demo_shell, install, served, wait_site  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    address = _need_running(machine)
+    shell = demo_shell(demo.settings, address)
+    state = add_crops(demo, machine, shell, index, gb)
+    typer.echo(f"crop volume {state.crops_volume} ({state.extra_gb} GB) mounted")
+    install(shell, demo.settings, machine, index)
+    served(demo, index)
+    assert machine.url is not None
+    waited = wait_site(machine.url)
+    typer.echo(f"site up at {machine.url} with {index} ({waited:.0f} s to load)")
 
 
 @demo_app.command("up")
@@ -2520,7 +2543,10 @@ def demo_up(
         str | None,
         typer.Option("--type", help="Run as this type only, e.g. POP2-HM-12C-96G (a check)."),
     ] = None,
-    index: DemoIndex = DEMO_INDEX,
+    index: Annotated[
+        str | None,
+        typer.Option("--index", help="Bundle in the index bucket (default: the one installed)."),
+    ] = None,
 ) -> None:
     """Power the demo machine on, wait until the site answers, print its address.
 
@@ -2533,6 +2559,7 @@ def demo_up(
         fit_hardware,
         idle_command,
         offer_of,
+        read_state,
         wait_site,
     )
 
@@ -2543,7 +2570,8 @@ def demo_up(
     booted = time.monotonic() - start
     shell = demo_shell(demo.settings, address)
     shell.wait()  # "running" comes a little before SSH answers
-    gpu = fit_hardware(shell, machine, demo.settings, index)
+    bundle = index or read_state(demo.state_path).index or DEMO_INDEX
+    gpu = fit_hardware(shell, machine, demo.settings, bundle)
     shell.run(idle_command(idle_minutes), timeout=60)
     assert machine.url is not None
     wait_site(machine.url)

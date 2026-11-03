@@ -137,9 +137,10 @@ def site_url(address: str) -> str:
     return f"https://{hostname(address)}"
 
 
-def rest_eur_per_hour(offer: Offer = DEMO_OFFER) -> float:
-    """What the machine costs while off: its volume and its IP."""
-    return offer.root_gb * VOLUME_EUR_PER_GB_HOUR + IP_EUR_PER_HOUR
+def rest_eur_per_hour(offer: Offer = DEMO_OFFER, extra_gb: int = 0) -> float:
+    """What the machine costs while off: its volumes (`extra_gb` beside the root one) and
+    its IP."""
+    return (offer.root_gb + extra_gb) * VOLUME_EUR_PER_GB_HOUR + IP_EUR_PER_HOUR
 
 
 # --- what the Mac remembers between commands ---------------------------------------------------
@@ -155,21 +156,31 @@ class DemoState:
     """The volume and IP are in the ledger up to here."""
     session_type: str | None = None
     """The commercial type of that session (the price it is billed at)."""
+    crops_volume: str | None = None
+    """The Block Storage volume holding the whole crop vectors (`demo crops`), if any."""
+    extra_gb: int = 0
+    """Its size: billed with the root volume, on or off."""
+    index: str | None = None
+    """The bundle the site serves, when installed by `install` or `crops` (`up` keeps it)."""
 
 
 def read_state(path: Path) -> DemoState:
     if not path.exists():
         return DemoState()
     raw = cast("dict[str, float | str | None]", json.loads(path.read_text(encoding="utf-8")))
-    start, rest, kind = (
+    start, rest, kind, volume = (
         raw.get("session_start"),
         raw.get("rest_paid_until"),
         raw.get("session_type"),
+        raw.get("crops_volume"),
     )
     return DemoState(
         None if start is None else float(start),
         None if rest is None else float(rest),
         None if kind is None else str(kind),
+        None if volume is None else str(volume),
+        int(raw.get("extra_gb") or 0),
+        None if raw.get("index") is None else str(raw.get("index")),
     )
 
 
@@ -265,9 +276,9 @@ class Demo:
             self.ledger.record_cost(
                 DEMO_NAME,
                 machine.zone,
-                f"block {DEMO_OFFER.root_gb} GB + flexible IP",
+                f"block {DEMO_OFFER.root_gb + state.extra_gb} GB + flexible IP",
                 minutes=math.ceil(hours * 60),
-                cost=hours * rest_eur_per_hour(),
+                cost=hours * rest_eur_per_hour(extra_gb=state.extra_gb),
                 purpose="demo storage",
             )
         state = replace(state, rest_paid_until=now)
@@ -453,6 +464,31 @@ def demo_key(settings: Settings) -> Path:
 
 def demo_shell(settings: Settings, address: str) -> Shell:
     return Shell(address, demo_key(settings), settings.demo_dir / "known_hosts")
+
+
+def served(demo: Demo, index: str) -> None:
+    """Remember the bundle the site now serves."""
+    write_state(demo.state_path, replace(read_state(demo.state_path), index=index))
+
+
+def add_crops(demo: Demo, machine: DemoMachine, shell: Shell, index: str, gb: int) -> DemoState:
+    """Give the demo machine the volume for `index`'s whole crop vectors (`crop_volume`),
+    once: made and attached the first time, mounted again otherwise. The storage is settled
+    first, so the ledger bills the new volume only from now."""
+    from miroir.jobs.crop_volume import add_crop_volume, mount_point, mount_script  # noqa: PLC0415
+
+    state = demo.settle(machine)
+    mount = mount_point(f"{ROOT}/web-index", index)
+    if state.crops_volume is None:
+        volume = add_crop_volume(
+            demo.api, shell, zone=machine.zone, server_id=machine.server_id, mount=mount,
+            name=f"{DEMO_NAME}-crops", gb=gb,
+        )  # fmt: skip
+        state = replace(state, crops_volume=volume, extra_gb=gb)
+        write_state(demo.state_path, state)
+    else:
+        shell.run(mount_script(state.crops_volume, mount), timeout=600)
+    return state
 
 
 def install(

@@ -29,7 +29,7 @@ import numpy as np
 import torch
 from PIL import Image as PILImage
 
-from miroir.config import WEIGHTS_MOUNT, Settings, get_settings
+from miroir.config import WEIGHTS_MOUNT, Settings
 from miroir.jobs.bulk import FULL_PREFIX, JobState, JobStatus, full_key, status_key
 from miroir.jobs.crop_embed import (
     CropSpec,
@@ -60,8 +60,11 @@ logger = logging.getLogger(__name__)
 A3 = OPTIONS["A3-megaloc-322"]
 SIDE = A3.resolution
 BATCH = 128
-#: Processes that read and cut files (cutting holds Python's lock: threads ran on one core).
-READERS = 12
+READERS = 16
+#: Threads reading stored files, and processes cutting them (cutting holds Python's lock:
+#: threads alone ran on one core).
+FETCHERS = 64
+CUTTERS = 7
 STATUS_EVERY_S = 30.0
 INDEX = "pop-all"
 EXACT_KEY = f"{INDEX}/a3_exact.npy"
@@ -69,12 +72,18 @@ EXACT_SCALE_KEY = f"{INDEX}/a3_exact_scale.npy"
 DIM = 8448
 
 
-def file_pixels(s3, bucket: str, file_id: str, grid: Grid) -> np.ndarray | str:
-    """Every window of the file, as uint8 (windows, 322, 322, 3), or why it cannot be read."""
+def read_file(s3, bucket: str, file_id: str) -> bytes | str:
+    """A stored file's bytes, or why it cannot be read."""
     try:
-        data = s3.get_object(Bucket=bucket, Key=full_key(file_id))["Body"].read()
+        return s3.get_object(Bucket=bucket, Key=full_key(file_id))["Body"].read()
     except Exception as err:
         return f"read: {type(err).__name__}"
+
+
+def cut(data: bytes | str, grid: Grid) -> np.ndarray | str:
+    """Every window of a stored file, as uint8 (windows, 322, 322, 3), or why not."""
+    if isinstance(data, str):
+        return data
     try:
         with PILImage.open(io.BytesIO(data)) as opened:
             image = opened.convert("RGB")
@@ -87,18 +96,16 @@ def file_pixels(s3, bucket: str, file_id: str, grid: Grid) -> np.ndarray | str:
         return f"unreadable: {type(err).__name__}"
 
 
-_CLIENT: list[object] = []
+def file_pixels(s3, bucket: str, file_id: str, grid: Grid) -> np.ndarray | str:
+    return cut(read_file(s3, bucket, file_id), grid)
 
 
-def load_file(job: tuple[str, str, str, Grid]) -> tuple[str, str, np.ndarray | str | None]:
-    """`file_pixels` in a worker process, with that process's own Object Storage client;
-    an empty file id (a piece's end) passes through."""
-    piece, file_id, bucket, grid = job
-    if not file_id:
-        return piece, file_id, None
-    if not _CLIENT:
-        _CLIENT.append(s3_client(get_settings()))
-    return piece, file_id, file_pixels(_CLIENT[0], bucket, file_id, grid)
+def cut_job(
+    job: tuple[str, str, bytes | str | None, Grid],
+) -> tuple[str, str, np.ndarray | str | None]:
+    """`cut` in a worker process; a piece's end (no bytes) passes through."""
+    piece, file_id, data, grid = job
+    return piece, file_id, (None if data is None else cut(data, grid))
 
 
 class Megaloc:
@@ -253,7 +260,7 @@ class Reporter:
 
 def run_crop_embed(settings: Settings, *, name: str, first: int, last: int) -> JobStatus:
     """Pieces `first`..`last` of the job `name` that are not written yet."""
-    s3 = s3_client(settings)
+    s3 = s3_client(settings, connections=FETCHERS + 8)
     bucket = bucket_name(settings, Bucket.IMAGES)
     spec = read_crop_spec(s3.get_object(Bucket=bucket, Key=spec_key(name))["Body"].read())
     pieces = spec.pieces()[first : last + 1]
@@ -312,8 +319,16 @@ def _run(
     started = time.monotonic()
     crops = written = 0
     current: Piece | None = None
-    jobs = ((piece, file_id, bucket, spec.grid) for piece, file_id in work())
-    loaded = process_map(load_file, jobs, workers=READERS, window=4 * READERS)
+
+    def fetch(item: tuple[str, str]) -> tuple[str, str, bytes | str | None, Grid]:
+        piece, file_id = item
+        data = read_file(s3, bucket, file_id) if file_id else None
+        return piece, file_id, data, spec.grid
+
+    # Object Storage answers each read in about half a second: many reads at once on
+    # threads, the cutting (which holds Python's lock) on processes.
+    fetched = bounded_map(fetch, work(), workers=FETCHERS, window=2 * FETCHERS)
+    loaded = process_map(cut_job, fetched, workers=CUTTERS, window=4 * CUTTERS)
     for piece, file_id, pixels in loaded:
         if current is None:
             current = Piece(piece, spec)

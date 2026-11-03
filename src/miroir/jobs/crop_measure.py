@@ -225,6 +225,17 @@ def measure_launch(settings: Settings, index: str) -> Launch:
     from miroir.jobs.scw_run import IMAGE_TAG, MOUNTS, REMOTE_ROOT, build_image  # noqa: PLC0415
 
     def start(shell: Shell, machine: Machine) -> None:
+        from miroir.jobs.crop_volume import add_crop_volume, mount_point  # noqa: PLC0415
+        from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+
+        api = InstanceApi(settings)
+        try:  # the whole crop vectors do not fit on the root volume
+            add_crop_volume(
+                api, shell, zone=machine.offer.zone, server_id=machine.server_id,
+                mount=mount_point(f"{REMOTE_ROOT}/web-index", index), name=f"{machine.name}-crops",
+            )  # fmt: skip
+        finally:
+            api.close()
         build_image(shell, settings)
         run = f"docker run -d --env-file {REMOTE_ROOT}/env {MOUNTS} --entrypoint miroir "
         shell.run(
@@ -243,5 +254,5 @@ def measure_launch(settings: Settings, index: str) -> Launch:
         alive="docker ps -q --filter name=^measure$ | wc -l",
         logs="docker logs --tail 40 measure 2>&1",
         probe="nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader "
-        "&& free -g | sed -n 2p",
+        "&& free -g | sed -n 2p && df -h / | tail -1",
     )

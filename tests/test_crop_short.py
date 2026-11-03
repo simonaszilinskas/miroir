@@ -41,6 +41,8 @@ from miroir.jobs.crop_embed import (
     write_piece,
 )
 from miroir.jobs.crop_measure import MeasureOut, QueryRanks, measure_queries, summarize
+from miroir.jobs.crop_volume import mount_point, mount_script
+from miroir.jobs.demo import DemoState, read_state, rest_eur_per_hour, write_state
 from miroir.jobs.objects import link_siblings
 from miroir.jobs.scaleway import Offer
 from miroir.web.crops import (
@@ -397,3 +399,22 @@ def test_a_crop_two_stage_rescores_only_the_crops_the_short_score_picks() -> Non
     hidden_first = crop_two_stage(short, whole, 2, 2, [np.asarray([0], np.int64)])
     assert np.isneginf(hidden_first[0, 0])
     assert hidden_first[0, 1] == np.float32(0.6)
+
+
+def test_the_demo_remembers_its_crop_volume_and_bills_it_at_rest(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    state = DemoState(rest_paid_until=1.0, crops_volume="vol-1", extra_gb=200, index="b")
+    write_state(path, state)
+    assert read_state(path) == state
+    assert rest_eur_per_hour(extra_gb=200) > rest_eur_per_hour()
+    old = tmp_path / "old.json"
+    old.write_text('{"session_start": null, "rest_paid_until": 5.0, "session_type": null}')
+    assert read_state(old) == DemoState(rest_paid_until=5.0)
+
+
+def test_the_mount_script_formats_only_an_empty_disk_and_mounts_it_at_every_boot() -> None:
+    script = mount_script("abc-123", "/opt/miroir/web-index/b/crops_whole")
+    assert "grep -i -- abc-123" in script
+    assert 'blkid "$dev" > /dev/null || mkfs.ext4' in script
+    assert "nofail" in script
+    assert mount_point("/opt/miroir/web-index", "b") == "/opt/miroir/web-index/b/crops_whole"
