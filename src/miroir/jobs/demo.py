@@ -464,7 +464,7 @@ def install(
     Run again after a code change: Docker reuses its cached layers and the copy skips files
     already there, so a second install takes a few minutes."""
     assert machine.address is not None
-    build_image(shell, settings)  # also writes the Scaleway keys (`SCW_ENV`)
+    build_image(shell, settings, page=True)  # also writes the Scaleway keys (`SCW_ENV`)
     start = time.monotonic()
     logger.info("copying %s and the model weights onto the disk", index)
     shell.run(fetch_command(index), timeout=60 * 60)

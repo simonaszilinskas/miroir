@@ -30,6 +30,11 @@ build/
 *.egg-info/
 node_modules/
 
+# The site's page: built by `make ui` into the package, DSFR files copied by the build
+src/miroir/web/ui/
+web-ui/public/dsfr/
+*.tsbuildinfo
+
 # Local logs, editor and browser-test folders
 *.log
 nohup.out

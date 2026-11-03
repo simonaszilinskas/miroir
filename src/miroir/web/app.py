@@ -24,7 +24,13 @@ from typing import Annotated, Protocol
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -52,7 +58,14 @@ from miroir.web.toolsearch import ToolHits, ToolQuery
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+UI_DIR = Path(__file__).parent / "ui"
+"""The page, built from `web-ui/` by `make ui` (Vite: React and the DSFR). Not in git: the
+build lands here and ships in the package (`miroir.web.ui`)."""
+#: Shown at / when the page was not built.
+NOT_BUILT = (
+    "<!doctype html><html lang=fr><meta charset=utf-8><title>Miroir</title>"
+    "<p>La page n’est pas construite : lancez <code>make ui</code>.</p></html>"
+)
 #: Largest photo accepted, after base64 decoding. The page shrinks photos before sending.
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
 #: Longest wait on the search backend before the page is told to retry (`_wait_for`).
@@ -235,10 +248,12 @@ def create_app(
     chat: Callable[[Callable[[str], Awaitable[bytes]]], ChatService] | None = None,
     on_visit: Callable[[], None] | None = None,
     notice: str | None = None,
+    ui_dir: Path = UI_DIR,
 ) -> FastAPI:
     """The app. `fetch` downloads an example photo or a thumbnail (tests pass a fake);
     `chat` makes the conversation page's service, given that `fetch`; `on_visit` runs on
-    every request with a valid session; `notice` is a line the page shows at the top."""
+    every request with a valid session; `notice` is a line the page shows at the top;
+    `ui_dir` holds the built page."""
     if not password:
         msg = "the site needs a password (`miroir web secret` sets it)"
         raise ValueError(msg)
@@ -260,9 +275,17 @@ def create_app(
         notice=notice,
     )
     app.middleware("http")(_headers)
-    app.add_api_route("/", _index, methods=["GET"], include_in_schema=False)
+
+    async def index() -> Response:
+        page = ui_dir / "index.html"
+        if not page.is_file():
+            logger.error("the page is not built in %s: run `make ui`", ui_dir)
+            return HTMLResponse(NOT_BUILT, status_code=503)
+        return FileResponse(page, headers={"Cache-Control": "no-cache"})
+
+    app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
     app.add_api_route("/chat", _chat_page, methods=["GET"], include_in_schema=False)
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", StaticFiles(directory=ui_dir, check_dir=False), name="static")
     app.include_router(api)
     return app
 
@@ -285,13 +308,9 @@ async def _headers(
     return response
 
 
-async def _index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
-
-
 async def _chat_page() -> RedirectResponse:
-    """The conversation page is a view of the one page."""
-    return RedirectResponse("/#/agentique", status_code=307)
+    """The old conversation page: the one page now holds both searches."""
+    return RedirectResponse("/", status_code=307)
 
 
 @api.post("/login")
@@ -439,6 +458,11 @@ class ChatOpenBody(BaseModel):
     image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
     text: str = Field(default="", max_length=MAX_WORDS)
     position: PositionBody | None = None
+    oneshot: bool = Field(
+        default=False,
+        description='The page\'s "Approfondi" search: one turn, no question to the visitor.',
+    )
+    filters: FiltersBody = Field(default_factory=FiltersBody)
 
 
 class ChatSendBody(BaseModel):
@@ -480,7 +504,14 @@ async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) ->
     image = _decode_photo(body.image)
     if image is None and not body.text.strip():
         raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
-    found = chat.open(session_id, photo=image, words=body.text, position=_position(body.position))
+    found = chat.open(
+        session_id,
+        photo=image,
+        words=body.text,
+        position=_position(body.position),
+        oneshot=body.oneshot,
+        filters=body.filters.filters(),
+    )
     return {"conversation_id": found.id}
 
 

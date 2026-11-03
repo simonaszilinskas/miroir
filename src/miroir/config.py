@@ -22,6 +22,11 @@ SEED = 20261012
 #: Repository root (holds `eval/results`, which is committed).
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: The site's page: its sources (React and the DSFR, built with Vite by `make ui`) and where
+#: the build lands, inside the package so the demo image ships it (`miroir.web.pagebuild`).
+WEB_UI_SOURCE = REPO_ROOT / "web-ui"
+WEB_UI_BUILD = REPO_ROOT / "src" / "miroir" / "web" / "ui"
+
 #: Base URL of the POP asset bucket. Export image paths are relative to it.
 POP_ASSET_HOST = "https://popcorn-prd-perf-assets.s3.gra.io.cloud.ovh.net"
 

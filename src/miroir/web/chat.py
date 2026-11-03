@@ -53,7 +53,7 @@ from miroir.config import Settings
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.mistral import MistralClient, MistralError
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
-from miroir.web.catalog import Catalog, CatalogRecord
+from miroir.web.catalog import COLLECTION_LABELS, Catalog, CatalogRecord, Filters
 from miroir.web.chat_tools import (
     MAX_RESULTS,
     SEARCHES,
@@ -324,6 +324,8 @@ class Conversation:
         words: str,
         position: Position | None,
         now: float,
+        oneshot: bool = False,
+        filters: Filters | None = None,
     ) -> None:
         self.service = service
         self.id = secrets.token_urlsafe(16)
@@ -331,6 +333,10 @@ class Conversation:
         self.photo_bytes = photo
         self.words = words
         self.position_given = position
+        self.oneshot = oneshot
+        """The page's "Approfondi" search: one turn, no question to the visitor."""
+        self.filters = filters or Filters()
+        """The filters the visitor set on the page."""
         self.touched = now
         self.messages: list[dict[str, JSON]] = []
         self.events: list[Event] = []
@@ -523,9 +529,18 @@ class ChatService:
     # --- conversations -------------------------------------------------------------------------
 
     def open(
-        self, session: str, *, photo: bytes | None, words: str, position: Position | None
+        self,
+        session: str,
+        *,
+        photo: bytes | None,
+        words: str,
+        position: Position | None,
+        oneshot: bool = False,
+        filters: Filters | None = None,
     ) -> Conversation:
-        """A new conversation. With a photo, the site's usual search starts at once."""
+        """A new conversation. With a photo, the site's usual search starts at once.
+        `oneshot`: the page's "Approfondi" search, which asks the visitor nothing; `filters`:
+        those the visitor set, which the first look applies and the model is told about."""
         self._forget_old()
         conversation = Conversation(
             self,
@@ -534,9 +549,16 @@ class ChatService:
             words=words.strip()[:MAX_WORDS],
             position=position,
             now=self._clock(),
+            oneshot=oneshot,
+            filters=filters,
         )
         if photo is not None:
-            request = SearchRequest(image=photo, text=conversation.words, position=position)
+            request = SearchRequest(
+                image=photo,
+                text=conversation.words,
+                position=position,
+                filters=conversation.filters,
+            )
             conversation.first_look = asyncio.ensure_future(self.backend.search(request))
         self._conversations[conversation.id] = conversation
         conversation.log(
@@ -545,6 +567,8 @@ class ChatService:
                 "photo": photo is not None,
                 "words": conversation.words,
                 "position": position is not None,
+                "oneshot": oneshot,
+                "filters": not conversation.filters.empty,
                 "model": self.model.model,
             }
         )
@@ -676,6 +700,10 @@ class ChatService:
 
     async def _opening(self, c: Conversation, goal: str) -> dict[str, JSON]:
         parts: list[JSON] = [_text(f"The visitor's goal, in their own words: «{goal or '?'}»")]
+        if c.oneshot:
+            parts.append(_text(ONESHOT_NOTE))
+        if not c.filters.empty:
+            parts.append(_text(filters_note(c.filters)))
         if c.photo_bytes is None:
             parts.append(
                 _text(f"No photo: the visitor only typed words: «{c.words}». Search with them.")
@@ -760,7 +788,7 @@ class ChatService:
 
     async def _loop(self, c: Conversation) -> str:
         """Model calls and their tools until the model shows results, asks, or stops."""
-        tools = tools_for(photo=c.photo_bytes is not None)
+        tools = tools_for(photo=c.photo_bytes is not None, ask=not c.oneshot)
         c.views = 0
         c.turn = _Turn()
         schemas = [t.schema() for t in tools]
@@ -938,7 +966,7 @@ class ChatService:
         if waiting is not None:
             return NOT_RUN_WAITING
         if name not in offered:
-            return f"error: {name} is not available here (no photo)."
+            return f"error: {name} is not available in this search."
         named = best_of(args)
         if named is not None:
             c.name_best(named)
@@ -1233,6 +1261,36 @@ and never in English. Never invent a name, a date or a place the records do not 
 
 
 # --- message helpers ---------------------------------------------------------------------------
+
+
+ONESHOT_NOTE = (
+    "This is a one-shot search: the visitor will not answer questions or frame anything. "
+    "Look, search and read records on your own, then finish with show_results: your best "
+    "picks, each with its reason, or found none."
+)
+
+
+def filters_note(filters: Filters) -> str:
+    """The page's filters, told to the model so its own searches keep them."""
+    parts: list[str] = []
+    if filters.collections:
+        names = ", ".join(COLLECTION_LABELS.get(c, c) for c in filters.collections)
+        parts.append(f"base {list(filters.collections)} ({names})")
+    if filters.region:
+        parts.append(f"région {filters.region} (no région key: name its départements)")
+    for key, value in (
+        ("departement", filters.departement),
+        ("domain", filters.domain),
+        ("period", filters.period),
+    ):
+        if value:
+            parts.append(f"{key} {value!r}")
+    return (
+        "The visitor set these filters on the page: "
+        + "; ".join(parts)
+        + '. Pass them in every search\'s filters with mode "hard", and show only records '
+        "that match them."
+    )
 
 
 def _text(text: str) -> JSON:

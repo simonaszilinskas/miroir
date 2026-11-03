@@ -918,9 +918,14 @@ TOOLS: tuple[Tool, ...] = (
 BY_NAME: dict[str, Tool] = {t.name.value: t for t in TOOLS}
 
 
-def tools_for(*, photo: bool) -> tuple[Tool, ...]:
-    """The tools a conversation offers: without a photo, no image search, no framing."""
-    return tuple(t for t in TOOLS if photo or not t.needs_photo)
+#: The tools that wait for the visitor: left out when nobody will answer (one-shot search).
+ASKING = frozenset({ToolName.ASK_VISITOR, ToolName.ASK_REGION})
+
+
+def tools_for(*, photo: bool, ask: bool = True) -> tuple[Tool, ...]:
+    """The tools a conversation offers: without a photo, no image search, no framing; without
+    `ask` (the page's one-shot "Approfondi" search), no question to the visitor."""
+    return tuple(t for t in TOOLS if (photo or not t.needs_photo) and (ask or t.name not in ASKING))
 
 
 async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:

@@ -159,6 +159,22 @@ class ScriptedModel:
 _LISTED = re.compile(r"^\d+\. ([^ |]+) \|", re.MULTILINE)
 
 
+_ONESHOT_SEARCH: dict[str, JSON] = {
+    "model": "auto",
+    "top_k": 10,
+    "why": "Personne ne répondra : je relance par l’image.",
+}
+
+
+def _searched(messages: Sequence[Mapping[str, object]]) -> bool:
+    """Whether the model has called image_search yet."""
+    return any(
+        _dict(c.get("function")).get("name") == "image_search"
+        for m in messages
+        for c in _dicts(m.get("tool_calls"))
+    )
+
+
 class FakeGuide:
     """A rule-following stand-in for the model, so the page runs on the Mac at no cost. With
     a photo it looks at the first look's top thumbnails, then asks one question (or asks to
@@ -193,12 +209,18 @@ class FakeGuide:
                     "why": "Je regarde d’abord les premiers résultats de près.",
                 }
                 return _answer("", [("view_results", look)])
-            if "image_search" in tools:
+            if "image_search" in tools and "ask_visitor" in tools:
                 return _answer("Modèle factice : une question d’abord.", [_QUESTION])
+            if "image_search" in tools:
+                return _answer("", [("image_search", _ONESHOT_SEARCH)])
             words = _between(content, "typed words: «", "»") or "église"
             return _answer("", [("text_search", _words_search(words))])
-        if not asked and "image_search" in tools and "Thumbnails asked for" in content:
-            return _answer("Modèle factice : une question d’abord.", [_QUESTION])
+        if "Thumbnails asked for" in content and "image_search" in tools and not asked:
+            # A one-shot search offers no question: search by image instead.
+            if "ask_visitor" in tools:
+                return _answer("Modèle factice : une question d’abord.", [_QUESTION])
+            if not _searched(messages):
+                return _answer("", [("image_search", _ONESHOT_SEARCH)])
         if role == "user" and "The part the visitor framed" in content:
             search = {"source": "region", "model": "auto", "why": "Je cherche la partie encadrée."}
             return _answer("", [("image_search", search)])

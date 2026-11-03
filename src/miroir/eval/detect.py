@@ -67,7 +67,7 @@ from miroir.web.bundle import SiteBundle, SiteHit, site_search
 
 logger = logging.getLogger(__name__)
 
-#: Longest side of a room photo as the page holds it (`KEEP_SIDE` in static/app.js).
+#: Longest side of a room photo as the page holds it (`KEEP_SIDE` in web-ui/src/photo.ts).
 ROOM_SIDE = 2048
 #: An outline counts as the one a person taps for an artwork from this IoU.
 TAP_IOU = 0.3

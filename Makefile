@@ -1,4 +1,4 @@
-.PHONY: check fmt lint types test sync
+.PHONY: check fmt lint types test sync ui
 
 sync:            ## install base + dev deps
 	uv sync
@@ -18,3 +18,7 @@ types:
 
 test:
 	uv run pytest
+
+ui:              ## build the site's page (web-ui/, Node) into src/miroir/web/ui/
+	npm --prefix web-ui ci
+	npm --prefix web-ui run build

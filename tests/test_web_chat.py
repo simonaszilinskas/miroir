@@ -17,10 +17,12 @@ from miroir.outlines import Outlines
 from miroir.records.bases import place_key
 from miroir.web import chat as chat_module
 from miroir.web.app import create_app
+from miroir.web.catalog import Filters
 from miroir.web.chat import (
     BRIEF,
     MAX_TOOL_CALLS,
     MAX_VIEWS,
+    ONESHOT_NOTE,
     ChatService,
     Limits,
     MemorySpend,
@@ -85,9 +87,11 @@ class CountingBackend:
         self.local = LocalBackend(engine)
         self.counts = {"search": 0, "tool": 0}
         self.queries: list[ToolQuery] = []
+        self.requests: list[SearchRequest] = []
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
+        self.requests.append(request)
         return await self.local.search(request)
 
     async def tool_search(self, query: ToolQuery) -> ToolHits:
@@ -163,8 +167,8 @@ class Rig:
     def __exit__(self, *exc: object) -> None:
         self.client.__exit__(None, None, None)
 
-    def start(self, *, photo: bool = True, words: str = "") -> str:
-        body: dict[str, object] = {"text": words}
+    def start(self, *, photo: bool = True, words: str = "", **extra: object) -> str:
+        body: dict[str, object] = {"text": words, **extra}
         if photo:
             body["image"] = PHOTO
         response = self.client.post("/api/chat/open", json=body)
@@ -520,7 +524,7 @@ def test_the_chat_address_opens_the_conversation_view() -> None:
     with Rig([]) as rig:
         response = rig.client.get("/chat", follow_redirects=False)
         assert response.status_code == 307
-        assert response.headers["location"] == "/#/agentique"
+        assert response.headers["location"] == "/"
         assert rig.client.get("/api/chat/status").json() == {"enabled": True}
         rig.client.cookies.clear()
         assert rig.client.post("/api/chat/open", json={"text": "x"}).status_code == 401
@@ -561,6 +565,10 @@ def test_every_tool_has_a_unique_name_and_a_json_schema() -> None:
         assert tool.description
     assert {t.name for t in tools_for(photo=False)} == set(ToolName) - {
         ToolName.IMAGE_SEARCH,
+        ToolName.ASK_REGION,
+    }
+    assert {t.name for t in tools_for(photo=True, ask=False)} == set(ToolName) - {
+        ToolName.ASK_VISITOR,
         ToolName.ASK_REGION,
     }
 
@@ -684,20 +692,59 @@ def test_looks_at_thumbnails_have_their_own_cap() -> None:
     assert last[-1].startswith(f"not run: {MAX_VIEWS} looks at thumbnails")
 
 
-def test_the_home_page_offers_both_searches() -> None:
-    with Rig([]) as rig:
-        page = rig.client.get("/").text
-        assert 'data-view="conversation"' in page
-        assert "Recherche simple" in page
-        assert "Recherche agentique" in page
-        assert 'href="#/simple"' in page
-        assert 'href="#/agentique"' in page
-        assert rig.client.get("/static/pictograms/innovation.svg").status_code == 200
-        assert "Votre photo est envoyée à ce modèle" in page
-        script = rig.client.get("/static/chat.js")
-        assert script.status_code == 200
-        assert "GOAL_CHIPS" in script.text
-        assert rig.client.get("/static/ui.js").status_code == 200
+def tool_names(body: Mapping[str, JSON]) -> set[str]:
+    return {str(t["function"]["name"]) for t in json.loads(json.dumps(body["tools"]))}
+
+
+def test_a_one_shot_search_asks_the_visitor_nothing() -> None:
+    """The page's "Approfondi" search: no question, no framing; the model is told so."""
+    with Rig([LOOK, shown("OBJ1")]) as rig:
+        cid = rig.start(oneshot=True)
+        events = rig.send(cid, "goal", EXACT)
+    names = tool_names(rig.model.bodies[0])
+    assert ToolName.ASK_VISITOR.value not in names
+    assert ToolName.ASK_REGION.value not in names
+    assert ToolName.IMAGE_SEARCH.value in names
+    assert ONESHOT_NOTE in body_text(rig.model.bodies[0])
+    assert card_ids(events) == ["OBJ1"]
+
+
+def test_a_question_in_a_one_shot_search_is_refused() -> None:
+    question = call("ask_visitor", {"question": "Où ?", "choices": ["Ici", "Là"]})
+    with Rig([question, shown("OBJ1")]) as rig:
+        cid = rig.start(oneshot=True)
+        events = rig.send(cid, "goal", EXACT)
+    assert not of(events, "question")
+    assert "not available in this search" in tool_messages(rig.model.bodies[1])[0]
+    assert card_ids(events) == ["OBJ1"]
+
+
+def test_a_conversation_still_offers_questions() -> None:
+    with Rig([shown("OBJ1")]) as rig:
+        cid = rig.start()
+        rig.send(cid, "goal", EXACT)
+    assert {ToolName.ASK_VISITOR.value, ToolName.ASK_REGION.value} <= tool_names(
+        rig.model.bodies[0]
+    )
+    assert ONESHOT_NOTE not in body_text(rig.model.bodies[0])
+
+
+def test_the_visitors_filters_reach_the_first_look_and_the_model() -> None:
+    filters = {
+        "collections": ["joconde", "nope"],
+        "departement": "Val-d’Oise",
+        "period": "16e siècle",
+    }
+    with Rig([shown("OBJ1")]) as rig:
+        cid = rig.start(oneshot=True, filters=filters)
+        rig.send(cid, "goal", EXACT)
+    assert rig.backend.requests[0].filters == Filters(
+        collections=("joconde",), departement="Val-d’Oise", period="16e siècle"
+    )
+    opening = body_text(rig.model.bodies[0])
+    assert "base ['joconde'] (Joconde)" in opening
+    assert "departement 'Val-d’Oise'" in opening
+    assert 'mode \\"hard\\"' in opening
 
 
 def test_read_record_of_ids_never_seen_is_an_error_the_model_can_read() -> None:

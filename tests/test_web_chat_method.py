@@ -104,11 +104,9 @@ def test_the_why_rides_on_the_running_and_the_done_step() -> None:
     with Rig(script) as rig:
         cid = rig.start()
         events = rig.send(cid, "goal", EXACT)
-        page = rig.client.get("/static/chat.js").text
     searches = [s for s in of(events, "step") if "Recherche par image" in str(s["label"])]
     assert {str(s["state"]) for s in searches} == {"running", "done"}
     assert all(s["why"] == WHY for s in searches)
-    assert "Pourquoi : " in page
 
 
 # --- 3. pivot from evidence --------------------------------------------------------------------
@@ -317,17 +315,6 @@ def test_found_none_says_so_plainly_even_when_the_model_did_not() -> None:
     assert said == f"{NOT_FOUND} Rien de tel ici."
     assert of(events, "results")[0]["cards"] == []
     assert of(events, "results")[0]["found"] == "none"
-
-
-# --- 6. the goal chips -------------------------------------------------------------------------
-
-
-def test_the_goal_chips_ask_what_where_more_and_who() -> None:
-    with Rig([]) as rig:
-        page = rig.client.get("/static/chat.js").text
-    for label in ("C’est quoi ?", "C’est où ?", "D’autres comme ça", "Qui l’a fait ?"):
-        assert f"label: '{label}'" in page
-    assert "Cet objet précis" not in page
 
 
 # --- 7. the log --------------------------------------------------------------------------------

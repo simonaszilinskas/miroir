@@ -32,7 +32,7 @@ PROMPTS: tuple[str, ...] = (
 #: Longest side, in pixels, of the photo a detector sees. The page sends this size.
 DETECT_SIDE = 1024
 #: Outlines drawn at first on one photo (functional spec §5: a person picks one by eye);
-#: `MAX_OUTLINES` in static/app.js. 20 still reads at 375 px on the densest room photo.
+#: `FIRST_OUTLINES` in web-ui/src/SearchPanel.tsx. 20 still reads at 375 px on the densest room photo.
 MAX_OUTLINES = 20
 #: Outlines sent: past the first `MAX_OUTLINES`, the page shows the rest on request ("Afficher
 #: tous les objets"), for walls hung with dozens of pictures (docs/results.md, step C).
