@@ -1886,22 +1886,36 @@ def scw_crop_slice(
     a7_others: Annotated[
         int, typer.Option(help="Files of the sample of others that get EmbeddingGemma 2 crops.")
     ] = 3000,
+    render: Annotated[
+        bool, typer.Option("--render", help="A RENDER-S (P100), MegaLoc crops only.")
+    ] = False,
+    gallery: Annotated[int, typer.Option(help="Gallery images.")] = 50_000,
+    t2_queries: Annotated[int, typer.Option(help="T2 queries kept (0: all).")] = 0,
 ) -> None:
     """Crop slice test (docs/search-levels.md): crops of a 50,000-image gallery on an L40S,
     scored against VET, PARTS, T2 and T3; the score tables land in the Scaleway folder."""
-    from miroir.jobs.crop_slice import crop_launch, fetch_outputs, prepare  # noqa: PLC0415
+    from miroir.jobs.crop_slice import (  # noqa: PLC0415
+        RENDER_OFFER,
+        crop_launch,
+        fetch_outputs,
+        prepare,
+    )
     from miroir.jobs.objects import s3_client  # noqa: PLC0415
     from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
     from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
 
     settings = get_settings()
     s3 = s3_client(settings)
-    typer.echo(prepare(settings, s3, a7_others=a7_others).note)
-    offers = [o for o in OFFERS if ("L40S" in o.commercial_type) != l4]
+    if render:
+        a7_others = 0
+    spec = prepare(settings, s3, a7_others=a7_others, size=gallery, t2_queries=t2_queries)
+    typer.echo(spec.note)
+    offers = (
+        [RENDER_OFFER] if render else [o for o in OFFERS if ("L40S" in o.commercial_type) != l4]
+    )
+    launch = crop_launch(settings, torch_tag="cu126" if render else "")
     try:
-        run_unattended(
-            settings, crop_launch(settings), offers=offers, max_hours=max_hours, purpose="crops"
-        )
+        run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
     finally:
         for path in fetch_outputs(settings, s3):
             typer.echo(f"got {path}")

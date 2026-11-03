@@ -226,12 +226,17 @@ def start_worker(
     )
 
 
-def build_image(shell: Shell, settings: Settings, *, match: bool = False) -> None:
-    """Send the keys and the build context, and build the job image on the machine."""
+def build_image(
+    shell: Shell, settings: Settings, *, match: bool = False, torch_tag: str = ""
+) -> None:
+    """Send the keys and the build context, and build the job image on the machine.
+    `torch_tag` (e.g. "cu126") overrides the wheels picked from the driver: an older GPU
+    needs a build that still carries its kernels."""
     send_env(shell, settings)
     smi = shell.run("nvidia-smi")
     logger.info("GPU: %s", " ".join(line.strip() for line in smi.splitlines()[2:4]))
     cuda = float(smi.split("CUDA Version:")[1].split()[0])
+    index = f"https://download.pytorch.org/whl/{torch_tag}" if torch_tag else torch_index(cuda)
     shell.run(
         f"rm -rf {REMOTE_ROOT}/build && mkdir -p {REMOTE_ROOT}/build "
         f"&& tar -xzf - -C {REMOTE_ROOT}/build",
@@ -241,7 +246,7 @@ def build_image(shell: Shell, settings: Settings, *, match: bool = False) -> Non
     logger.info("building the job image on the machine (a few minutes)")
     shell.run(
         f"cd {REMOTE_ROOT}/build && docker build -t {IMAGE_TAG} "
-        f"--build-arg TORCH_INDEX={shlex.quote(torch_index(cuda))} "
+        f"--build-arg TORCH_INDEX={shlex.quote(index)} "
         f"--build-arg MATCH={int(match)} . "
         f"> {REMOTE_ROOT}/build.log 2>&1 || (tail -40 {REMOTE_ROOT}/build.log; exit 1)",
         timeout=BUILD_TIMEOUT_S,

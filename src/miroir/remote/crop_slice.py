@@ -49,7 +49,7 @@ from miroir.jobs.crop_slice import (
     outside_key,
     read_spec,
 )
-from miroir.jobs.modal_spec import OPTIONS
+from miroir.jobs.modal_spec import OPTIONS, ModalOption
 from miroir.jobs.objects import Bucket, bucket_name, download_tree, s3_client
 from miroir.parallel import bounded_map
 from miroir.remote.models import DEVICE, MegaLocEncoder, SentenceEncoder
@@ -135,10 +135,29 @@ def _unit_rows(vectors: np.ndarray) -> np.ndarray:
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
+class Fp32SentenceEncoder(SentenceEncoder):
+    """EmbeddingGemma 2 in float32, for a GPU without bfloat16 (a P100 is older than Ampere)."""
+
+    def __init__(self, option: ModalOption) -> None:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+        self.option = option
+        self.model = SentenceTransformer(
+            option.model, device=DEVICE, model_kwargs={"torch_dtype": torch.float32}
+        )
+
+
 class Models:
     def __init__(self) -> None:
-        self.a7 = SentenceEncoder(replace(A7, batch_size=A7_BATCH))
+        option = replace(A7, batch_size=A7_BATCH)
+        old_gpu = torch.cuda.get_device_capability()[0] < 8
+        self.a7 = Fp32SentenceEncoder(option) if old_gpu else SentenceEncoder(option)
         self.a3 = MegaLocEncoder(A3)
+        logger.info(
+            "GPU %s; EmbeddingGemma 2 in %s",
+            torch.cuda.get_device_name(),
+            "float32" if old_gpu else "bfloat16",
+        )
         self.pool = ThreadPoolExecutor(A7_STREAMS)
 
     def encode_a3(self, images: list[PILImage.Image]) -> np.ndarray:

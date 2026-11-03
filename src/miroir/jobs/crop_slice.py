@@ -28,6 +28,7 @@ from pydantic import ConfigDict, TypeAdapter
 
 from miroir.config import SEED, Settings
 from miroir.jobs.objects import Bucket, bucket_name
+from miroir.jobs.scaleway import Offer
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -232,6 +233,7 @@ def build_spec(
     *,
     size: int = GALLERY_SIZE,
     a7_distractors: int = A7_DISTRACTORS,
+    a7_sets: Sequence[str] = A7_SETS,
     seed: int = SEED,
 ) -> SliceSpec:
     """The gallery, its files and the queries (`pick_gallery`, `pick_a7_files`)."""
@@ -246,12 +248,16 @@ def build_spec(
     def file(image_id: str) -> str:
         return "" if is_commons_image(image_id) else file_of.get(image_id, image_id)
 
-    a7_targets = {e for q in queries if q.set_id in A7_SETS for e in q.expected_entity_ids}
-    a7_files = pick_a7_files(
-        [file(i) for i in answers if entity_of.get(i) in a7_targets],
-        [file(i) for i in others],
-        a7_distractors,
-        seed,
+    a7_targets = {e for q in queries if q.set_id in a7_sets for e in q.expected_entity_ids}
+    a7_files = (
+        []
+        if not a7_sets
+        else pick_a7_files(
+            [file(i) for i in answers if entity_of.get(i) in a7_targets],
+            [file(i) for i in others],
+            a7_distractors,
+            seed,
+        )
     )
     picked = [
         SliceQuery(
@@ -279,13 +285,27 @@ def build_spec(
     )
 
 
+def sample_set(queries: Sequence[Query], set_id: str, count: int, seed: int = SEED) -> list[Query]:
+    """`count` seeded queries of `set_id`, every query of the other sets."""
+    mine = [q for q in queries if q.set_id == set_id]
+    kept = {q.query_id for q in random.Random(seed).sample(mine, min(count, len(mine)))}
+    return [q for q in queries if q.set_id != set_id or q.query_id in kept]
+
+
 def slice_queries(settings: Settings) -> list[Query]:
     from miroir.eval.sets import load_queries  # noqa: PLC0415 (the Mac's side only)
 
     return [q for s in SETS for q in load_queries(settings, s, "tune")]
 
 
-def prepare(settings: Settings, s3: S3Client, *, a7_others: int = A7_DISTRACTORS) -> SliceSpec:
+def prepare(
+    settings: Settings,
+    s3: S3Client,
+    *,
+    a7_others: int = A7_DISTRACTORS,
+    size: int = GALLERY_SIZE,
+    t2_queries: int = 0,
+) -> SliceSpec:
     """Pick the gallery from the `pop-all` index and send the spec, the supplied query
     vectors and the outside photos to the images bucket."""
     from miroir.eval.router3 import query_chroma  # noqa: PLC0415 (fetches photos)
@@ -302,7 +322,17 @@ def prepare(settings: Settings, s3: S3Client, *, a7_others: int = A7_DISTRACTORS
     entity_of.update(_column_map(settings.commons_gallery_parquet("full"), "image_id", "entity_id"))
     file_of = _column_map(settings.scaleway_dir / IMAGE_FILES, "image_id", "file_id")
     queries = slice_queries(settings)
-    spec = build_spec(queries, index_ids, entity_of, file_of, a7_distractors=a7_others)
+    if t2_queries:
+        queries = sample_set(queries, "T2", t2_queries)
+    spec = build_spec(
+        queries,
+        index_ids,
+        entity_of,
+        file_of,
+        size=size,
+        a7_distractors=a7_others,
+        a7_sets=A7_SETS if a7_others else (),
+    )
     logger.info("%s", spec.note)
 
     bucket = bucket_name(settings, Bucket.IMAGES)
@@ -353,13 +383,13 @@ def fetch_outputs(settings: Settings, s3: S3Client) -> list[Path]:
 # --- the machine -------------------------------------------------------------------------------
 
 
-def crop_launch(settings: Settings) -> Launch:
+def crop_launch(settings: Settings, torch_tag: str = "") -> Launch:
     """`miroir scw crop-slice-run` in the job image on a GPU machine."""
     from miroir.jobs.scw_bulk import Launch  # noqa: PLC0415
     from miroir.jobs.scw_run import IMAGE_TAG, MOUNTS, REMOTE_ROOT, build_image  # noqa: PLC0415
 
     def start(shell: Shell, machine: Machine) -> None:
-        build_image(shell, settings)
+        build_image(shell, settings, torch_tag=torch_tag)
         run = f"docker run -d --env-file {REMOTE_ROOT}/env {MOUNTS} --entrypoint miroir "
         shell.run(
             f"{run} --name watch {IMAGE_TAG} scw watch --server-id {machine.server_id} "
@@ -376,3 +406,8 @@ def crop_launch(settings: Settings) -> Launch:
         probe="nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader "
         "&& cat /proc/loadavg && free -g | sed -n 2p",
     )
+
+
+#: Scaleway's public price of a RENDER-S (Tesla P100 16 GB, 10 cores), rounded up: the only
+#: GPU in stock on 2026-11-03, when every L4, L40S and H100 was short.
+RENDER_OFFER = Offer("fr-par-2", "RENDER-S", 1.25)
