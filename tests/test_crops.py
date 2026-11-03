@@ -296,3 +296,15 @@ def test_report_reads_what_the_machine_writes(tmp_path) -> None:
     assert full["a-whole"] == 3  # D and B above A
     assert full["b-whole+2x2"] == 1  # the crop (0.95) passes D (0.9)
     assert out["look_alikes"]["T2"]["b-whole+2x2"]["lost_first"] == 1  # type: ignore[index]
+
+
+def test_full_summary_pads_a_short_ranking() -> None:
+    e7 = np.zeros(3, dtype=np.float32)
+    e3 = np.asarray([0.3, NEG, NEG], dtype=np.float32)  # one entity on the shortlist
+    full = summarize_full(e7, e3, 0.2, np.asarray([0], dtype=np.int64), top=4)
+    assert full.top.tolist() == [0, -1, -1, -1]
+    assert np.isneginf(full.top_e3[1:]).all()
+    none = np.full(1, NEG, dtype=np.float32)
+    top_in_gallery = np.asarray([0, -1, -1, -1])
+    args = {"top_in_gallery": top_in_gallery, "crop7": none, "crop3": none, "a7_weight": 0.2}
+    assert full_rank(full, right=[0], **args) == 1

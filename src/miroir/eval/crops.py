@@ -158,8 +158,20 @@ def summarize_full(
     lo7, hi7 = _range(e7)
     lo3, hi3 = _range(e3)
     best = ranking.top_entities(fused(e7, e3, a7_weight), top)
+    # Fewer entities than `top` may be ranked (MegaLoc scores only its shortlist): pad with
+    # row -1 and -inf, so every query's arrays have one shape.
+    pad = top - len(best)
+    neg = np.full(pad, -np.inf, dtype=np.float32)
     return FullScores(
-        lo7, hi7, lo3, hi3, best, e7[best], e3[best], e7[gallery_rows], e3[gallery_rows]
+        lo7,
+        hi7,
+        lo3,
+        hi3,
+        np.concatenate([best, np.full(pad, -1, dtype=np.int64)]),
+        np.concatenate([e7[best].astype(np.float32), neg]),
+        np.concatenate([e3[best].astype(np.float32), neg]),
+        e7[gallery_rows],
+        e3[gallery_rows],
     )
 
 
@@ -326,7 +338,7 @@ def rank_full(
         q = position[case.query_id]
         full = scores.full[q]
         top_in_gallery = np.fromiter(
-            (gallery_row.get(scores.full_entities[int(r)], -1) for r in full.top),
+            (gallery_row.get(scores.full_entities[int(r)], -1) if r >= 0 else -1 for r in full.top),
             np.int64,
             len(full.top),
         )
@@ -430,7 +442,7 @@ def load_scores(folder: Path, spec: SliceSpec) -> Scores:
             full = [
                 FullScores(
                     *(float(x) for x in data["range"][q]),
-                    top=np.asarray([position[int(r)] for r in top[q]], dtype=np.int64),
+                    top=np.asarray([position.get(int(r), -1) for r in top[q]], dtype=np.int64),
                     top_e7=data["top_e7"][q],
                     top_e3=data["top_e3"][q],
                     gallery_e7=data["gallery_e7"][q],

@@ -333,7 +333,7 @@ def _full(
         status.set(note=f"full index: {j + 1}/{len(spec.queries)} queries")
     del g7, g3
     torch.cuda.empty_cache()
-    named = sorted({int(r) for top in fields["top"] for r in top})
+    named = sorted({int(r) for top in fields["top"] for r in top if r >= 0})
     _save(
         s3, bucket, "full",
         top=np.stack(fields["top"]),
