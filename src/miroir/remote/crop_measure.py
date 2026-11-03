@@ -108,13 +108,21 @@ def run_crop_measure(settings: Settings, index: str) -> None:
         photo_ms = _photo_searches(s3, bucket, index, engine, spec)
         out = MeasureOut(
             index=index, gpu=torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
-            ranks=tuple(ranks), photo_search_ms=photo_ms,
+            ranks=tuple(ranks), photo_search_ms=photo_ms, memory_gb=_memory(),
         )  # fmt: skip
         s3.put_object(Bucket=bucket, Key=out_key(index), Body=out_json(out))
     except Exception as err:
         report(state=JobState.FAILED, note=f"{type(err).__name__}: {err}"[:500])
         raise
     report(state=JobState.DONE, done=len(spec.queries), note="ranks written")
+
+
+def _memory() -> dict[str, float]:
+    import resource  # noqa: PLC0415
+
+    host = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6  # kB on Linux
+    gpu = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
+    return {"gpu_max_allocated": round(gpu, 2), "host_max_rss": round(host, 2)}
 
 
 def _supplied(s3, bucket: str, index: str) -> dict[str, tuple[np.ndarray, np.ndarray, float]]:

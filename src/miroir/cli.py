@@ -2084,6 +2084,7 @@ def scw_crop_measure(
         "gpu": out.gpu,
         "sets": table,
         "photo_search_ms": {k: list(v) for k, v in out.photo_search_ms.items()},
+        "memory_gb": dict(out.memory_gb),
         "skipped": list(spec.skipped),
         "vet_ranks": {r.query_id: [r.off, r.on] for r in out.ranks if r.set_id == "VET"},
     }

@@ -167,6 +167,36 @@ uv run miroir scw pop-coverage   # writes ~/miroir-data/index/coverage-pop-all.j
 - Keep the Mac on mains power and awake (`caffeinate -ims`): while it sleeps, finished
   machines wait to be deleted and keep costing.
 
+Crops of every POP image (docs/search-levels.md, "Crops of all of POP"), and the bundle that
+serves them:
+
+```sh
+uv run miroir scw crop-short-slice            # crops of the slice kept, for `eval crop-short`
+uv run miroir eval crop-short                 # eval/results/R3/SL-crop-short.json
+uv run miroir scw crop-embed-spec --dims 256 --precision fp16   # the spec of the full run
+MIROIR_SCW_BUDGET_EUR=108 nohup caffeinate -ims uv run miroir scw crop-embed \
+  --first 0 --last 1023 --max-hours 6 > crops-a.log 2>&1 &
+# the same for 1024-2047, 2048-3071, 3072-4095; `--reverse` puts a second machine on a
+# range from its other end
+uv run miroir scw crop-bundle                 # pop-all-crops in the index bucket (no model)
+uv run miroir scw crop-measure                # tune sets, crops off and on, on a GPU machine
+```
+
+- `crop-embed` cuts each stored file into 3×3 windows and embeds them with MegaLoc in
+  float16 (three times float32's speed, same vectors to a cosine of 0.9996). Each of the
+  4,096 pieces is written once, to `crops/pop-3x3/` in the images bucket: PCA coordinates
+  (`pieces/`) and the whole vectors in int8 (`whole/`, 164 GB in all). A machine first lists
+  the pieces written and checks each again before starting it, so ranges can be rerun, or
+  shared, at any time.
+- Files are read on 64 threads (Object Storage answers each in about half a second) and cut
+  on 7 processes (cutting holds Python's lock: on threads it ran on one core).
+- Speeds: an L40S about 550 crops a second, an L4 about 200.
+- `crop-bundle` runs on the Mac: it downloads the coordinates (10 GB), writes the crop files,
+  copies `pop-all` and the whole vectors into `pop-all-crops/` bucket to bucket, and sends
+  the crop files.
+- `crop-measure` mounts a 200 GB volume for the whole vectors on the job machine, as the
+  demo machine needs one (`miroir demo crops`).
+
 The full POP export comes from public sources with a standalone script:
 `python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps).
 

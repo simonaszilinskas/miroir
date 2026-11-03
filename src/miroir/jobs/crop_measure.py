@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -176,6 +176,9 @@ class MeasureOut:
     ranks: tuple[QueryRanks, ...]
     photo_search_ms: Mapping[str, tuple[float, ...]]
     """End to end (`Engine.search` on the photo, models included), "off" and "on"."""
+    memory_gb: Mapping[str, float] = field(default_factory=dict[str, float])
+    """GPU memory the search models, gallery and crops took (most allocated at once), and
+    the process's host memory at its largest."""
 
 
 _OUT = TypeAdapter(MeasureOut)
