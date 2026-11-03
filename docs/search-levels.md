@@ -38,7 +38,7 @@ On VET (3 Vétheuil images) and PARTS (360 detail → whole pairs from POP, tune
 1. Move the jobs and the query search from Modal to Scaleway. (Done 2026-11-03: the jobs run on Scaleway machines and the site on the demo machine; the Modal code is gone.)
 2. Build VET and PARTS. (Done: `miroir testsets vet`, `miroir testsets parts`.)
 3. Download and embed everything; build the full index on Scaleway. (Done 2026-11-03: bundle `pop-all`, below.)
-4. Crop vectors; measures 1 to 3.
+4. Crop vectors; measures 1 to 3. (Crops built and measured 2026-11-03: bundle `pop-all-crops`, below; not deployed yet. The agent, measure 3, is still to do.)
 5. One page with Instant and Deeper; deploy on Scaleway. (Deploy done 2026-11-03: the site serves `pop-all` on the demo machine, `miroir demo up`; prototype.md, "Hosting". On VET today's search puts the target first for VET-1 and VET-3, fourth for VET-2. The one page is still to do.)
 
 ### What step 3 built (2026-11-03)
@@ -58,3 +58,21 @@ Before paying for crops of all of POP, a cheap test: do crop vectors find a whol
 - **Nothing gets worse.** T3 hit@10 82.8 → 89.9, T2 65.0 → 68.0. Crops put a wrong record first for 1 T2, 2 T3 and 2 PARTS queries, and the right one first for 2, 6 and 26.
 - **VET.** The altarpiece comes first for all three photos with or without crops, through its other photos. Through the photo from before 1896 alone, crops do not help: the carved groups fill about 3% of that photo, a 3×3 window 16%.
 - **Next.** 3×3 alone gives nearly all the gain for 9 crops a photo: about 19 million MegaLoc crops, 40 hours of L40S, about €58, more than the €55 left of the €100. Serving them whole would take 163 GB in int8, so crops must be stored shorter (1,024 numbers, 20 GB), which this test did not measure. Measure that on a slice first (about €2 on an L40S), then decide between 3×3 for every photo and 2×2 (€26).
+
+### Short crops (2026-11-03)
+
+Crops kept whole would weigh 163 GB in int8. On the slice, shortened crops (PCA 128 to 1,024 axes) alone keep most of PARTS' gain but let look-alike crops pass the right record: T2 hit@1 falls from 68 to 59–64, at every length and weight. Picking crops with 128 axes and scoring the picked ones whole matches whole-length crops on PARTS, T2 and T3. So crops are kept in both forms: 128 axes on the GPU (2.5 GB) and whole vectors in int8 on a disk of their own (164 GB). MegaLoc in float16 runs three times faster than float32 for the same vectors (cosine 0.9996 at worst). Full figures: [results.md](results.md), "Short crops".
+
+### Crops of all of POP (2026-11-03)
+
+- **Built.** 19,376,523 crops (3×3 windows of 40%) of the 2,152,947 stored files (7 unreadable), on one L40S and six L4 side by side, 3 h 50 min, €23.39. Bundle `pop-all-crops` in `miroir-index`: `pop-all` (27.4 GB) plus the crops (2.6 GB for the GPU, 164 GB of whole vectors for disk).
+- **Measured** over all of POP, tune halves, with the site's code, crops off → on (hit@1 / hit@10): PARTS 42.8 / 58.3 → **53.9 / 71.1**; T3 54.5 / 82.8 → 57.6 / 85.9; T2 53.7 / 64.9 → 55.4 / 64.3; T2b 78.0 / 88.0 → 78.4 / 88.3; T5 26.9 / 41.8 → 28.1 / 42.8; T1 unchanged; VET the altarpiece first for 2 of 3 photos, as before. Full figures: [results.md](results.md), "Crops of all of POP".
+- **Cost of a search.** About 0.4 s more on the GPU machine (5,000 crops read from disk and scored); 0.65 s end to end expected against 0.25 s today.
+- **Serving.** The demo machine needs a 200 GB Block Storage volume for the whole crop vectors (about €19 a month). Not deployed: Simon runs it when he chooses, demo machine on (`uv run miroir demo up` first):
+
+  ```sh
+  cd /Users/simonaszilinskas/miroir && uv run miroir demo crops
+  ```
+
+  It makes, attaches and mounts the volume the first time, then installs `pop-all-crops` (only the crop files come down: the files it shares with `pop-all` are linked on the disk), and `demo up` keeps serving it afterwards. Back to the search without crops: `uv run miroir demo install --index pop-all`. On the L4 the crops add about 2.5 GB of GPU memory to the 19 of 23 GB the site uses; check `uv run miroir demo status` after the first searches. Without a GPU the crops are scored on the CPU (not measured).
+- **Next.** Paused until the ministry's full data export arrives: its new images get vectors and crops in one pass, and the index is rebuilt once. The crop job writes whole pieces of the file ids, and new files fall into pieces already written: that run must redo the pieces that gained files (or start a new job name).

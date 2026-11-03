@@ -226,6 +226,15 @@ class InstanceApi:
     def delete_server(self, zone: str, server_id: str) -> None:
         self._call("DELETE", f"instance/v1/zones/{zone}/servers/{server_id}")
 
+    def availability(self, zone: str) -> dict[str, str]:
+        """Each commercial type's stock in a zone: "available", "scarce" or "shortage"."""
+        found = self._call(
+            "GET", f"instance/v1/zones/{zone}/products/servers/availability",
+            params={"per_page": 100},
+        )  # fmt: skip
+        servers = cast("dict[str, JSON]", found.get("servers") or {})
+        return {kind: str(info.get("availability", "")) for kind, info in servers.items()}
+
     def servers(self, zone: str) -> list[JSON]:
         params = {"project": self.project, "per_page": 50}
         return list(self._pages(f"instance/v1/zones/{zone}/servers", "servers", params))
@@ -252,6 +261,32 @@ class InstanceApi:
     def delete_block_volume(self, zone: str, volume_id: str) -> None:
         path = f"block/v1/zones/{zone}/volumes/{volume_id}"
         _gone_ok(lambda: self._call("DELETE", path))
+
+    def create_block_volume(
+        self, zone: str, name: str, gb: int, tags: Sequence[str], iops: int = 5000
+    ) -> str:
+        """A new empty Block Storage volume; returns its id once it is available."""
+        body: JSON = {
+            "name": name,
+            "project_id": self.project,
+            "from_empty": {"size": gb * 10**9},
+            "perf_iops": iops,
+            "tags": list(tags),
+        }
+        found = self._call("POST", f"block/v1/zones/{zone}/volumes", body=body)
+        volume_id = str(found["id"])
+        end = time.monotonic() + BOOT_TIMEOUT_S
+        while time.monotonic() < end:
+            state = self._call("GET", f"block/v1/zones/{zone}/volumes/{volume_id}").get("status")
+            if state == "available":
+                return volume_id
+            time.sleep(POLL_S)
+        msg = f"volume {volume_id} not available after {BOOT_TIMEOUT_S} s"
+        raise TimeoutError(msg)
+
+    def attach_block_volume(self, zone: str, server_id: str, volume_id: str) -> None:
+        path = f"instance/v1/zones/{zone}/servers/{server_id}/attach-volume"
+        self._call("POST", path, body={"volume_id": volume_id, "volume_type": "sbs_volume"})
 
     def instance_volumes(self, zone: str) -> list[JSON]:
         params = {"project": self.project, "per_page": 50}

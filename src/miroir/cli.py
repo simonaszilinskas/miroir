@@ -366,6 +366,61 @@ def eval_crops() -> None:
     typer.echo(f"written to {path}")
 
 
+@eval_app.command("crop-short")
+def eval_crop_short() -> None:
+    """Score shorter crop vectors on the crop slice (`miroir scw crop-short-slice` first)."""
+    import numpy as np  # noqa: PLC0415
+
+    from miroir.config import eval_result_path  # noqa: PLC0415
+    from miroir.eval.crop_short import Projection, load_pieces, run_measure  # noqa: PLC0415
+    from miroir.eval.crops import cases_of, load_scores  # noqa: PLC0415
+    from miroir.jobs.crop_embed import SLICE_NAME, crops_dir  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    folder = slice_dir(settings)
+    spec = read_spec((folder / "spec.json").read_bytes())
+    scores = load_scores(folder, spec)
+    cases = cases_of(spec, slice_queries(settings))
+    mine = crops_dir(settings, SLICE_NAME)
+    with np.load(mine / "queries.npz", allow_pickle=False) as data:
+        at = {str(q): i for i, q in enumerate(data["query_ids"].tolist())}
+        queries = np.asarray(data["a3"], dtype=np.float32)[[at[q] for q in scores.query_ids]]
+    with np.load(folder / "crops.npz", allow_pickle=False) as data:
+        columns = [str(f) for f in data["files"].tolist()]
+    projection_path = mine / "pop-all-a3_projection.npz"
+    if not projection_path.exists():
+        s3_client(settings).download_file(
+            bucket_name(settings, Bucket.INDEX), "pop-all/a3_projection.npz", str(projection_path)
+        )
+    with np.load(projection_path, allow_pickle=False) as data:
+        pop_pca = Projection(
+            np.asarray(data["mean"], np.float32), np.asarray(data["components"], np.float32)
+        )
+    right = {e for c in cases for e in c.right}
+    answer_files = {
+        f for f, e in zip(spec.files, scores.row_entities, strict=True) if f and e in right
+    }
+    short_path = mine / "gallery-a3-pca1024.npy"
+    out = run_measure(
+        scores,
+        cases,
+        load_pieces(mine),
+        queries,
+        columns=columns,
+        pop_pca=pop_pca,
+        answer_files=answer_files,
+        gallery_short=np.load(short_path) if short_path.exists() else None,
+    )
+    trial = mine / "trial.json"
+    if trial.exists():
+        out["trial"] = json.loads(trial.read_text())
+    path = eval_result_path("R3", "SL", "crop-short")
+    path.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+    typer.echo(f"written to {path}")
+
+
 @eval_app.command("compare")
 def eval_compare(
     a: Annotated[Path, typer.Argument(help="Result file of run a.")],
@@ -1811,6 +1866,232 @@ def scw_crop_slice(
             typer.echo(f"got {path}")
 
 
+@scw_app.command("crop-embed-run", hidden=True)
+def scw_crop_embed_run(
+    name: Annotated[str, typer.Option(help="The crop job (its spec is in the images bucket).")],
+    first: Annotated[int, typer.Option(help="First piece.")],
+    last: Annotated[int, typer.Option(help="Last piece, included.")],
+    *,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Last piece first.")] = False,
+) -> None:
+    """Crop vectors for pieces of a crop job, in the job image on a GPU machine. Never run on
+    the Mac."""
+    from miroir.remote.crop_embed import run_crop_embed  # noqa: PLC0415 (machine only)
+
+    run_crop_embed(get_settings(), name=name, first=first, last=last, reverse=reverse)
+
+
+def _run_crop_job(
+    name: str, first: int, last: int, max_hours: float, *, any_gpu: bool, reverse: bool = False
+) -> None:
+    """One machine for pieces `first`..`last`, the best offer in stock; deleted at the end."""
+    from miroir.jobs.crop_embed import crop_launch, crop_offers, in_stock  # noqa: PLC0415
+    from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    settings = get_settings()
+    api = InstanceApi(settings)
+    try:
+        offers = in_stock(api, crop_offers())
+    finally:
+        api.close()
+    if not any_gpu:
+        offers = [o for o in offers if o.commercial_type != "RENDER-S"]
+    if not offers:
+        typer.echo("no GPU in stock: nothing started")
+        raise typer.Exit(1)
+    launch = crop_launch(settings, name, first, last, reverse=reverse)
+    done = run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
+    for status in done:
+        typer.echo(status.line())
+
+
+@scw_app.command("crop-short-slice")
+def scw_crop_short_slice(
+    max_hours: MaxHours = 2.0,
+    *,
+    any_gpu: Annotated[
+        bool, typer.Option("--any-gpu", help="Also a RENDER-S (P100) when no L4 or L40S is free.")
+    ] = False,
+) -> None:
+    """Keep the 3x3 crop vectors of the crop slice (float32 and bfloat16, whole) and the slice
+    queries' MegaLoc vectors, for `miroir eval crop-short`. Lands in the Scaleway folder."""
+    from miroir.jobs.crop_embed import crops_dir, fetch_job, put_spec, slice_spec  # noqa: PLC0415
+    from miroir.jobs.crop_slice import slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    folder = slice_dir(settings)
+    ids = (folder / "ids.txt").read_text(encoding="utf-8").split()
+    spec = slice_spec(folder / "spec.json", ids)
+    s3 = s3_client(settings)
+    put_spec(settings, s3, spec)
+    typer.echo(f"{spec.note}: {len(spec.pieces())} pieces")
+    try:
+        _run_crop_job(spec.name, 0, len(spec.pieces()) - 1, max_hours, any_gpu=any_gpu)
+    finally:
+        got = fetch_job(settings, s3, spec.name)
+        typer.echo(f"{len(got)} files in {crops_dir(settings, spec.name)}")
+
+
+@scw_app.command("crop-embed")
+def scw_crop_embed(
+    first: Annotated[int, typer.Option(help="First piece (0 to 4095).")],
+    last: Annotated[int, typer.Option(help="Last piece, included.")],
+    max_hours: MaxHours = 12.0,
+    *,
+    any_gpu: Annotated[
+        bool, typer.Option("--any-gpu", help="Also a RENDER-S (P100) when no L4 or L40S is free.")
+    ] = False,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Last piece first.")] = False,
+) -> None:
+    """3x3 crop vectors of every stored POP file, pieces `first` to `last`, on one GPU machine
+    (resumable: pieces already written are skipped; `--reverse` starts from the last, to share
+    a range with a machine already on it). The spec comes from `crop-embed-spec`."""
+    from miroir.jobs.crop_embed import FULL_NAME  # noqa: PLC0415
+
+    _run_crop_job(FULL_NAME, first, last, max_hours, any_gpu=any_gpu, reverse=reverse)
+
+
+@scw_app.command("crop-embed-spec")
+def scw_crop_embed_spec(
+    dims: Annotated[int, typer.Option(help="PCA axes kept per crop (at most 1,024).")] = 256,
+    precision: Annotated[
+        str, typer.Option(help="MegaLoc on the GPU: fp32, tf32, bf16, fp16.")
+    ] = "fp16",
+) -> None:
+    """Write the spec of the crop run over all of POP: 3x3 crops, projected on the first
+    `dims` axes of the `pop-all` MegaLoc PCA (copied beside the spec)."""
+    from miroir.jobs.crop_embed import FULL_NAME, PREFIX, Precision, full_spec, put_spec  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    key = f"{PREFIX}/{FULL_NAME}/projection.npz"
+    s3.copy(
+        {"Bucket": bucket_name(settings, Bucket.INDEX), "Key": "pop-all/a3_projection.npz"},
+        bucket_name(settings, Bucket.IMAGES),
+        key,
+    )
+    spec = full_spec(Precision(precision), key, dims)
+    put_spec(settings, s3, spec)
+    typer.echo(f"{spec.note}: {len(spec.pieces())} pieces")
+
+
+@scw_app.command("crop-bundle")
+def scw_crop_bundle(
+    dims: Annotated[int, typer.Option(help="PCA axes per crop to pick crops with.")] = 128,
+    rescore: Annotated[int, typer.Option(help="Crops picked and scored whole per search.")] = 5_000,
+    shortlist: Annotated[
+        int, typer.Option(help="Image rows by best crop on the shortlist.")
+    ] = 2000,
+    weight: Annotated[float, typer.Option(help="An image scores max(whole, weight * crop).")] = 1.0,
+) -> None:
+    """Build `pop-all-crops` in the index bucket: `pop-all` copied there, plus the crop files
+    made from the crop run's pieces (downloaded to the Scaleway folder first). No model."""
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    from miroir.index.crop_bundle import (  # noqa: PLC0415
+        NAME,
+        SOURCE,
+        copy_bundle,
+        copy_whole,
+        crop_file_paths,
+        piece_paths,
+        write_crop_files,
+    )
+    from miroir.jobs.crop_embed import FULL_NAME, crops_dir, fetch_job  # noqa: PLC0415
+    from miroir.jobs.crop_slice import IMAGE_FILES, slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client, upload_files  # noqa: PLC0415
+    from miroir.web.crops import CropRule  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    index = bucket_name(settings, Bucket.INDEX)
+    fetch_job(settings, s3, FULL_NAME)
+    folder = crops_dir(settings, FULL_NAME)
+    ids = (slice_dir(settings) / "ids.txt").read_text(encoding="utf-8").split()
+    path = settings.scaleway_dir / IMAGE_FILES
+    table = pq.read_table(path, columns=["image_id", "file_id"])  # pyright: ignore[reportUnknownMemberType]
+    columns = table.to_pydict()
+    file_of = dict(zip(columns["image_id"], columns["file_id"], strict=True))
+    out = settings.scaleway_dir / NAME / NAME
+    facts = write_crop_files(
+        piece_paths(folder),
+        out,
+        index_ids=ids,
+        file_of=file_of,
+        projection=folder / "projection.npz",
+        dims=dims,
+        rule=CropRule(rescore=rescore, shortlist=shortlist, weight=weight),
+    )
+    typer.echo(json.dumps(facts))
+    copied = copy_bundle(s3, index, SOURCE, NAME)
+    copy_whole(s3, bucket_name(settings, Bucket.IMAGES), FULL_NAME, index, NAME)
+    upload_files(s3, index, out.parent, crop_file_paths(out))
+    typer.echo(f"{NAME}: {copied} file(s) of {SOURCE} copied, crop files sent")
+
+
+@scw_app.command("crop-measure-run", hidden=True)
+def scw_crop_measure_run(index: Annotated[str, typer.Option(help="Bundle to measure.")]) -> None:
+    """Search the measure's queries crops off and on. Runs on a GPU machine, never the Mac."""
+    from miroir.remote.crop_measure import run_crop_measure  # noqa: PLC0415 (machine only)
+
+    run_crop_measure(get_settings(), index)
+
+
+@scw_app.command("crop-measure")
+def scw_crop_measure(
+    index: Annotated[str, typer.Option(help="Bundle with crops.")] = "pop-all-crops",
+    max_hours: MaxHours = 2.0,
+) -> None:
+    """T1, T2, T2b, T3, T5, PARTS and VET (tune halves) searched on a GPU machine with the
+    site's code, crops off and on; hit rates and times go to eval/results/R3."""
+    from miroir.config import eval_result_path  # noqa: PLC0415
+    from miroir.jobs.crop_embed import crop_offers, in_stock  # noqa: PLC0415
+    from miroir.jobs.crop_measure import (  # noqa: PLC0415
+        fetch_out,
+        measure_launch,
+        prepare,
+        read_out,
+        summarize,
+    )
+    from miroir.jobs.crop_slice import slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    settings = get_settings()
+    s3 = s3_client(settings)
+    ids = (slice_dir(settings) / "ids.txt").read_text(encoding="utf-8").split()
+    spec = prepare(settings, s3, index, ids)
+    typer.echo(f"{len(spec.queries)} queries ({len(spec.skipped)} without vectors left out)")
+    api = InstanceApi(settings)
+    try:
+        offers = [o for o in in_stock(api, crop_offers()) if o.commercial_type != "RENDER-S"]
+    finally:
+        api.close()
+    run_unattended(
+        settings, measure_launch(settings, index), offers=offers, max_hours=max_hours,
+        purpose="crop measure",
+    )  # fmt: skip
+    out = read_out(fetch_out(settings, s3, index).read_bytes())
+    table = summarize(out)
+    result = {
+        "index": index,
+        "gpu": out.gpu,
+        "sets": table,
+        "photo_search_ms": {k: list(v) for k, v in out.photo_search_ms.items()},
+        "memory_gb": dict(out.memory_gb),
+        "skipped": list(spec.skipped),
+        "vet_ranks": {r.query_id: [r.off, r.on] for r in out.ranks if r.set_id == "VET"},
+    }
+    path = eval_result_path("R3", "SL", index)
+    path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    typer.echo(json.dumps(table, indent=1))
+    typer.echo(f"written to {path}")
+
+
 @scw_app.command("build-pop-index", hidden=True)
 def scw_build_pop_index(
     work: Annotated[Path, typer.Option(help="Scratch folder for the gathered vectors.")],
@@ -2220,14 +2501,37 @@ def demo_create(index: DemoIndex = DEMO_INDEX) -> None:
 @demo_app.command("install")
 def demo_install(index: DemoIndex = DEMO_INDEX) -> None:
     """Send this checkout's code to the running machine, rebuild, restart the site."""
-    from miroir.jobs.demo import demo_shell, install, wait_site  # noqa: PLC0415
+    from miroir.jobs.demo import demo_shell, install, served, wait_site  # noqa: PLC0415
 
     demo, machine = _need_demo()
     address = _need_running(machine)
     install(demo_shell(demo.settings, address), demo.settings, machine, index)
+    served(demo, index)
     assert machine.url is not None
     waited = wait_site(machine.url)
     typer.echo(f"site up at {machine.url} ({waited:.0f} s to load)")
+
+
+@demo_app.command("crops")
+def demo_crops(
+    index: DemoIndex = "pop-all-crops",
+    gb: Annotated[int, typer.Option(help="Size of the volume for the whole crop vectors.")] = 200,
+) -> None:
+    """Serve a bundle with crops on the running demo machine: a Block Storage volume for its
+    whole crop vectors (made, attached and mounted the first time, about €19 a month), then
+    `install` with that bundle. Back to the bundle without crops: `demo install`."""
+    from miroir.jobs.demo import add_crops, demo_shell, install, served, wait_site  # noqa: PLC0415
+
+    demo, machine = _need_demo()
+    address = _need_running(machine)
+    shell = demo_shell(demo.settings, address)
+    state = add_crops(demo, machine, shell, index, gb)
+    typer.echo(f"crop volume {state.crops_volume} ({state.extra_gb} GB) mounted")
+    install(shell, demo.settings, machine, index)
+    served(demo, index)
+    assert machine.url is not None
+    waited = wait_site(machine.url)
+    typer.echo(f"site up at {machine.url} with {index} ({waited:.0f} s to load)")
 
 
 @demo_app.command("up")
@@ -2244,7 +2548,10 @@ def demo_up(
         str | None,
         typer.Option("--type", help="Run as this type only, e.g. POP2-HM-12C-96G (a check)."),
     ] = None,
-    index: DemoIndex = DEMO_INDEX,
+    index: Annotated[
+        str | None,
+        typer.Option("--index", help="Bundle in the index bucket (default: the one installed)."),
+    ] = None,
 ) -> None:
     """Power the demo machine on, wait until the site answers, print its address.
 
@@ -2257,6 +2564,7 @@ def demo_up(
         fit_hardware,
         idle_command,
         offer_of,
+        read_state,
         wait_site,
     )
 
@@ -2267,7 +2575,8 @@ def demo_up(
     booted = time.monotonic() - start
     shell = demo_shell(demo.settings, address)
     shell.wait()  # "running" comes a little before SSH answers
-    gpu = fit_hardware(shell, machine, demo.settings, index)
+    bundle = index or read_state(demo.state_path).index or DEMO_INDEX
+    gpu = fit_hardware(shell, machine, demo.settings, bundle)
     shell.run(idle_command(idle_minutes), timeout=60)
     assert machine.url is not None
     wait_site(machine.url)
@@ -2418,11 +2727,18 @@ def demo_watch(
 def demo_fetch(index: DemoIndex = DEMO_INDEX) -> None:
     """Copy the bundle and the weights from their buckets onto the machine's disk."""
     from miroir.jobs.demo import MOUNTS  # noqa: PLC0415
-    from miroir.jobs.objects import Bucket, bucket_name, download_tree, s3_client  # noqa: PLC0415
+    from miroir.jobs.objects import (  # noqa: PLC0415
+        Bucket,
+        bucket_name,
+        download_tree,
+        link_siblings,
+        s3_client,
+    )
 
     settings = get_settings()
     s3 = s3_client(settings)
     root = Path(MOUNTS["web-index"])
+    link_siblings(s3, bucket_name(settings, Bucket.INDEX), root, f"{index}/")
     got = download_tree(s3, bucket_name(settings, Bucket.INDEX), root, prefix=f"{index}/")
     weights = download_tree(s3, bucket_name(settings, Bucket.WEIGHTS), Path(MOUNTS["weights"]))
     typer.echo(f"{index}: {got} file(s) copied; weights: {weights} file(s) copied")

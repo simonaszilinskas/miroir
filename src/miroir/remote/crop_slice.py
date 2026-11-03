@@ -99,7 +99,7 @@ def _save(s3, bucket: str, name: str, **arrays: np.ndarray) -> None:
     logger.info("saved %s (%.1f MB)", name, buffer.tell() / 1e6)
 
 
-def _small(image: PILImage.Image) -> PILImage.Image:
+def as_gallery_crop(image: PILImage.Image) -> PILImage.Image:
     """A crop prepared as the whole photos were (`to_jpeg`: at most 512 px, LANCZOS, JPEG),
     then opened as RGB."""
     image.thumbnail((LONG_SIDE, LONG_SIDE), PILImage.Resampling.LANCZOS)
@@ -119,7 +119,7 @@ def _crops(s3, bucket: str, file_id: str, spec: SliceSpec) -> list[PILImage.Imag
         with PILImage.open(io.BytesIO(data)) as opened:
             image = opened.convert("RGB")
         return [
-            _small(image.crop(box))
+            as_gallery_crop(image.crop(box))
             for grid in spec.grids
             for box in crop_boxes(image.width, image.height, grid)
         ]

@@ -128,6 +128,8 @@ Since 2026-11-03 the site runs on one Scaleway GPU machine, `miroir-demo`, that 
 - **Machine:** an L4-1-24G (one L4 GPU with 24 GB, 8 CPUs, 48 GB of memory) in fr-par-2, with one 100 GB block volume that holds the system, the Docker image, the model weights and the `pop-all` bundle. Nothing is downloaded at start.
 - **Inside:** three containers that Docker starts at every boot. `miroir-site` loads the models and the bundle, then serves the page on the machine's loopback (`src/miroir/remote/site.py`); `caddy` takes HTTPS on ports 80 and 443; `miroir-watch` powers the machine off (below). Loaded, the site uses 30 of the 48 GB of memory (the MegaLoc vectors in int8 are 19 GB) and 19 of the GPU's 23 GB.
 
+**Crops (not deployed yet).** The bundle `pop-all-crops` adds crop vectors, so a photo of a part finds the whole it belongs to (PARTS hit@10 58 → 71 over all of POP; search-levels.md, "Crops of all of POP"). Its whole crop vectors need a 200 GB volume beside the root one (about €19 a month). With the machine on, `uv run miroir demo crops` makes, attaches and mounts it, then serves that bundle; `demo up` keeps it; `uv run miroir demo install --index pop-all` goes back.
+
 ```sh
 uv run miroir demo up        # power on, wait until the page answers, print the address
 uv run miroir demo down      # power off: only the disk and the address are billed

@@ -43,19 +43,24 @@ class Pca:
 
 def fit_pca(run: VectorSet, dims: int, name: str) -> Pca:
     """Principal axes of a run's vectors, from their covariance (eigh, largest first)."""
-    count, dim = run.vectors.shape
+    return fit_pca_rows(run.vectors, dims, name)
+
+
+def fit_pca_rows(vectors: NDArray[np.floating], dims: int, name: str) -> Pca:
+    """`fit_pca` on any matrix of rows (memory-mapped or not), read in blocks."""
+    count, dim = vectors.shape
     if not 0 < dims < dim:
         msg = f"cannot reduce {dim} dims to {dims}"
         raise ValueError(msg)
     total = np.zeros(dim, dtype=np.float64)
     gram = np.zeros((dim, dim), dtype=np.float64)
     for start in range(0, count, BLOCK_ROWS):
-        block = np.asarray(run.vectors[start : start + BLOCK_ROWS], dtype=np.float32)
+        block = np.asarray(vectors[start : start + BLOCK_ROWS], dtype=np.float32)
         total += block.sum(axis=0, dtype=np.float64)
         gram += (block.T @ block).astype(np.float64)
     mean = total / count
     covariance = gram / count - np.outer(mean, mean)
-    values, vectors = np.linalg.eigh(covariance)
+    values, axes = np.linalg.eigh(covariance)
     top = np.argsort(values)[::-1][:dims]
     explained = values[top] / values.sum()
     logger.info(
@@ -66,7 +71,7 @@ def fit_pca(run: VectorSet, dims: int, name: str) -> Pca:
         count,
         100 * explained.sum(),
     )
-    return Pca(mean, vectors[:, top].astype(np.float32), explained, name)
+    return Pca(mean, axes[:, top].astype(np.float32), explained, name)
 
 
 def project(pca: Pca, vectors: NDArray[np.floating]) -> NDArray[np.float32]:

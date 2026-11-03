@@ -54,20 +54,23 @@ def endpoint(settings: Settings) -> str:
     return f"https://s3.{settings.scw_region}.scw.cloud"
 
 
-def s3_client(settings: Settings) -> S3Client:
-    """A boto3 client for the project's region. Keys come from the settings, never the shell."""
+def s3_client(settings: Settings, connections: int = TRANSFERS) -> S3Client:
+    """A boto3 client for the project's region, `connections` requests at once. Keys come
+    from the settings, never the shell."""
     import boto3  # noqa: PLC0415 (the scaleway extra)
     from botocore.config import Config  # noqa: PLC0415
 
     if settings.scw_access_key is None or settings.scw_secret_key is None:
         msg = "Scaleway is not set up: SCW_ACCESS_KEY and SCW_SECRET_KEY go in .env"
         raise RuntimeError(msg)
-    # Scaleway does not take the checksums newer boto3 adds to every upload.
+    # Scaleway does not take the checksums newer boto3 adds to every upload. It answers
+    # "InternalError" in bursts now and then: retried up to 12 times (5 were not enough on
+    # 2026-11-03).
     config = Config(
-        max_pool_connections=TRANSFERS,
+        max_pool_connections=connections,
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
-        retries={"max_attempts": 5, "mode": "standard"},
+        retries={"max_attempts": 12, "mode": "standard"},
     )
     return boto3.client(  # pyright: ignore[reportUnknownMemberType]
         "s3",
@@ -142,6 +145,33 @@ def download_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -
     list(bounded_map(get, todo, workers=TRANSFERS))
     logger.info("%s/%s: %d files down to %s", bucket, prefix, len(todo), root)
     return len(todo)
+
+
+def link_siblings(client: S3Client, bucket: str, root: Path, prefix: str) -> int:
+    """Before `download_tree(client, bucket, root, prefix)`: hard-link into place every file
+    that another folder under `root` already holds under the same name and size (a bundle
+    built as a copy of another, `miroir.index.crop_bundle`), so only what differs comes
+    down and the disk holds the shared files once. Returns how many were linked."""
+    linked = 0
+    folder = prefix.strip("/")
+    siblings = (
+        [p for p in root.iterdir() if p.is_dir() and p.name != folder] if root.exists() else []
+    )
+    for item in listing(client, bucket, prefix):
+        path = root / item.key
+        if _same(path, item.size):
+            continue
+        name = item.key.removeprefix(prefix).lstrip("/")
+        for sibling in siblings:
+            source = sibling / name
+            if _same(source, item.size):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.unlink(missing_ok=True)
+                path.hardlink_to(source)
+                linked += 1
+                break
+    logger.info("%s: %d files linked from %s", prefix, linked, [s.name for s in siblings])
+    return linked
 
 
 def upload_tree(client: S3Client, bucket: str, root: Path, prefix: str = "") -> int:

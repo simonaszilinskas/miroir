@@ -32,6 +32,7 @@ from miroir.outlines import (
 from miroir.remote.detect import detect_size, load_detector
 from miroir.remote.models import DEVICE, MegaLocEncoder, SentenceEncoder
 from miroir.web.archive import CaptionReader
+from miroir.web.crops import has_crops, read_numpy_crops
 from miroir.web.engine import A3_FILE, A7_FILE, Engine, load_engine
 from miroir.web.toolsearch import ToolHits, ToolQuery, ToolSearch
 
@@ -101,10 +102,45 @@ class GpuGallery:
         return self._a3[row].float().cpu().numpy()
 
 
+class GpuCrops:
+    """A bundle's short crop vectors (`miroir.web.crops`) on the GPU in int8, picked in
+    float32 blocks. Copied up from the memory-mapped file block by block, so host memory
+    never holds them whole."""
+
+    #: Crop rows turned to float32 at once on the GPU.
+    BLOCK = 1 << 19
+
+    def __init__(self, directory: Path) -> None:
+        start = time.monotonic()
+        numpy = read_numpy_crops(directory, mmap=True)
+        rows = numpy.coords
+        self.coords = torch.empty(tuple(rows.shape), dtype=torch.int8, device=DEVICE)
+        for at in range(0, rows.shape[0], self.BLOCK):
+            block = np.ascontiguousarray(rows[at : at + self.BLOCK])
+            self.coords[at : at + len(block)] = torch.from_numpy(block).to(DEVICE)
+        self.scale = torch.from_numpy(numpy.scale).to(DEVICE)
+        logger.info(
+            "crops on GPU: %s int8 (%.1f GB) in %.0f s",
+            tuple(rows.shape), rows.nbytes / 1e9, time.monotonic() - start,
+        )  # fmt: skip
+
+    @torch.inference_mode()
+    def top_crops(self, query: Floats, count: int) -> NDArray[np.int64]:
+        q = torch.from_numpy(np.asarray(query, dtype=np.float32)).to(DEVICE)
+        sims = torch.empty(self.coords.shape[0], dtype=torch.float32, device=DEVICE)
+        for at in range(0, self.coords.shape[0], self.BLOCK):
+            block = self.coords[at : at + self.BLOCK].float()
+            sims[at : at + len(block)] = (block @ q) * self.scale[at : at + len(block)]
+        best = torch.topk(sims, min(count, sims.shape[0]), sorted=False).indices
+        return np.sort(best.cpu().numpy().astype(np.int64))
+
+
 def load_search(directory: Path, captions: CaptionReader | None = None) -> Engine:
-    """Everything a search container needs, loaded once at start."""
+    """Everything a search container needs, loaded once at start. Without a GPU, crops stay
+    in host memory and the CPU scores them."""
     gallery = GpuGallery(directory)
-    return load_engine(directory, QueryModels(), gallery, captions)
+    crops = GpuCrops(directory) if has_crops(directory) and DEVICE != "cpu" else None
+    return load_engine(directory, QueryModels(), gallery, captions, crops)
 
 
 class OutlineFinder:

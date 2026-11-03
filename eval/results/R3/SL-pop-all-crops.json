@@ -1,0 +1,165 @@
+{
+  "index": "pop-all-crops",
+  "gpu": "NVIDIA L40S",
+  "sets": {
+    "T1": {
+      "queries": 138.0,
+      "hit@1 off": 45.7,
+      "hit@1 on": 45.7,
+      "hit@1 on_few": 45.7,
+      "hit@10 off": 59.4,
+      "hit@10 on": 59.4,
+      "hit@10 on_few": 59.4,
+      "first lost": 0.0,
+      "first gained": 0.0,
+      "median ms off": 193.2,
+      "median ms on": 1519.7,
+      "median crops ms": 1314.2,
+      "median few crops ms": 418.6
+    },
+    "T2": {
+      "queries": 516.0,
+      "hit@1 off": 53.7,
+      "hit@1 on": 55.8,
+      "hit@1 on_few": 55.4,
+      "hit@10 off": 64.9,
+      "hit@10 on": 64.5,
+      "hit@10 on_few": 64.3,
+      "first lost": 4.0,
+      "first gained": 15.0,
+      "median ms off": 122.2,
+      "median ms on": 1590.0,
+      "median crops ms": 1456.9,
+      "median few crops ms": 398.6
+    },
+    "T2b": {
+      "queries": 291.0,
+      "hit@1 off": 78.0,
+      "hit@1 on": 78.4,
+      "hit@1 on_few": 78.4,
+      "hit@10 off": 88.0,
+      "hit@10 on": 88.3,
+      "hit@10 on_few": 88.3,
+      "first lost": 4.0,
+      "first gained": 5.0,
+      "median ms off": 126.5,
+      "median ms on": 1516.8,
+      "median crops ms": 1375.7,
+      "median few crops ms": 391.8
+    },
+    "T3": {
+      "queries": 99.0,
+      "hit@1 off": 54.5,
+      "hit@1 on": 57.6,
+      "hit@1 on_few": 57.6,
+      "hit@10 off": 82.8,
+      "hit@10 on": 85.9,
+      "hit@10 on_few": 85.9,
+      "first lost": 2.0,
+      "first gained": 5.0,
+      "median ms off": 128.9,
+      "median ms on": 2023.0,
+      "median crops ms": 1877.5,
+      "median few crops ms": 409.3
+    },
+    "T5": {
+      "queries": 491.0,
+      "hit@1 off": 26.9,
+      "hit@1 on": 28.1,
+      "hit@1 on_few": 28.1,
+      "hit@10 off": 41.8,
+      "hit@10 on": 42.8,
+      "hit@10 on_few": 42.8,
+      "first lost": 2.0,
+      "first gained": 8.0,
+      "median ms off": 123.8,
+      "median ms on": 1339.2,
+      "median crops ms": 1207.8,
+      "median few crops ms": 388.3
+    },
+    "PARTS": {
+      "queries": 180.0,
+      "hit@1 off": 42.8,
+      "hit@1 on": 53.9,
+      "hit@1 on_few": 53.9,
+      "hit@10 off": 58.3,
+      "hit@10 on": 71.1,
+      "hit@10 on_few": 71.1,
+      "first lost": 4.0,
+      "first gained": 24.0,
+      "median ms off": 126.8,
+      "median ms on": 2271.6,
+      "median crops ms": 2134.2,
+      "median few crops ms": 403.5
+    },
+    "VET": {
+      "queries": 3.0,
+      "hit@1 off": 66.7,
+      "hit@1 on": 66.7,
+      "hit@1 on_few": 66.7,
+      "hit@10 off": 100.0,
+      "hit@10 on": 100.0,
+      "hit@10 on_few": 100.0,
+      "first lost": 0.0,
+      "first gained": 0.0,
+      "median ms off": 133.9,
+      "median ms on": 2240.3,
+      "median crops ms": 2104.2,
+      "median few crops ms": 396.2
+    }
+  },
+  "photo_search_ms": {
+    "off": [
+      253.3,
+      252.8,
+      253.4,
+      301.2,
+      300.8,
+      300.9,
+      252.7,
+      252.7,
+      256.6
+    ],
+    "on": [
+      1477.8,
+      1477.6,
+      1480.4,
+      1571.0,
+      1556.3,
+      1553.1,
+      1493.0,
+      1489.9,
+      1492.8
+    ]
+  },
+  "memory_gb": {
+    "gpu_max_allocated": 14.23,
+    "host_max_rss": 50.51
+  },
+  "skipped": [
+    "T1-9c97b9c973bf8098",
+    "T5-2ae88fcfbc988801",
+    "T5-6f0d26e9c3e8fceb",
+    "T5-785cebdc09b454f4",
+    "T5-84dd20ffe9143584",
+    "T5-8781487028130172",
+    "T5-a17bb3e4f3609f31",
+    "T5-a446b8db965dd497",
+    "T5-c8bdb574168b6b12",
+    "T5-fabfe4f83b6fd4c7"
+  ],
+  "vet_ranks": {
+    "VET-1": [
+      1,
+      1
+    ],
+    "VET-2": [
+      3,
+      4
+    ],
+    "VET-3": [
+      1,
+      1
+    ]
+  }
+}

@@ -37,6 +37,7 @@ from miroir.web.catalog import (
     display_url,
     read_catalog,
 )
+from miroir.web.crops import CropIndex, CropStore, read_crops
 from miroir.web.levels import (
     LEVEL_LABELS,
     LEVELS_FILE,
@@ -58,7 +59,7 @@ from miroir.web.routing import (
     read_guess,
     read_routing,
 )
-from miroir.web.store import ExactStore, read_exact, shortlist_cosines
+from miroir.web.store import ExactStore, read_exact, shortlist_cosines, top_rows
 from miroir.web.sure import SURE_FILE, SureRule, read_sure
 
 logger = logging.getLogger(__name__)
@@ -220,6 +221,7 @@ class Engine:
         levels: Levels | None = None,
         captions: CaptionReader | None = None,
         archive: ArchiveRule = SITE_ARCHIVE,
+        crops: CropIndex | None = None,
     ) -> None:
         self.catalog = catalog
         self.places = places
@@ -231,6 +233,10 @@ class Engine:
         self.exact = exact
         """MegaLoc whole in host memory (`miroir.web.store`): the GPU then holds it reduced,
         only to shortlist images, and the shortlisted ones are scored exactly from here."""
+        self.crops = crops
+        """Crop vectors (`miroir.web.crops`): a photo of a part finds its whole."""
+        self.use_crops = True
+        """Off: search as a bundle without crops (measurements compare both)."""
         self.sure = sure
         """The older rule a bundle without `levels.json` falls back on (objects)."""
         self.levels = levels
@@ -415,23 +421,51 @@ class Engine:
     ) -> PhotoCosines:
         tick = time.monotonic()
         a7_query, a3_query = self.encoders.image(jpeg)
+        timings["embed_photo"] = _ms(tick)
+        return self.vector_cosines(a7_query, a3_query, chroma_spread(jpeg), mask, timings)
+
+    def vector_cosines(
+        self,
+        a7_query: Floats,
+        a3_query: Floats,
+        chroma: float,
+        mask: NDArray[np.bool_],
+        timings: dict[str, float],
+    ) -> PhotoCosines:
+        """`photo_cosines` from a photo's vectors (as the models give them) and its chroma
+        spread: what a search does once the models have run. Measurements call it with stored
+        vectors."""
         a7_query = unit(a7_query)
         a3_full = unit(a3_query)
-        a3_query = a3_full if self.projection is None else self.projection.apply(a3_query)
-        timings["embed_photo"] = _ms(tick)
+        a3_query = a3_full if self.projection is None else self.projection.apply(a3_full)
         tick = time.monotonic()
         a7 = np.where(mask, self.gallery.a7(a7_query), -np.inf).astype(np.float32)
         a3 = np.where(mask, self.gallery.a3(a3_query), -np.inf).astype(np.float32)
-        if self.exact is not None:
-            a3 = shortlist_cosines(self.exact, a3_full, a7, a3)
         timings["vectors_photo"] = _ms(tick)
+        crop_rows: NDArray[np.int64] | None = None
+        crop_scores: Floats | None = None
+        if self.crops is not None and self.use_crops:
+            tick = time.monotonic()
+            crop_scores = self.crops.row_scores(a3_full, mask)
+            crop_rows = top_rows(crop_scores, self.crops.rule.shortlist)
+            timings["crops"] = _ms(tick)
+        tick = time.monotonic()
+        if self.exact is not None:
+            a3 = shortlist_cosines(self.exact, a3_full, a7, a3, extra=crop_rows)
+        if self.crops is not None and crop_rows is not None and crop_scores is not None:
+            weight = np.float32(self.crops.rule.weight)
+            a3[crop_rows] = np.maximum(a3[crop_rows], weight * crop_scores[crop_rows])
+        timings["exact"] = _ms(tick)
         photo_type, _ = self.guess.photo_type(a7_query)
-        chroma = chroma_spread(jpeg)
         bucket = self.routing.choose(photo_type, chroma)
         return PhotoCosines(a7=a7, a3=a3, bucket=bucket, photo_type=photo_type, chroma=chroma)
 
     def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
         cosines = self._cosines(prepare_photo(data), mask, timings)
+        return self.photo_of(cosines)
+
+    def photo_of(self, cosines: PhotoCosines) -> _Photo:
+        """The photo's two signals, routed (what `search` fuses)."""
         a7, a3, bucket = cosines.a7, cosines.a3, cosines.bucket
         photo_type, chroma = cosines.photo_type, cosines.chroma
         w = bucket.a7_weight
@@ -650,6 +684,7 @@ def load_engine(
     encoders: Encoders,
     gallery: GalleryVectors,
     captions: CaptionReader | None = None,
+    crop_store: CropStore | None = None,
 ) -> Engine:
     """An engine over one index bundle; the caller brings the models and the vectors."""
     start = time.monotonic()
@@ -673,6 +708,7 @@ def load_engine(
         sure=read_sure(directory / SURE_FILE),
         levels=read_levels(directory / LEVELS_FILE),
         captions=captions,
+        crops=read_crops(directory, crop_store),
     )
 
 

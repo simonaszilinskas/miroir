@@ -804,6 +804,83 @@ What the runs show:
 - Not measured: A7 crops, a 50,000-image gallery, all T2 queries, and crops stored shorter than 8,448 numbers.
 - Full run, MegaLoc only, at the L40S speed of 135 images a second (€1.47 an hour): 2×2 is 8.6 million crops, about 18 hours, €26; 3×3 is 19.3 million, about 40 hours, €58; both about €84. Kept whole in int8, 3×3 crops would take 163 GB, which no machine here serves; at 1,024 numbers, 20 GB. The shorter crops need their own test before the full run.
 
+## Short crops (2026-11-03)
+
+Question: crops of all of POP kept whole would weigh 163 GB in int8, more than any machine here serves. Can they be kept shorter and still find wholes from their parts, without letting look-alikes pass the right record? `uv run miroir scw crop-short-slice`, then `uv run miroir eval crop-short`; scores in `eval/results/R3/SL-crop-short.json`.
+
+Method.
+
+- **Crops.** The crop slice's 19,787 stored files, cut into the same 3×3 grid (178,083 crops), embedded with MegaLoc on an L40S in float32 and in bfloat16, every vector kept. The float32 crops match the slice test's to 0.0005 on every one of 7.6 million query–file cells. 27 minutes, €0.66.
+- **Shortened** to the first 1,024, 512, 256 or 128 axes of the `pop-all` PCA (fitted on whole photos), or of a PCA fitted on the crops of the slice's other photos (never an answer's), in int8 with one scale per crop. Two scales: "norm", the cosine of the shortened vectors renormalised, as the site's whole-photo shortlist uses it; "approx", the whole cosine put back from the PCA (coordinates, plus each crop's dot with the PCA mean).
+- **Two-stage.** Short vectors pick, whole ones score. Picking files: each query's top 20 (or 100) files of the slice's 19,787, about the share 2,000 (or 10,000) files are of all of POP. Picking crops: the share of the slice that 5,000, 20,000 or 50,000 crops are of all of POP's 19.4 million.
+- **Ranking and measures** as in the crop slice test: an image's MegaLoc score is max(whole, weight × best crop); the slice (every photo has crops) and the full-index estimate (only the answers have crops). Tune halves only.
+
+Hit@1 / hit@10:
+
+| Variant | PARTS slice | T2 slice | T3 slice | PARTS full est. | T2 full est. | T3 full est. |
+|---|---|---|---|---|---|---|
+| Today, no crops | 64.4 / 77.2 | 68.0 / 75.0 | 70.7 / 91.9 | 42.8 / 58.3 | 54.0 / 65.0 | 56.6 / 82.8 |
+| 3×3 whole length, float32 | 77.8 / 88.9 | 68.0 / 78.0 | 74.7 / 94.9 | 61.1 / 76.7 | 55.0 / 66.0 | 64.6 / 89.9 |
+| 3×3 whole length, bfloat16 | 77.8 / 88.9 | 68.0 / 79.0 | 74.7 / 94.9 | 61.1 / 77.2 | 55.0 / 66.0 | 63.6 / 89.9 |
+| PCA 1,024, approx | 70.6 / 87.2 | 68.0 / 81.0 | 71.7 / 94.9 | 47.2 / 65.6 | 55.0 / 65.0 | 58.6 / 88.9 |
+| PCA 256, approx | 64.4 / 81.1 | 68.0 / 75.0 | 70.7 / 90.9 | 42.8 / 58.3 | 54.0 / 65.0 | 56.6 / 83.8 |
+| PCA 1,024, norm | 76.1 / 88.9 | 63.0 / 73.0 | 74.7 / 90.9 | 66.7 / 83.3 | 59.0 / 72.0 | 67.7 / 89.9 |
+| PCA 512, norm | 75.6 / 87.8 | 63.0 / 72.0 | 72.7 / 89.9 | 67.2 / 84.4 | 61.0 / 71.0 | 67.7 / 88.9 |
+| PCA 256, norm | 73.3 / 86.7 | 59.0 / 73.0 | 68.7 / 85.9 | 63.9 / 82.8 | 59.0 / 71.0 | 64.6 / 85.9 |
+| PCA 256, norm, weight 0.9 | 74.4 / 86.7 | 60.0 / 73.0 | 69.7 / 87.9 | 65.0 / 82.8 | 60.0 / 71.0 | 64.6 / 87.9 |
+| PCA 128, norm | 66.1 / 83.9 | 52.0 / 65.0 | 63.6 / 80.8 | 59.4 / 81.7 | 51.0 / 65.0 | 60.6 / 81.8 |
+| Crop PCA 256, norm | 71.7 / 88.9 | 58.0 / 71.0 | 66.7 / 85.9 | 62.8 / 85.6 | 58.0 / 69.0 | 64.6 / 84.8 |
+| Two-stage, PCA 256 picks top 20 files | 76.7 / 87.2 | 69.0 / 80.0 | 75.8 / 94.9 | 60.6 / 75.0 | 55.0 / 66.0 | 64.6 / 89.9 |
+| Two-stage, PCA 128 picks 5,000 of POP's crops | 76.1 / 86.1 | 69.0 / 79.0 | 74.7 / 96.0 | 60.6 / 73.9 | 55.0 / 66.0 | 63.6 / 88.9 |
+| **Two-stage, PCA 128 picks 20,000 of POP's crops** | **77.8 / 88.3** | **68.0 / 79.0** | **75.8 / 96.0** | **61.1 / 76.1** | **55.0 / 66.0** | **64.6 / 89.9** |
+| Two-stage, PCA 256 picks 20,000 of POP's crops | 77.8 / 88.9 | 68.0 / 78.0 | 75.8 / 94.9 | 61.1 / 76.7 | 55.0 / 66.0 | 64.6 / 89.9 |
+
+int8 storage moves no figure by more than a point against float32. Wrong record first, slice ("lost": right first before, wrong first after): whole length loses 1 T2 and 2 T3 queries; PCA 256 norm loses 10 T2 and 8 T3; PCA 128 norm 16 and 12; two-stage with PCA 128 and 20,000 crops 1 and 1, as whole length does.
+
+Speed of MegaLoc on the L40S, 1,024 crops, cosine with float32 (`trial.json`): float32 241 crops a second; TF32 449 (worst cosine 0.999996); bfloat16 790 (worst 0.961); float16 764 (worst 0.9996, median 0.999994).
+
+What the runs show:
+
+- Short crops alone do not hold. Renormalised, they keep most of PARTS' gain but let look-alike crops pass the right record: T2 hit@1 falls from 68 to 59–64 and T3 hit@10 from 92 to 86–91, at every length, int8 or not. A lower weight (0.8–0.95) does not fix it, and neither does a PCA fitted on crops. The full-index estimate hides this: there only the answers have crops, so inflated crop scores only lift answers.
+- Put back on the scale of a whole cosine ("approx"), short crops lose nearly all of their effect: two parts that match share their detail on the axes the PCA drops, so the short cosine of a matching crop falls short of its whole cosine. Judging a crop against its own photo in the short space did no better (T2 hit@1 59 at 512 axes).
+- Picking with short vectors and scoring with whole ones keeps the whole-length result. 128 axes picking 20,000 crops of all of POP equals the whole-length crops on all three sets, within a point; 5,000 crops keep 85% of PARTS' gain.
+- float16 MegaLoc is three times faster than float32 for the same vectors. bfloat16 is as fast but further off (its slice scores still match).
+
+Decision: two stages. 128 axes in int8 (2.5 GB for all of POP, on the GPU) pick 20,000 crops per search; their whole vectors in int8 (164 GB, on a disk of their own) score them. Every crop of POP embedded once in float16, both forms kept.
+
+## Crops of all of POP (2026-11-03)
+
+Question: with crops of every POP photo, does the site find wholes from their parts, and does anything else get worse? `uv run miroir scw crop-embed` (4 ranges), `uv run miroir scw crop-bundle`, `uv run miroir scw crop-measure`; scores in `eval/results/R3/SL-pop-all-crops.json`.
+
+Method.
+
+- **Crops.** Every stored file of `pop-all` (2,152,947; 7 unreadable) cut into 3×3 windows of 40% (19,376,523 crops), embedded with MegaLoc in float16, each kept twice: 256 PCA axes (the `pop-all` PCA) and the whole vector in int8. One L40S and six L4 side by side, 3 h 50 min in all, €23.39 (an L40S did about 370 crops a second here, an L4 about 190; reading the files from Object Storage, not the GPU, held them back).
+- **Bundle `pop-all-crops`.** `pop-all` plus 128 axes of every crop in int8 (2.5 GB, on the GPU), the whole crop vectors in int8 (164 GB, on a disk of their own) and which crop file each image row has (2,247,002 of 2,257,225 rows; Commons photos have none).
+- **Search** (`miroir.web.crops`): the query's 128-axis vector meets every crop on the GPU; the best 5,000 (or 20,000) crops are read whole from disk and scored exactly; each image takes its file's best crop; the 2,000 best images join the MegaLoc shortlist; an image's MegaLoc score is max(whole, crop). Routing and fusion as before.
+- **Measure.** The tune halves of T1, T2, T2b, T3, T5, PARTS and VET (1,718 queries; 10 Commons photos without stored vectors left out), each searched by the site's own code on an L40S with a 200 GB Block Storage volume (5,000 IOPS) for the whole crop vectors: crops off (the `pop-all` search), crops on with 20,000 rescored crops, and with 5,000. A POP query photo uses its stored vectors and is hidden from its own search with the images its set hides. The machine: €2.35, plus €1.22 for three starts that failed (too many open files; Object Storage answering "internal error").
+
+Hit@1 / hit@10 over all of POP, tune halves:
+
+| Set | Queries | Crops off (`pop-all`) | Crops on, 5,000 rescored | Wrong first, lost / gained (20,000 rescored) |
+|---|---|---|---|---|
+| PARTS | 180 | 42.8 / 58.3 | **53.9 / 71.1** | 4 / 24 |
+| T3 | 99 | 54.5 / 82.8 | 57.6 / 85.9 | 2 / 5 |
+| T2 | 516 | 53.7 / 64.9 | 55.4 / 64.3 | 4 / 15 |
+| T2b | 291 | 78.0 / 88.0 | 78.4 / 88.3 | 4 / 5 |
+| T5 | 491 | 26.9 / 41.8 | 28.1 / 42.8 | 2 / 8 |
+| T1 | 138 | 45.7 / 59.4 | 45.7 / 59.4 | 0 / 0 |
+| VET | 3 | 66.7 / 100 | 66.7 / 100 | 0 / 0 |
+
+20,000 rescored crops give the same figures to a tenth (T2 55.8 / 64.5). VET: the altarpiece stays first for VET-1 and VET-3; for VET-2 it goes from third to fourth.
+
+Time on the L40S, median per query, ranking only (the models' time is the same either way): crops off 120–190 ms; crops on with 5,000 rescored 510–600 ms (the crop step alone 390–420 ms); with 20,000, 1.3–2.3 s (the step alone 1.2–2.1 s, most of it reading the disk). End to end on the three VET photos (models included), with 20,000: 1.5 s against 0.25 s; with 5,000 expect about 0.65 s. Memory on the L40S: 14.2 GB of GPU at most (both models, gallery and crops); the process peaked at 50.5 GB of host memory while loading.
+
+What the runs show:
+
+- Crops find wholes from their parts over the whole index: PARTS hit@10 58.3 → 71.1, hit@1 42.8 → 53.9; 24 queries gain first place, 4 lose it. Less than the slice's estimate (76.7), as expected: every photo of POP now has crops too.
+- Nothing else gets worse beyond a query or two. T3 gains 3 points (its queries are crops of room photos), T2 hit@1 and T5 a point or two; T2's hit@10 loses 0.6 (3 of 516 queries). T1 (archive prints, ranked by EmbeddingGemma 2 alone) does not move: crops are MegaLoc only.
+- Rescoring 5,000 crops does as well as 20,000 and takes a quarter of the time: the bundle keeps 5,000.
+
 ## Summary of all runs
 
 <!-- summary:start (generated by `miroir eval summary`; do not edit) -->
