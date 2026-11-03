@@ -802,7 +802,7 @@ What the runs show:
 - Nothing gets worse: T3 gains 7 points of hit@10 (its queries are crops of room photos), T2 3. Crops put a wrong record first for 5 of the 379 queries, and the right one for 34.
 - VET: the altarpiece is found first through its other photos, crops or not. Through the 1896 photo alone, crops do not help: each stolen group fills about 3% of that photo, a 3×3 window 16%, and crops of other photos rise as much as the target's.
 - Not measured: A7 crops, a 50,000-image gallery, all T2 queries, and crops stored shorter than 8,448 numbers.
-- Full run, MegaLoc only, at the L40S speed of 135 images a second (€1.40 an hour): 2×2 is 8.6 million crops, about 18 hours, €25; 3×3 is 19.3 million, about 40 hours, €55; both about €80. Kept whole in int8, 3×3 crops would take 163 GB, which no machine here serves; at 1,024 numbers, 20 GB. The shorter crops need their own test before the full run.
+- Full run, MegaLoc only, at the L40S speed of 135 images a second (€1.47 an hour): 2×2 is 8.6 million crops, about 18 hours, €26; 3×3 is 19.3 million, about 40 hours, €58; both about €84. Kept whole in int8, 3×3 crops would take 163 GB, which no machine here serves; at 1,024 numbers, 20 GB. The shorter crops need their own test before the full run.
 
 ## Summary of all runs
 
