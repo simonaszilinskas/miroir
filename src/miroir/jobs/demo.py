@@ -305,19 +305,29 @@ class Demo:
 
     # --- power -----------------------------------------------------------------------------
 
-    def power_on(self, machine: DemoMachine, *, allow_cpu: bool = True) -> DemoMachine:
+    def power_on(
+        self, machine: DemoMachine, *, allow_cpu: bool = True, only: str | None = None
+    ) -> DemoMachine:
         """Power on and wait until Scaleway says it runs.
 
         Tries each of `DEMO_OFFERS` in order (without a GPU only with `allow_cpu`), skipping
         those whose longest session would pass the cap, changing the machine's type while it
-        is off; when none starts, tries again every `STOCK_WAIT_S`, `STOCK_TRIES` times."""
+        is off; when none starts, tries again every `STOCK_WAIT_S`, `STOCK_TRIES` times.
+        `only` tries that one type (to check how the site runs on it)."""
         self.settle(machine)
         if machine.state in {"running", "starting"}:
             return wait_state(self.api, machine, "running", BOOT_TIMEOUT_S)
         if machine.state != "stopped":
             msg = f"the demo machine is {machine.state}: wait a minute and try again"
             raise RuntimeError(msg)
-        offers = [o for o in DEMO_OFFERS if allow_cpu or has_gpu(o.commercial_type)]
+        offers = [
+            o
+            for o in DEMO_OFFERS
+            if (allow_cpu or has_gpu(o.commercial_type)) and only in {None, o.commercial_type}
+        ]
+        if not offers:
+            msg = f"{only} is not one of {', '.join(o.commercial_type for o in DEMO_OFFERS)}"
+            raise ValueError(msg)
         affordable = [o for o in offers if self._fits(o)]
         if not affordable:
             self.check_budget(self.settings.demo_max_hours, offers[0])  # raises, with the sums

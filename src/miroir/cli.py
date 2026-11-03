@@ -2160,6 +2160,10 @@ def demo_up(
     gpu_only: Annotated[
         bool, typer.Option("--gpu-only", help="Wait for a GPU rather than run on the CPU.")
     ] = False,
+    only: Annotated[
+        str | None,
+        typer.Option("--type", help="Run as this type only, e.g. POP2-HM-12C-96G (a check)."),
+    ] = None,
     index: DemoIndex = DEMO_INDEX,
 ) -> None:
     """Power the demo machine on, wait until the site answers, print its address.
@@ -2178,7 +2182,7 @@ def demo_up(
 
     demo, machine = _need_demo()
     start = time.monotonic()
-    machine = demo.power_on(machine, allow_cpu=not gpu_only)
+    machine = demo.power_on(machine, allow_cpu=not gpu_only, only=only)
     address = _need_running(machine)
     booted = time.monotonic() - start
     shell = demo_shell(demo.settings, address)

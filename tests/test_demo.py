@@ -279,6 +279,14 @@ def test_the_next_up_goes_back_to_an_l4_when_one_is_free(settings: Settings) -> 
     assert demo.power_on(found).commercial_type == "L4-1-24G"
 
 
+def test_a_type_can_be_asked_for(settings: Settings) -> None:
+    fake, clock = FakeApi(), Clock()
+    demo, machine = made(settings, fake, clock)
+    machine = demo.power_off(machine)
+    fake.free = {"L4-1-24G", "POP2-HM-12C-96G"}
+    assert demo.power_on(machine, only="POP2-HM-12C-96G").commercial_type == "POP2-HM-12C-96G"
+
+
 def test_gpu_only_waits_then_says_none_was_free(settings: Settings) -> None:
     fake, clock = FakeApi(), Clock()
     demo, machine = made(settings, fake, clock)
