@@ -58,8 +58,11 @@ def run_crop_measure(settings: Settings, index: str) -> None:
     def report(**changes: object) -> None:
         nonlocal status
         status = status.now(**changes)
-        s3.put_object(Bucket=bucket, Key=status_key(JOB, 0), Body=status.to_json().encode())
         logger.info("%s", status.line())
+        try:  # a status the bucket refuses once must not stop the run
+            s3.put_object(Bucket=bucket, Key=status_key(JOB, 0), Body=status.to_json().encode())
+        except Exception as err:
+            logger.warning("status not written: %s", err)
 
     try:
         report(note="weights and bundle")

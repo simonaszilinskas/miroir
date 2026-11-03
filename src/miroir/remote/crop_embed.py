@@ -254,8 +254,11 @@ class Reporter:
             return
         self.reported = time.time()
         key = status_key(self.status.job, 0)
-        self.s3.put_object(Bucket=self.bucket, Key=key, Body=self.status.to_json().encode())
         logger.info("%s", self.status.line())
+        try:  # a status the bucket refuses once must not stop the run
+            self.s3.put_object(Bucket=self.bucket, Key=key, Body=self.status.to_json().encode())
+        except Exception as err:
+            logger.warning("status not written: %s", err)
 
 
 def run_crop_embed(
