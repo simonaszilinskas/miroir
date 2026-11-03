@@ -95,7 +95,7 @@ MEMORY_OFFERS = (
 )
 #: Zones `leftovers` looks in: every zone an offer names.
 ZONES = tuple(dict.fromkeys(o.zone for o in (*OFFERS, *CPU_OFFERS, *MEMORY_OFFERS)))
-#: Euros to dollars, rounded up, for the run costs written beside Modal's (`RunInfo.cost_usd`).
+#: Euros to dollars, rounded up, for run costs in dollars (`RunInfo.cost_usd`).
 EUR_TO_USD = 1.20
 
 JSON = dict[str, object]

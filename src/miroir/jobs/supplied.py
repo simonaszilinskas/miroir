@@ -1,4 +1,4 @@
-"""Images the Mac sends to Modal as bytes (`ModalRunner.embed_supplied`).
+"""Images the Mac sends to the GPU machine as bytes (`GpuRunner.embed_supplied`).
 
 Two sources: Commons photos added to a gallery (step F2), fetched politely from Wikimedia,
 and grey copies of POP images and Commons query photos (step F1), made here with Pillow
@@ -88,8 +88,8 @@ def grey_candidates(settings: Settings, gallery: str, set_ids: Sequence[str]) ->
 
 
 class PopImages:
-    """POP images fetched on the Mac (image cache, else the bucket), for records the Modal
-    image volume does not hold: those copied from the whole download (`records/extra`)."""
+    """POP images fetched on the Mac (image cache, else the bucket), for records the images
+    bucket does not hold: those copied from the whole download (`records/extra`)."""
 
     def __init__(self, pop: ImageFetcher, images: Mapping[str, Image]) -> None:
         self._pop = pop

@@ -38,7 +38,7 @@ app.add_typer(rerank_app, name="rerank")
 r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
 app.add_typer(r0_app, name="r0")
 index_app = typer.Typer(
-    no_args_is_help=True, help="Full-sample index for the website: PCA, the guess, upload."
+    no_args_is_help=True, help="Full-sample index for the website: PCA and the guess."
 )
 app.add_typer(index_app, name="index")
 vlm_app = typer.Typer(
@@ -50,7 +50,7 @@ words_app = typer.Typer(
 )
 app.add_typer(words_app, name="words")
 web_app = typer.Typer(
-    no_args_is_help=True, help="The prototype website: build its index, deploy it, run it locally."
+    no_args_is_help=True, help="The prototype website: build its index, upload it, run it locally."
 )
 app.add_typer(web_app, name="web")
 geo_app = typer.Typer(
@@ -68,6 +68,9 @@ demo_app = typer.Typer(
 )
 app.add_typer(demo_app, name="demo")
 
+MaxHours = Annotated[
+    float, typer.Option(help="Longest life of the machine; its worker deletes it then.")
+]
 DEFAULT_GALLERY = "screening-20k-publishable-fetched"
 DEFAULT_SETS = ("T1", "T3", "T5")
 #: The model whose text tower the website searches words with (A7).
@@ -127,21 +130,6 @@ def records_build_full(
     for line in summary_lines(report):
         typer.echo(line)
     typer.echo(f"wrote {settings.full_report_json}")
-
-
-@records_app.command("fetch-probe")
-def records_fetch_probe(
-    max_usd: Annotated[float, typer.Option(help="Stop before Modal time passes this.")] = 0.4,
-) -> None:
-    """Time about 1,000 downloads from the POP bucket on Modal CPUs (spec §12, question 2).
-
-    Needs `records build-full` first. Takes about 5 minutes; costs a few cents.
-    """
-    from miroir.jobs.fetch_probe import run  # noqa: PLC0415
-
-    settings = get_settings()
-    summary = run(settings, max_usd, settings.full_fetch_probe_dir)
-    typer.echo(json.dumps(summary, indent=2))
 
 
 @geo_app.command("places")
@@ -761,129 +749,61 @@ def embed_openrouter(
         typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
-@embed_app.command("modal")
-def embed_modal(
-    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
-    gallery: Annotated[
-        str, typer.Option(help="Gallery list. Only publishable images may go to Modal.")
-    ] = "screening-20k-publishable",
-    queries: Annotated[
-        list[str] | None,
-        typer.Option(
-            help="Embed these test sets' tune query images instead of a gallery; repeat it."
-        ),
-    ] = None,
-    *,
-    probe: Annotated[
-        bool, typer.Option("--probe", help="Embed 100 gallery images; print the projected cost.")
-    ] = False,
-    max_usd: Annotated[
-        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
-    ] = None,
-    workers: Annotated[
-        int, typer.Option(help="Chunks sent at once, each to its own GPU container.")
-    ] = 1,
-    reuse: Annotated[
-        list[str] | None,
-        typer.Option(help="Vector run of the same model and settings to take vectors from."),
-    ] = None,
-    all_images: Annotated[
-        bool,
-        typer.Option(
-            "--all-images",
-            help="Also images of records that are not publishable (full-sample index only).",
-        ),
-    ] = False,
-) -> None:
-    """Embed a gallery, or test sets' query images, with an open model on a Modal GPU.
-
-    Paid: probe first. Commons query photos are fetched on the Mac and sent as bytes.
-    """
-    from miroir.commons.images import open_commons_images  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
-    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
-
-    find_option(option)  # fail before starting Modal
-    if queries and probe:
-        raise typer.BadParameter("--probe works with --gallery only")
-    settings = get_settings()
-    with open_commons_images(settings) as commons, open_modal(settings) as calls:
-        runner = ModalRunner(
-            settings,
-            calls,
-            key_usage_usd=_openrouter_key_usage(),
-            commons=commons,
-            all_images=all_images,
-        )
-        if queries:
-            done = runner.embed_queries(option, queries, max_usd=max_usd)
-            typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
-            return
-        if probe:
-            result, size = runner.probe(option, gallery)
-            typer.echo(
-                f"{option} probe: {result.images} images cost ${result.cost_usd:.4f} "
-                f"({result.fixed_s:.0f} s start-up, {result.per_image_s * 1000:.0f} ms per image). "
-                f"Projected for {gallery} ({size:,} images): ${result.projected_usd(size):.2f}"
-            )
-            return
-        written = runner.embed_gallery(
-            option, gallery, max_usd=max_usd, workers=workers, reuse=reuse or ()
-        )
-    for done in written:
-        typer.echo(
-            f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors, "
-            f"${done.info.cost_usd:.4f}"
-        )
-
-
-@embed_app.command("modal-f2")
-def embed_modal_f2(
-    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+@embed_app.command("f2")
+def embed_f2(
+    option: Annotated[str, typer.Option(help="Model option id, e.g. A7-embeddinggemma-2-512.")],
     gallery: Annotated[str, typer.Option(help="Gallery whose F2 photos to embed.")],
     max_usd: Annotated[
         float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
     ] = None,
+    max_hours: MaxHours = 2.0,
 ) -> None:
     """F2: embed the Commons photos added to a gallery's buildings (sent from the Mac)."""
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.supplied import open_gallery_photos  # noqa: PLC0415
     from miroir.records.store import read_commons  # noqa: PLC0415
 
     settings = get_settings()
     ids = [p.image_id for p in read_commons(settings.commons_gallery_parquet(gallery))]
-    with open_gallery_photos(settings, gallery) as photos, open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    purpose = f"embed {option} F2-{gallery}"
+    with (
+        open_gallery_photos(settings, gallery) as photos,
+        open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls,
+    ):
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, f"F2-{gallery}", ids, photos, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
-@embed_app.command("modal-extra")
-def embed_modal_extra(
-    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+@embed_app.command("extra")
+def embed_extra(
+    option: Annotated[str, typer.Option(help="Model option id, e.g. A7-embeddinggemma-2-512.")],
     max_usd: Annotated[
         float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
     ] = None,
+    max_hours: MaxHours = 2.0,
 ) -> None:
     """Embed the images of the records in extra/ (`miroir records add`), sent from the Mac."""
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.supplied import open_extra_images  # noqa: PLC0415
     from miroir.records.extra import read_extra_images  # noqa: PLC0415
 
     settings = get_settings()
     ids = [i.image_id for i in read_extra_images(settings)]
-    with open_extra_images(settings) as images, open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    with (
+        open_extra_images(settings) as images,
+        open_scaleway(settings, max_hours=max_hours, purpose=f"embed {option} X") as calls,
+    ):
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, "X", ids, images, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
-@embed_app.command("modal-grey")
-def embed_modal_grey(
-    option: Annotated[str, typer.Option(help="Modal option id, e.g. A3-megaloc-322.")],
+@embed_app.command("grey")
+def embed_grey(
+    option: Annotated[str, typer.Option(help="Model option id, e.g. A3-megaloc-322.")],
     gallery: Annotated[str, typer.Option(help="Gallery whose colour images to grey.")],
     queries: Annotated[
         list[str] | None, typer.Option(help="Also grey these sets' tune query images.")
@@ -891,23 +811,25 @@ def embed_modal_grey(
     max_usd: Annotated[
         float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
     ] = None,
+    max_hours: MaxHours = 2.0,
 ) -> None:
     """F1: embed grey copies of every image with colour in a gallery and the query sets."""
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.supplied import grey_candidates, open_grey_copies  # noqa: PLC0415
 
     settings = get_settings()
+    purpose = f"embed {option} grey-{gallery}"
     with open_grey_copies(settings) as grey:
         ids = grey.not_grey(grey_candidates(settings, gallery, queries or ()))
-        with open_modal(settings) as calls:
-            runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        with open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls:
+            runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
             done = runner.embed_supplied(option, f"grey-{gallery}", ids, grey, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 
-@embed_app.command("modal-images")
-def embed_modal_images(
+@embed_app.command("images")
+def embed_images(
     gallery: Annotated[str, typer.Option(help="Gallery list.")] = "screening-20k-publishable",
     *,
     all_images: Annotated[
@@ -917,14 +839,15 @@ def embed_modal_images(
             help="Also images of records that are not publishable (full-sample index only).",
         ),
     ] = False,
+    max_hours: MaxHours = 2.0,
 ) -> None:
-    """Fetch a gallery's images once into the Modal image volume, so model runs read them there."""
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    """Fetch a gallery's images once into the images bucket, so model runs read them there."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
 
     settings = get_settings()
-    with open_modal(settings) as calls:
-        runner = ModalRunner(
+    with open_scaleway(settings, max_hours=max_hours, purpose=f"images {gallery}") as calls:
+        runner = GpuRunner(
             settings, calls, key_usage_usd=_openrouter_key_usage(), all_images=all_images
         )
         counts = runner.fill_images(gallery)
@@ -936,14 +859,15 @@ def r0_run(
     model: Annotated[
         str, typer.Option(help="dinov2-giant-224 (expect 48.9 mAP) or dinov3-vit7b16-224 (56.5).")
     ] = "dinov2-giant-224",
+    max_hours: MaxHours = 1.0,
 ) -> None:
-    """Download AmsterTime into a Modal volume and embed it there; vectors come back here."""
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    """Download AmsterTime on a GPU machine and embed it there; vectors come back here."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
 
     settings = get_settings()
-    with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    with open_scaleway(settings, max_hours=max_hours, purpose=f"r0 {model}") as calls:
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.r0(model)
     run = settings.vectors_path(f"R0-{model}-amstertime").name
     typer.echo(f"{run}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
@@ -1234,16 +1158,17 @@ def words_sets() -> None:
 def words_embed(
     *,
     max_usd: Annotated[float, typer.Option(help="Stop before a call once spent.")] = 0.5,
+    max_hours: MaxHours = 1.0,
 ) -> None:
-    """Embed T7/T7en tune words and the refine communes with EmbeddingGemma 2 on Modal. Paid."""
+    """Embed T7/T7en tune words and the refine communes with EmbeddingGemma 2 on a GPU. Paid."""
     from miroir.eval.wordsearch import TEXT_LABEL, text_inputs  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
 
     settings = get_settings()
     ids, texts = text_inputs(settings)
-    with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    with open_scaleway(settings, max_hours=max_hours, purpose="words embed") as calls:
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_texts(TEXT_OPTION, TEXT_LABEL, ids, texts, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
@@ -1303,8 +1228,8 @@ def _web_index_ids() -> set[str]:
     return set(path.read_text(encoding="utf-8").split())
 
 
-@rerank_app.command("modal")
-def rerank_modal(
+@rerank_app.command("run")
+def rerank_run(
     *,
     vectors: Annotated[str, typer.Option(help="Vector run whose search gives the shortlists.")],
     test_set: Annotated[str, typer.Option("--set", help="Test set id; tune half only.")],
@@ -1312,18 +1237,20 @@ def rerank_modal(
     gallery: Annotated[str, typer.Option(help="Gallery list.")] = (
         "screening-20k-publishable-fetched"
     ),
+    max_hours: MaxHours = 2.0,
 ) -> None:
-    """Match each tune query against its top 50 entities' best images, on a Modal GPU. Paid."""
+    """Match each tune query against its top 50 entities' best images, on a GPU. Paid."""
     from miroir.eval.rerank import tasks  # noqa: PLC0415
     from miroir.eval.run import matches_name, rerank_shortlists  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
 
     settings = get_settings()
     lists, _, _ = rerank_shortlists(settings, vector_run=vectors, set_id=test_set, gallery=gallery)
     name = matches_name(vectors, test_set)
-    with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+    purpose = f"rerank {name}"
+    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.match(name, tasks(lists), max_usd=max_usd)
     typer.echo(f"{name}: {done} queries matched; next: uv run miroir eval rerank ...")
 
@@ -1397,17 +1324,6 @@ def index_guess(
         typer.echo(f"  {set_id} tune: {100 * share:.1f}% of {count} queries guessed right")
 
 
-@index_app.command("upload")
-def index_upload(
-    runs: Annotated[list[str], typer.Option("--run", help="Vector run to copy; repeat.")],
-) -> None:
-    """Copy vector runs and the full-sample .npz files into the `miroir-index` Modal volume."""
-    from miroir.index.upload import upload  # noqa: PLC0415 (imports the modal client)
-
-    for line in upload(get_settings(), runs):
-        typer.echo(line)
-
-
 def _openrouter_key_usage() -> float | None:
     """What OpenRouter says its key has spent, for the project-wide cap; None without a key."""
     settings = get_settings()
@@ -1443,18 +1359,20 @@ def web_build_index(index: WebIndex = WEB_INDEX) -> None:
 
 @web_app.command("upload")
 def web_upload(index: WebIndex = WEB_INDEX) -> None:
-    """Copy the bundle to the Modal volume the website reads."""
+    """Copy the bundle to the index bucket, where the demo machine and `web dev --scw` read it."""
     from miroir.web.ops import upload_index  # noqa: PLC0415
 
     size = upload_index(get_settings(), index)
-    typer.echo(f"uploaded {size / 1e6:.0f} MB")
+    typer.echo(f"{index}: {size / 1e6:.0f} MB sent to the index bucket")
 
 
 @web_app.command("places")
 def web_places(
     index: WebIndex = WEB_INDEX,
     *,
-    upload: Annotated[bool, typer.Option(help="Also copy places.npz alone to the volume.")] = False,
+    upload: Annotated[
+        bool, typer.Option(help="Also copy places.npz alone to the index bucket.")
+    ] = False,
 ) -> None:
     """Add entity positions (`miroir geo places`) to a built bundle, without rebuilding it."""
     from miroir.web.bundle import add_places  # noqa: PLC0415
@@ -1467,7 +1385,7 @@ def web_places(
         from miroir.web.ops import upload_file  # noqa: PLC0415
 
         upload_file(settings, index, PLACES_FILE)
-        typer.echo(f"{PLACES_FILE} uploaded; `miroir web deploy` makes the site read it")
+        typer.echo(f"{PLACES_FILE} uploaded; `miroir demo install` makes the site read it")
 
 
 @web_app.command("publishable")
@@ -1475,7 +1393,7 @@ def web_publishable(
     index: WebIndex = WEB_INDEX,
     *,
     upload: Annotated[
-        bool, typer.Option(help="Also copy publishable.txt.gz alone to the volume.")
+        bool, typer.Option(help="Also copy publishable.txt.gz alone to the index bucket.")
     ] = False,
 ) -> None:
     """Mark which images of a built bundle may go to an outside model (the conversation page)."""
@@ -1489,7 +1407,7 @@ def web_publishable(
         from miroir.web.ops import upload_file  # noqa: PLC0415
 
         upload_file(settings, index, PUBLISHABLE_FILE)
-        typer.echo(f"{PUBLISHABLE_FILE} uploaded; `miroir web deploy` makes the site read it")
+        typer.echo(f"{PUBLISHABLE_FILE} uploaded; `miroir demo install` makes the site read it")
 
 
 @web_app.command("secret")
@@ -1497,19 +1415,15 @@ def web_secret(
     *,
     rotate: Annotated[bool, typer.Option(help="Replace the password.")] = False,
 ) -> None:
-    """Make the shared password: kept in .env (`ENV_PASSWORD_KEY`) and the Modal secret."""
+    """Make the shared password, kept in .env (`ENV_PASSWORD_KEY`) only."""
     from miroir.web.ops import set_secret  # noqa: PLC0415
 
-    changed = set_secret(rotate=rotate)
-    typer.echo(f"new password in .env ({ENV_PASSWORD_KEY})" if changed else "password unchanged")
-
-
-@web_app.command("deploy")
-def web_deploy() -> None:
-    """Deploy the `miroir-web` Modal app (GPU search sleeps when idle)."""
-    from miroir.web.ops import deploy  # noqa: PLC0415
-
-    typer.echo(f"deployed: {deploy()}")
+    if set_secret(rotate=rotate):
+        typer.echo(
+            f"new password in .env ({ENV_PASSWORD_KEY}); `miroir demo install` sends it to the site"
+        )
+    else:
+        typer.echo("password unchanged")
 
 
 @web_app.command("dev")
@@ -1517,9 +1431,6 @@ def web_dev(
     index: WebIndex = WEB_INDEX,
     port: Annotated[int, typer.Option(help="Local port.")] = 8000,
     *,
-    real: Annotated[
-        bool, typer.Option(help="Search with the deployed models on Modal (costs GPU time).")
-    ] = False,
     fake_llm: Annotated[
         bool,
         typer.Option(help="The conversation page uses a scripted stand-in, even with a key."),
@@ -1528,7 +1439,7 @@ def web_dev(
         bool,
         typer.Option(
             help="Search on a Scaleway GPU started for this session, deleted when it stops "
-            "(index from `miroir scw upload-index`)."
+            "(index from `miroir web upload`)."
         ),
     ] = False,
     max_hours: Annotated[float, typer.Option(help="With --scw: the machine's longest life.")] = 1.0,
@@ -1536,12 +1447,12 @@ def web_dev(
     """Run the website on this Mac with fake models (no model is loaded here).
 
     The conversation page (/chat) calls Mistral Large 4 on Mistral's API when MISTRAL_API_KEY
-    is set, else through OpenRouter, within the same spending caps as the deployed site."""
+    is set, else through OpenRouter, within the same spending caps as the demo site."""
     from miroir.web.ops import serve_locally  # noqa: PLC0415
 
     settings = get_settings()
     if not scw:
-        serve_locally(settings, name=index, port=port, real=real, fake_llm=fake_llm)
+        serve_locally(settings, name=index, port=port, fake_llm=fake_llm)
         return
     from miroir.jobs.scw_run import ScalewayBackend, open_scaleway  # noqa: PLC0415
 
@@ -1550,53 +1461,17 @@ def web_dev(
         serve_locally(settings, name=index, port=port, fake_llm=fake_llm, search=search)
 
 
-@web_app.command("chat-secret")
-def web_chat_secret() -> None:
-    """Copy MISTRAL_API_KEY and OPENROUTER_API_KEY from .env into the conversation's secret."""
-    from miroir.web.modal_app import CHAT_SECRET_NAME  # noqa: PLC0415
-    from miroir.web.ops import set_chat_secret  # noqa: PLC0415
-
-    set_chat_secret(get_settings())
-    typer.echo(f"key written to the {CHAT_SECRET_NAME} Modal secret (not shown)")
-
-
-@web_app.command("chat-logs")
-def web_chat_logs() -> None:
-    """Copy the deployed conversation page's logs (JSON lines, no images) to the Mac."""
-    from miroir.web.ops import pull_chat_logs  # noqa: PLC0415
-
-    settings = get_settings()
-    written = pull_chat_logs(settings)
-    typer.echo(f"{len(written)} log file(s) new or grown in {settings.chat_logs_dir / 'hosted'}")
-
-
 # --- Scaleway --------------------------------------------------------------------------------
-
-MaxHours = Annotated[
-    float, typer.Option(help="Longest life of the machine; its worker deletes it then.")
-]
 
 
 @scw_app.command("buckets")
 def scw_buckets() -> None:
-    """Create the Object Storage buckets that stand in for the Modal volumes."""
+    """Create the Object Storage buckets the GPU machines and the website read."""
     from miroir.jobs.objects import ensure_buckets, s3_client  # noqa: PLC0415
 
     settings = get_settings()
     for name, outcome in ensure_buckets(settings, s3_client(settings)).items():
         typer.echo(f"{name}: {outcome}")
-
-
-@scw_app.command("upload-index")
-def scw_upload_index(index: WebIndex = WEB_INDEX) -> None:
-    """Copy a web index bundle to the index bucket, for searches on a Scaleway machine."""
-    from miroir.jobs.objects import Bucket, bucket_name, s3_client, upload_tree  # noqa: PLC0415
-
-    settings = get_settings()
-    folder = settings.web_index_dir(index)
-    bucket = bucket_name(settings, Bucket.INDEX)
-    sent = upload_tree(s3_client(settings), bucket, folder.parent, prefix=index)
-    typer.echo(f"{index}: {sent} file(s) sent to {bucket}")
 
 
 def _leftovers_report() -> tuple[object, list[object]]:
@@ -1909,7 +1784,7 @@ def scw_pop_coverage() -> None:
 
 @embed_app.command("scw")
 def embed_scw(
-    option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],
+    option: Annotated[str, typer.Option(help="Model option id, e.g. A7-embeddinggemma-2-512.")],
     gallery: Annotated[str, typer.Option(help="Gallery list.")] = "screening-20k-publishable",
     queries: Annotated[
         list[str] | None,
@@ -1929,14 +1804,21 @@ def embed_scw(
             help="Also images of records that are not publishable (full-sample index only).",
         ),
     ] = False,
+    reuse: Annotated[
+        list[str] | None,
+        typer.Option(help="Vector run of the same model and settings to take vectors from."),
+    ] = None,
     max_hours: MaxHours = 2.0,
 ) -> None:
-    """`embed modal` on a Scaleway GPU machine: start it, run, delete it. Same vector runs."""
+    """Embed a gallery, or test sets' query images, with an open model on a Scaleway GPU.
+
+    Starts a machine, runs, deletes it. Paid: probe first. Commons query photos are fetched on
+    the Mac and sent as bytes.
+    """
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
-    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.remote_spec import option as find_option  # noqa: PLC0415
     from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Service  # noqa: PLC0415
 
     find_option(option)  # fail before starting a machine
     if queries and probe:
@@ -1947,14 +1829,12 @@ def embed_scw(
         open_commons_images(settings) as commons,
         open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls,
     ):
-        runner = ModalRunner(
+        runner = GpuRunner(
             settings,
             calls,
             key_usage_usd=_openrouter_key_usage(),
             commons=commons,
             all_images=all_images,
-            machine=calls.machine,
-            service=Service.SCALEWAY,
         )
         if queries:
             done = runner.embed_queries(option, queries, max_usd=max_usd)
@@ -1968,7 +1848,7 @@ def embed_scw(
                 f"${result.projected_usd(size):.2f}"
             )
             return
-        written = runner.embed_gallery(option, gallery, max_usd=max_usd)
+        written = runner.embed_gallery(option, gallery, max_usd=max_usd, reuse=reuse or ())
     for done in written:
         typer.echo(f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors")
 
@@ -1984,16 +1864,17 @@ app.add_typer(detect_app, name="detect")
 
 
 @detect_app.command("locate")
-def detect_locate() -> None:
-    """Find where each T3 tune artwork hangs in its room photos, on a Modal GPU. Paid."""
+def detect_locate(max_hours: MaxHours = 1.0) -> None:
+    """Find where each T3 tune artwork hangs in its room photos, on a GPU. Paid."""
     from miroir.eval.detect import run_locate  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
     paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_modal(settings) as calls:
+    purpose = "detect locate"
+    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
         located = run_locate(settings, calls, paid)
     found = sum(x.box is not None for x in located)
     typer.echo(f"{found} of {len(located)} (room photo, artwork) pairs located")
@@ -2002,16 +1883,18 @@ def detect_locate() -> None:
 @detect_app.command("rooms")
 def detect_rooms(
     option: Annotated[str, typer.Option(help="Detector id (C1-owlv2-base...) or C0-located.")],
+    max_hours: MaxHours = 1.0,
 ) -> None:
     """Run one detector on the room photos and search every box like the site. Paid."""
     from miroir.eval.detect import run_detector  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
     paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_modal(settings) as calls:
+    purpose = f"detect {option}"
+    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
         found = run_detector(settings, calls, paid, option)
     boxes = sum(len(r.boxes) for r in found.rooms)
     typer.echo(f"{option}: {boxes} raw boxes on {len(found.rooms)} photos, ${found.cost_usd:.4f}")
@@ -2043,12 +1926,13 @@ def eval_detect_order() -> None:
 @rerank_app.command("site")
 def rerank_site(
     max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],
+    max_hours: MaxHours = 2.0,
 ) -> None:
-    """E1 in the website: match object searches' top 30 on Modal with the site's code. Paid."""
+    """E1 in the website: match object searches' top 30 on a GPU with the site's code. Paid."""
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
     from miroir.eval.site_rerank import match_sets, search_sets  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
     from miroir.web.bundle import SiteBundle  # noqa: PLC0415
 
@@ -2056,7 +1940,10 @@ def rerank_site(
     bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
     searched = search_sets(settings, bundle)
     paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_commons_images(settings) as photos, open_modal(settings) as calls:
+    with (
+        open_commons_images(settings) as photos,
+        open_scaleway(settings, max_hours=max_hours, purpose="rerank site", match=True) as calls,
+    ):
         cost = match_sets(settings, searched, calls, paid, photos, max_usd=max_usd)
     typer.echo(f"site re-rank matched, ${cost:.4f}; next: uv run miroir eval rerank-site")
 
@@ -2076,17 +1963,22 @@ def eval_rerank_site(round_id: Annotated[str, typer.Option("--round")] = "R3") -
 @detect_app.command("single")
 def detect_single(
     option: Annotated[str, typer.Option(help="Detector id, e.g. C2-gdino-tiny.")],
+    max_hours: MaxHours = 1.0,
 ) -> None:
     """Count the outlines the site would draw on photos of one object (T5, T2b). Paid."""
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
     from miroir.eval.detect import run_single_objects  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
     paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_commons_images(settings) as commons, open_modal(settings) as calls:
+    purpose = f"detect single {option}"
+    with (
+        open_commons_images(settings) as commons,
+        open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls,
+    ):
         counts = run_single_objects(settings, calls, paid, option, commons)
     for set_id, found in counts.items():
         none = sum(n == 0 for n in found)
@@ -2147,17 +2039,18 @@ def archive_remote(
     model: Annotated[
         list[str], typer.Option(help="Caption reader(s), from miroir.caption.CAPTION_MODELS.")
     ],
+    max_hours: MaxHours = 1.0,
 ) -> None:
-    """On Modal: embed the T1 tune photos whole and cut from their mounts, read their
+    """On a GPU: embed the T1 tune photos whole and cut from their mounts, read their
     captions. Paid; each part is kept and not asked again."""
     from miroir.eval.archive import run_remote  # noqa: PLC0415
-    from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
     paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_modal(settings) as calls:
+    with open_scaleway(settings, max_hours=max_hours, purpose="archive remote") as calls:
         cost = run_remote(settings, calls, paid, model)
     typer.echo(f"done, ${cost:.4f}")
 

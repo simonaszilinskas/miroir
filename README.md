@@ -39,7 +39,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 ## Ce que fait le prototype
 
-Un premier prototype est en ligne : **<https://simonaszilinskas--miroir.us-east.modal.run>**. Mot de passe : **zhax-386e-rpjd** Une recherche prend moins d'une seconde ; la première après 10 minutes sans usage prend 1 à 2 minutes, le temps que le serveur et sa carte graphique (GPU) démarrent.
+Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : adresse et accès dans [docs/prototype.md](docs/prototype.md), section Hosting. Une recherche prend moins d'une seconde.
 
 La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
 
@@ -207,7 +207,7 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 ## Lancer, tester, déployer
 
-Il faut Python 3.12 et [uv](https://docs.astral.sh/uv/). Aucun modèle ne tourne sur la machine de développement : ils tournent chez Modal ou OpenRouter. Depuis novembre 2026, les tâches de calcul tournent sur des machines GPU du projet Scaleway du ministère, effacées à la fin de chaque tâche (voir [docs/developpement.md](docs/developpement.md#scaleway)).
+Il faut Python 3.12 et [uv](https://docs.astral.sh/uv/). Aucun modèle ne tourne sur la machine de développement : ils tournent chez OpenRouter ou sur des machines GPU du projet Scaleway du ministère, effacées à la fin de chaque tâche (voir [docs/developpement.md](docs/developpement.md#scaleway)). Avant le 3 novembre 2026, ils tournaient chez Modal.
 
 ```sh
 uv sync                    # installe le projet et les outils de développement
@@ -216,19 +216,11 @@ make check                 # format, lint, types, tests : doit passer avant chaq
 uv run miroir web dev      # le site sur http://localhost:8000, avec de faux modèles
 ```
 
-Pour mettre en ligne (compte Modal requis) :
-
-```sh
-uv run miroir web build-index   # prépare l'index sur la machine, environ 3 minutes
-uv run miroir web deploy        # déploie d'abord le code
-uv run miroir web upload        # puis envoie l'index
-```
-
-Le détail, avec le mot de passe partagé et la recherche agentique : [docs/prototype.md](docs/prototype.md#run-and-deploy).
+Pour mettre en ligne : voir [docs/prototype.md](docs/prototype.md), section Hosting.
 
 ## Documentation technique
 
-- [Prototype](docs/prototype.md) : ce qui est en ligne, ses scores, comment le déployer
+- [Prototype](docs/prototype.md) : ce qui est en ligne, ses scores, comment le mettre en ligne
 - [Développement](docs/developpement.md) : installer, réglages, la commande `miroir`
 - [Règles de contribution](CLAUDE.md) et [règles de code](CODING_STANDARDS.md)
 - [Spécification fonctionnelle](docs/functional-spec.md) : pour qui, quoi, comment on juge

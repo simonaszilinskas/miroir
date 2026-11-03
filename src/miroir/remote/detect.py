@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Object detectors for outlines (step C, F4). Runs only inside Modal containers.
+"""Object detectors for outlines (step C, F4). Runs only on a Scaleway GPU machine.
 
 Each detector takes a PIL photo and returns raw boxes (`miroir.outlines.Box`, in shares of
 the photo) for step C's prompts: OWLv2 and Grounding DINO through transformers' zero-shot

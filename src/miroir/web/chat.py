@@ -9,7 +9,7 @@ shows its picks as the site's result cards. The visitor can keep writing, and th
 searches again.
 
 A turn runs as a task on the server and writes events (`Conversation.events`); the page
-reads them as a stream, which ends after `STREAM_S` (Modal cuts a request at 150 s) and is
+reads them as a stream, which ends after `STREAM_S` (so no request stays open for long) and is
 asked for again from where it stopped.
 
 Rules: only the visitor's own photo and thumbnails of publishable records go to the model

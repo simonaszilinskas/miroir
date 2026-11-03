@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Load a model and turn PIL images into vectors. Runs only inside Modal containers.
+"""Load a model and turn PIL images into vectors. Runs only on a Scaleway GPU machine.
 
 Type-checked in basic mode: torch and the model libraries are not installed on the Mac.
 """
@@ -20,15 +20,15 @@ import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGES_MOUNT
+from miroir.config import IMAGES_MOUNT
 from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
-from miroir.jobs.modal_spec import (
+from miroir.jobs.remote_spec import (
     MAX_ASPECT,
     TEXT_PROMPT,
     ChunkResult,
     DType,
     Family,
-    ModalOption,
+    ModelOption,
     Pooling,
     Resize,
     SuppliedImage,
@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 DEVICE = "cuda"
 GEM_P = 3.0
-#: Parallel image reads per container (volume, else POP), running ahead of the GPU.
+#: Parallel image reads on the machine (image folder, else POP), running ahead of the GPU.
 FETCH_CONCURRENCY = 32
-#: Parallel file reads from a Modal volume.
+#: Parallel file reads from the machine's image folder.
 VOLUME_READERS = 32
 
 
@@ -54,7 +54,7 @@ class Encoder(Protocol):
 _LOADED: dict[str, Encoder] = {}
 
 
-def encoder(option: ModalOption) -> tuple[Encoder, float]:
+def encoder(option: ModelOption) -> tuple[Encoder, float]:
     """The option's encoder, loaded once per container. Returns it and the seconds loading took."""
     if option.id in _LOADED:
         return _LOADED[option.id], 0.0
@@ -85,7 +85,7 @@ class DinoEncoder:
     DINOv2 interpolates its position embeddings to any grid; DINOv3 uses RoPE.
     """
 
-    def __init__(self, option: ModalOption) -> None:
+    def __init__(self, option: ModelOption) -> None:
         from transformers import AutoModel  # noqa: PLC0415
 
         self.option = option
@@ -135,7 +135,7 @@ class DinoEncoder:
 class MegaLocEncoder:
     """MegaLoc (DINOv2-B + SALAD) through torch.hub: 322 x 322 input, 8,448-d output."""
 
-    def __init__(self, option: ModalOption) -> None:
+    def __init__(self, option: ModelOption) -> None:
         self.option = option
         model = torch.hub.load(option.model, "get_trained_model", trust_repo=True)
         self.model = model.to(DEVICE).eval()
@@ -149,7 +149,7 @@ class MegaLocEncoder:
 class Siglip2Encoder:
     """SigLIP 2 image tower and its attention-pooling head, through transformers."""
 
-    def __init__(self, option: ModalOption) -> None:
+    def __init__(self, option: ModelOption) -> None:
         from transformers import AutoModel, AutoProcessor  # noqa: PLC0415
 
         self.model = AutoModel.from_pretrained(option.model, dtype=torch.float32).to(DEVICE).eval()
@@ -167,7 +167,7 @@ class Siglip2Encoder:
 class PeCoreEncoder:
     """Perception Encoder (PE-Core) image tower through open_clip, with its own preprocessing."""
 
-    def __init__(self, option: ModalOption) -> None:
+    def __init__(self, option: ModelOption) -> None:
         import open_clip  # noqa: PLC0415
 
         model, preprocess = open_clip.create_model_from_pretrained(f"hf-hub:{option.model}")
@@ -189,7 +189,7 @@ class SentenceEncoder:
     instruction (Qwen3-VL-Embedding). Qwen's pixel budget is capped at resolution².
     """
 
-    def __init__(self, option: ModalOption) -> None:
+    def __init__(self, option: ModelOption) -> None:
         from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
         if option.dtype is not DType.BFLOAT16:
@@ -226,14 +226,14 @@ class SentenceEncoder:
 
 
 def embed_images(
-    option: ModalOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
+    option: ModelOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
 ) -> ChunkResult:
     """Fetch POP images by URL (512 px, IIIF fallback) and embed them, then the supplied ones."""
     model, load_s = encoder(option)
     start = time.monotonic()
     limits = httpx.Limits(max_connections=FETCH_CONCURRENCY)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
-        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+        cache = ImageCache(Path(IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=FETCH_CONCURRENCY)
         skips: dict[str, int] = {}
         given = (Fetched(s.image_id, s.jpeg, None) for s in supplied)
@@ -242,7 +242,7 @@ def embed_images(
     return ChunkResult(ids, vectors, skips, load_s, time.monotonic() - start)
 
 
-def embed_texts(option: ModalOption, ids: Sequence[str], texts: Sequence[str]) -> ChunkResult:
+def embed_texts(option: ModelOption, ids: Sequence[str], texts: Sequence[str]) -> ChunkResult:
     """Search words as the website embeds them (EmbeddingGemma 2, `TEXT_PROMPT`)."""
     model, load_s = encoder(option)
     if not isinstance(model, SentenceEncoder):
@@ -261,7 +261,7 @@ def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, in
     counts: dict[str, int] = {}
     limits = httpx.Limits(max_connections=concurrency)
     with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as http:
-        cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+        cache = ImageCache(Path(IMAGES_MOUNT), None)
         fetcher = ImageFetcher(http, cache, concurrency=concurrency)
         for item in fetcher.fetch_all(images):
             key = "ok" if item.skip is None else f"fetch_{item.skip.value}"
@@ -269,8 +269,8 @@ def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, in
     return counts
 
 
-def embed_files(option: ModalOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
-    """Embed images read from disk (a benchmark on a Modal volume), keyed by the given ids."""
+def embed_files(option: ModelOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
+    """Embed images read from disk (a benchmark in the machine's folder), keyed by the given ids."""
     model, load_s = encoder(option)
     start = time.monotonic()
     # Volume files load lazily and one read waits on the network: read many at once.

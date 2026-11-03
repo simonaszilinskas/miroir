@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
+from miroir.config import Settings
 from miroir.web import auth
 from miroir.web.app import create_app
+from miroir.web.bundle import MANIFEST_FILE
 from miroir.web.fake import LocalBackend
-from miroir.web.ops import read_env_password, write_env_password
+from miroir.web.ops import (
+    read_env_password,
+    set_secret,
+    upload_file,
+    upload_index,
+    write_env_password,
+)
 from tests import web_helpers as h
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 PASSWORD = "test-mot-de-passe"
 
@@ -208,6 +220,43 @@ def test_the_password_line_in_env_is_replaced_not_duplicated(tmp_path: Path) -> 
     assert env.read_text(encoding="utf-8") == "OPENROUTER_API_KEY=x\nMIROIR_APP_PASSWORD=new\n"
     assert read_env_password(env) == "new"
     assert read_env_password(tmp_path / "missing") is None
+
+
+def test_the_password_stays_in_env_until_rotated(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    assert set_secret(env_file=env)
+    first = read_env_password(env)
+    assert first
+    assert not set_secret(env_file=env)
+    assert read_env_password(env) == first
+    assert set_secret(rotate=True, env_file=env)
+    assert read_env_password(env) not in (None, first)
+
+
+class FakeS3:
+    """Records what `upload_files` sends; no network."""
+
+    def __init__(self) -> None:
+        self.sent: dict[tuple[str, str], bytes] = {}
+
+    def upload_file(self, filename: str, bucket: str, key: str, **_: object) -> None:
+        self.sent[bucket, key] = Path(filename).read_bytes()
+
+
+def test_web_upload_sends_every_bundle_file_to_the_index_bucket(settings: Settings) -> None:
+    folder = settings.web_index_dir("small")
+    folder.mkdir(parents=True)
+    (folder / MANIFEST_FILE).write_text("{}", encoding="utf-8")
+    (folder / "places.npz").write_bytes(b"places")
+    fake = FakeS3()
+    size = upload_index(settings, "small", cast("S3Client", fake))
+    bucket = f"{settings.scw_bucket_prefix}-index"
+    assert set(fake.sent) == {(bucket, f"small/{MANIFEST_FILE}"), (bucket, "small/places.npz")}
+    assert size == 2 + len(b"places")
+
+    again = FakeS3()
+    upload_file(settings, "small", "places.npz", cast("S3Client", again))
+    assert again.sent == {(bucket, "small/places.npz"): b"places"}
 
 
 def test_generated_passwords_are_long_and_differ() -> None:

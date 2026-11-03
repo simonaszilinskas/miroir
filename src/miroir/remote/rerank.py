@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Keypoint re-ranking for the website's object searches (step E1). Runs only inside Modal.
+"""Keypoint re-ranking for the website's object searches (step E1). Runs only on a GPU machine.
 
 For one query photo and the best image of each of its top entities: read the images from the
 `miroir-images` volume (512 px, as the gallery was embedded), ALIKED keypoints on each, then
@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGES_MOUNT
+from miroir.config import IMAGES_MOUNT
 from miroir.eval.wire import SiteMatches, SiteMatchTask
 from miroir.images.fetch import ImageCache
 from miroir.parallel import bounded_map
@@ -72,7 +72,7 @@ _LOADED: list[KeypointReranker] = []
 def match_site_tasks(tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]:
     """Re-rank evaluation: each task timed as the website would pay for it."""
     if not _LOADED:
-        _LOADED.append(KeypointReranker(Path(MODAL_IMAGES_MOUNT)))
+        _LOADED.append(KeypointReranker(Path(IMAGES_MOUNT)))
     reranker = _LOADED[0]
     if tasks and tasks[0].image_id is not None:  # warm the GPU kernels before timing
         warm = reranker.cache.get(tasks[0].image_id)

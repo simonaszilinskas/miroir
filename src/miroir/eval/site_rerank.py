@@ -2,9 +2,9 @@
 
 The site's ranking (`miroir.web.bundle.site_search`, full index) gives each tune query its
 top `SHORTLIST` entities and the best image of each. Queries the router sends to the object
-bucket are matched on Modal by the website's own code (`miroir.remote.rerank`), which reads the
-candidates from the image volume and computes every keypoint at search time; the time it takes
-is the time a search would add. Buildings are never re-ranked.
+bucket are matched on a GPU machine by the website's own code (`miroir.remote.rerank`), which
+reads the candidates from the images bucket and computes every keypoint at search time; the
+time it takes is the time a search would add. Buildings are never re-ranked.
 
 Re-ranking is E1's `mix`: the routed mix of an entity's raw cosines plus inliers /
 `MIX_INLIERS`. Entities past the shortlist keep their place. The site's search on every tune
@@ -31,8 +31,8 @@ from miroir.eval.scoring import QueryScore, ScoreResult, paired_bootstrap
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import SiteMatches, SiteMatchTask
 from miroir.images.fetch import Fetched
-from miroir.jobs.modal_run import PaidCall, paid_call
-from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4
+from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, Machine
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.web.bundle import SiteBundle, SiteHit, asked_sets, site_search
 from miroir.web.engine import prepare_photo
@@ -52,6 +52,9 @@ CALL_QUERIES = 50
 
 
 class SiteCalls(Protocol):
+    @property
+    def machine(self) -> Machine: ...
+
     def match_site(self, tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]: ...
 
 
@@ -131,7 +134,7 @@ def match_sets(
     *,
     max_usd: float,
 ) -> float:
-    """Match every object-bucket query against its shortlist on Modal; resumes. Returns cost."""
+    """Match every object-bucket query against its shortlist on the GPU; resumes. Returns cost."""
     cost = 0.0
     for s in searched:
         path = settings.matches_path(matches_name(s.set_id))
@@ -150,7 +153,7 @@ def match_sets(
             done = paid_call(
                 paid,
                 lambda tasks=tasks: calls.match_site(tasks),
-                machine=L4,
+                machine=calls.machine,
                 timeout_s=CHUNK_TIMEOUT_S,
                 kind=SpendKind.RUN,
                 option="E1",
@@ -317,7 +320,8 @@ def write_report(
             wall_time_s=summary.seconds_median if after else 0.0,
             route=Route.HOSTED,
             notes=(
-                f"Modal L4. Object searches re-ranked: top {SHORTLIST}, cosine mix + inliers/"
+                "Matched on an L4 GPU. "
+                f"Object searches re-ranked: top {SHORTLIST}, cosine mix + inliers/"
                 f"{MIX_INLIERS:.0f}. Added time median {summary.seconds_median:.2f} s, p95 "
                 f"{summary.seconds_p95:.2f} s. Only the object queries matched before the "
                 "run was stopped (time rule failed)."

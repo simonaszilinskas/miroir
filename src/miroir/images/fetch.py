@@ -82,8 +82,8 @@ def to_jpeg(data: bytes, long_side: int = LONG_SIDE) -> bytes:
 class ImageCache:
     """Resized JPEGs keyed by `image_id`, capped at `max_bytes`; oldest files are removed first.
 
-    `max_bytes=None` means no cap: no eviction, and no scan of the folder at start (a Modal
-    volume holding every screening image, where listing 19,000 files would be slow).
+    `max_bytes=None` means no cap: no eviction, and no scan of the folder at start (the GPU
+    machine's image folder, where listing 19,000 files would be slow).
     """
 
     def __init__(self, directory: Path, max_bytes: int | None) -> None:

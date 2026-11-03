@@ -13,7 +13,7 @@ The official evaluation (github.com/seyrankhademi/AmsterTime, `amstertime/eval.p
 It takes the top k = 128 neighbours by cosine distance; AP is 1/rank of the one match, or 0
 past rank 128. `score_amstertime` reproduces that with the MIROIR scorer.
 
-Embedding runs on Modal (`miroir r0 run`), which downloads AmsterTime into a volume and
+Embedding runs on a GPU machine (`miroir r0 run`), which downloads AmsterTime there and
 returns a vector run (technical spec §7.1) whose ids are `old/NNNN.jpg` and `new/NNNN.png`.
 Nothing here loads a model, and scoring needs no local copy of the images.
 """
@@ -104,7 +104,7 @@ def image_ids(images: Path) -> list[str]:
 def check_ids(ids: Iterable[str]) -> None:
     """Raise unless `ids` are exactly one `old/NNNN.jpg` and one `new/NNNN.png` per place.
 
-    Needs no local copy of the images: they live in a Modal volume.
+    Needs no local copy of the images: they live on the GPU machine and in the benchmarks bucket.
     """
     ids = list(ids)
     old = {place_of(i) for i in ids if i.startswith("old/") and i.endswith(".jpg")}

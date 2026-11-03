@@ -167,7 +167,7 @@ def score_rerank(
     """Score a shortlist re-ranked each way (`Rerank`), one result file per way.
 
     Writes eval/results/<round>/E-E1-<label>-<way>.json. Matches must be on file
-    (`miroir rerank modal`).
+    (`miroir rerank run`).
     """
     lists, plain, vectors = rerank_shortlists(
         settings, vector_run=vector_run, set_id=set_id, gallery=gallery, top=top
@@ -196,7 +196,7 @@ def score_rerank(
                 f"top {top} entities re-ranked by {how} (homography inliers"
                 f"{f', + cosine, inliers / {MIX_INLIERS:.0f}' if how is Rerank.MIX else ''}); "
                 f"adds {median_s * 1000:.0f} ms median, {p95_s * 1000:.0f} ms p95 per search "
-                "on a Modal L4 (gallery keypoints computed ahead)"
+                "on an L4 GPU (gallery keypoints computed ahead)"
             ),
         )
         write_result(

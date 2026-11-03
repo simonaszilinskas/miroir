@@ -1,7 +1,7 @@
 """One search: a photo and/or words, plus filters, in; cards, each with its level, out.
 
 `Engine` holds the catalog, the routing and the gallery vectors. The models sit behind two
-small interfaces so the same engine runs in the Modal GPU container (`miroir.remote.search`)
+small interfaces so the same engine runs on the GPU machine (`miroir.remote.search`)
 and on the Mac with fake models (`miroir.web.fake`, tests, `miroir web dev`).
 """
 

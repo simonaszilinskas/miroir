@@ -10,7 +10,7 @@ Finding the right heritage record from a photo is a research problem before it i
 2. **Simplest wins a tie.** When two options' error bars overlap, keep the cheaper, faster, open one.
 3. **Same queries for every option.** Comparisons are paired: every option answers the same queries against the same index.
 4. **The sealed half stays sealed.** We tune on the tuning half only and open the sealed half once, in week 6.
-5. **Paid runs have a cap.** All paid model work together (OpenRouter and Modal) may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` and `miroir embed modal` refuse a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is our log of Modal calls plus the larger of our log of OpenRouter calls and what OpenRouter says the key has spent. Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
+5. **Paid runs have a cap.** All paid model work in dollars together (OpenRouter, and Modal before 2026-11-03) may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` and `miroir embed scw` refuse a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is the larger of our log of OpenRouter calls and what OpenRouter says the key has spent, plus our log of Modal calls. Scaleway GPU machines have their own cap, in euros (developpement.md, "Scaleway"). Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
 6. **Every result is committed.** Each run writes `eval/results/<round>/<step>-<option>.json`, and `docs/results.md` holds the summary table.
 
 ## 2. Options by step
@@ -32,7 +32,7 @@ Finding the right heritage record from a photo is a research problem before it i
 | A10 | Voyage multimodal 3.5; Nemotron Embed VL (`nvidia/llama-nemotron-embed-vl-1b-v2`, 1.7B despite the name) | no / yes | OpenRouter | More reference points. Nemotron is on OpenRouter only as a free variant, capped at 20 requests a minute and 1,000 a day: about 138 days for every image at one per request. It was trained on document pages, not photos |
 | A11 | RootSIFT + VLAD, and perceptual hash | yes | hosted (TBD) | Classic floor. The hash also flags exact duplicates |
 
-Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU (`miroir embed modal`, technical spec §4); only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
+Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU, until 2026-11-03; since then they run on a Scaleway GPU machine (`miroir embed scw`, technical spec §4). Only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
 
 **Status (2026-10-19).** Run: A1, A2, A3, A4 (so400m), A5 (PE-Core L), A7, A8 (2B), A9, A10 (Voyage). Not run: A6, A8b, A10 Nemotron, A11. Kept: A7 and A3.
 

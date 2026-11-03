@@ -3,7 +3,7 @@
 Technical spec §7 (T3): detect on the room photo, search each box, hit if the artwork is in
 the top 5. Here a box is searched exactly as the website searches a tapped outline: cut from
 the photo as the page holds it (`ROOM_SIDE`), shrunk like any query photo, embedded by both
-models on Modal, then ranked on the Mac against the site's own index bundle (full index,
+models on a GPU machine, then ranked on the Mac against the site's own index bundle (full index,
 routing and all, `miroir.web.bundle.site_search`).
 
 Which outline would a person tap for a given artwork? The one that best covers it. The
@@ -44,8 +44,8 @@ from miroir.eval.sets import load_queries
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import DetectChunk, DetectedRoom, Located, LocateTask, RoomPhoto
 from miroir.images.fetch import Fetched, to_jpeg
-from miroir.jobs.modal_run import PaidCall, paid_call
-from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4, L4_DINO
+from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, Machine
 from miroir.jobs.spend import SpendKind
 from miroir.outlines import (
     ALL_OUTLINES,
@@ -519,7 +519,7 @@ def summary(score: OutlineScore) -> dict[str, object]:
     }
 
 
-# --- the runs on Modal ----------------------------------------------------------------------
+# --- the runs on the GPU machine ------------------------------------------------------------
 
 
 class SuppliesJpegs(Protocol):
@@ -527,7 +527,10 @@ class SuppliesJpegs(Protocol):
 
 
 class RoomCalls(Protocol):
-    """The remote calls of step C (`miroir.jobs.modal_app.ModalCalls`)."""
+    """The remote calls of step C (`miroir.jobs.scw_run.ScalewayCalls`)."""
+
+    @property
+    def machine(self) -> Machine: ...
 
     def detect_rooms(
         self,
@@ -555,7 +558,7 @@ def run_locate(settings: Settings, calls: RoomCalls, paid: PaidCall) -> list[Loc
     done = paid_call(
         paid,
         lambda: calls.locate_artworks(photos, tasks),
-        machine=L4,
+        machine=calls.machine,
         timeout_s=CHUNK_TIMEOUT_S,
         kind=SpendKind.RUN,
         option="C",
@@ -591,7 +594,7 @@ def run_detector(settings: Settings, calls: RoomCalls, paid: PaidCall, label: st
     done = paid_call(
         paid,
         lambda: calls.detect_rooms(option, photos, given),
-        machine=L4_DINO,
+        machine=calls.machine,
         timeout_s=CHUNK_TIMEOUT_S,
         kind=SpendKind.RUN,
         option="C",
@@ -625,7 +628,8 @@ def write_scores(settings: Settings, label: str, *, round_id: str = "R3") -> lis
             wall_time_s=detections.load_s,
             route=Route.HOSTED,
             notes=(
-                f"Modal L4. Outlines: {json.dumps(summary(score), ensure_ascii=False)}. Rank is "
+                "Detected on an L4 GPU. "
+                f"Outlines: {json.dumps(summary(score), ensure_ascii=False)}. Rank is "
                 f"the tapped outline's (IoU >= {TAP_IOU} with the located artwork); {TOP + 1} = "
                 f"not in its top {TOP} or no outline there."
             ),
@@ -718,7 +722,7 @@ def run_single_objects(
     done = paid_call(
         paid,
         lambda: calls.detect_rooms(option, every, {}),
-        machine=L4_DINO,
+        machine=calls.machine,
         timeout_s=CHUNK_TIMEOUT_S,
         kind=SpendKind.RUN,
         option="C",

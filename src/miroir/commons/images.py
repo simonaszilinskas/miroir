@@ -4,7 +4,7 @@ Commons photos are queries only (T2, T2b, T8c), never gallery images. They are o
 licensed, so they may go to any service (technical spec §7). The Mac fetches each one through
 `WikimediaClient`: one request at a time, at most four a second, with a User-Agent naming the
 project, and every copy kept in `Settings.commons_cache_dir`, so a second run sends nothing.
-Modal containers never fetch from Wikimedia: the Mac sends them the bytes.
+The GPU machine never fetches from Wikimedia: the Mac sends it the bytes.
 """
 
 from __future__ import annotations

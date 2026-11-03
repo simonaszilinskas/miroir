@@ -1,7 +1,7 @@
 """No ML model library is ever imported on the Mac (CLAUDE.md rule 1).
 
-Ruff bans torch and friends everywhere except `miroir.remote`, the code that runs inside
-Modal containers. These tests prove the rest of the package never pulls that code in: they
+Ruff bans torch and friends everywhere except `miroir.remote`, the code that runs only on a
+Scaleway GPU machine. These tests prove the rest of the package never pulls that code in: they
 import the CLI and every other module in a fresh interpreter that refuses model imports.
 """
 
@@ -56,13 +56,13 @@ def test_cli_and_every_local_module_import_without_model_libraries() -> None:
     assert done.returncode == 0, done.stderr
 
 
-def test_the_modal_app_is_among_the_modules_checked() -> None:
-    assert "miroir.jobs.modal_app" in local_modules()
+def test_the_gpu_machine_driver_is_among_the_modules_checked() -> None:
+    assert "miroir.jobs.scw_run" in local_modules()
     assert "miroir.cli" in local_modules()
 
 
 def test_remote_code_is_imported_only_inside_functions() -> None:
-    """Outside `miroir.remote`, an import of it must sit in a function body (run in Modal)."""
+    """Outside `miroir.remote`, an import of it must sit in a function body (run on the machine)."""
     top_level: list[str] = []
     for path in PACKAGE.rglob("*.py"):
         if REMOTE in path.parents:

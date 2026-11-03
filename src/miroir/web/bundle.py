@@ -138,7 +138,8 @@ INDEXES: dict[str, IndexSpec] = {
         a3_query_run="A3-megaloc-322-T2-T2b-T8c-tune-queries",
     ),
     # Every image of the July exports the Modal runs could fetch (136,731 of 137,775), from
-    # the full-sample index (`miroir embed modal --all-images`); MegaLoc kept at 8,448 dims.
+    # the full-sample index (then `embed modal --all-images`, now `embed scw`); MegaLoc kept
+    # at 8,448 dims.
     "full": IndexSpec(
         name="full",
         a7_run="A7-embeddinggemma-2-512-full",

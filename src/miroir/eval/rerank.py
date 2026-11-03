@@ -1,6 +1,6 @@
 """Re-ranking a vector search's top entities by keypoint matches (experiments.md step E1).
 
-Matching runs on Modal (`miroir.remote.matching`); this module holds what goes there and
+Matching runs on a GPU machine (`miroir.remote.matching`); this module holds what goes there and
 back, and re-ranks on the Mac with NumPy only. Each query's shortlist is its top entities by
 cosine, each with its best image (`scoring.shortlists`). Two ways to re-rank:
 
@@ -59,7 +59,7 @@ class CandidateMatch:
 
 @dataclass(frozen=True, slots=True)
 class QueryMatches:
-    """What matching one query cost and found. Times are on the Modal GPU, in seconds."""
+    """What matching one query cost and found. Times are on the GPU, in seconds."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
 

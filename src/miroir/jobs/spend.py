@@ -1,9 +1,10 @@
-"""Money rules for paid model work, OpenRouter and Modal together (experiments.md §1 rule 5).
+"""Money rules for paid model work (experiments.md §1 rule 5).
 
 - Every paid call is appended to one ledger (`Settings.spend_ledger`) as soon as it returns,
   tagged with the service that billed it.
-- Total spend is the Modal lines plus the larger of the OpenRouter lines and what OpenRouter
-  says the key has spent.
+- Total spend is the larger of the OpenRouter lines and what OpenRouter says the key has
+  spent, plus the Modal lines (runs before 2026-11-03). Scaleway lines are left out: the
+  machines have their own cap (`miroir.jobs.scaleway`).
 - A probe embeds 100 images and stores the cost per image (`Settings.probe_path`).
   Probes together, on both services, may not spend more than `probe_budget_usd`.
 - A full run needs a probe on file for the same model and image size, and refuses to start
@@ -43,6 +44,7 @@ class Service(StrEnum):
 
     OPENROUTER = "openrouter"
     MODAL = "modal"
+    """Calls on Modal GPUs, before 2026-11-03. Kept so old ledger lines still read."""
     SCALEWAY = "scaleway"
     """Calls on a Scaleway GPU machine, paid from the ministry's project, not from this budget.
     Machines have their own cap and ledger (`miroir.jobs.scaleway`)."""
@@ -64,7 +66,7 @@ class SpendLine:
     cost_usd: float
     items: int
     service: Service = Service.OPENROUTER
-    """Lines written before Modal arrived carry no service: they are OpenRouter's."""
+    """Lines written before a second service arrived carry no service: they are OpenRouter's."""
 
 
 class Projection(Protocol):

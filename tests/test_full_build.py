@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 
 from miroir.config import Settings
-from miroir.images.fetch_probe import TimedBatch, TimedFetch
-from miroir.jobs.fetch_probe import copy_pairs, summarise
 from miroir.records.full import build_full, count_full
 from miroir.records.images import ImageSkip, copy_key, skip_reason
 from miroir.records.model import Collection, Record
@@ -87,36 +85,3 @@ def test_full_counts_each_file_once(full: Settings) -> None:
     unique = full.full_image_list("unique").read_text(encoding="utf-8").split()
     assert len(unique) == report["unique_images"]
     assert full.full_report_json.exists()
-
-
-def _fetch(image_id: str, *, status: int = 200, sha1: str = "", phash: int = 0) -> TimedFetch:
-    error = "" if status == 200 else ("timeout" if status == 0 else "http")
-    size = 1000 if status == 200 else 0
-    return TimedFetch(image_id, status, 0, size, 0.2, 0.01, 10, 10, sha1, phash, error)
-
-
-def test_fetch_probe_counts_server_failures_apart_from_missing_files() -> None:
-    fetches = (
-        _fetch("a", sha1="1"),
-        _fetch("b", status=0),
-        _fetch("c", status=503),
-        _fetch("d", status=404),
-    )
-    step = summarise(TimedBatch(8, 2.0, 0.0, fetches))
-    assert step["server_failures"] == 2
-    assert step["missing"] == 1
-    assert step["ok"] == 1
-    assert step["images_per_s"] == 2.0
-
-
-def test_fetch_probe_finds_one_picture_saved_twice() -> None:
-    fetches = (
-        _fetch("a", sha1="x", phash=0b1111),
-        _fetch("b", sha1="x", phash=0b1111),  # same file
-        _fetch("c", sha1="y", phash=0b1110),  # same picture, other file
-        _fetch("d", sha1="z", phash=(1 << 64) - 1),  # another picture
-    )
-    found = copy_pairs(fetches, dict.fromkeys("abcd", "REF1"))
-    assert found["pairs"] == 6
-    assert found["same_file"] == 1
-    assert found["images_that_repeat_another"] == 2

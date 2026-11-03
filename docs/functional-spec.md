@@ -179,7 +179,7 @@ Testers agree in writing that we keep their photos until the end of the PoC, the
 | 5 | User tests, fixes between sessions | Test notes |
 | 6 | Final scores on the sealed halves (R4), report, decision meeting | Decision |
 
-*Where it stands (2026-10-19):* weeks 1 to 3 are done, with a search API, a website on Modal, outlines, drawn boxes and card levels in place of the cut-off. The full POP export is mapped but not indexed; detail search (F5), user tests and R4 have not started. An agentic search (step H5) was added.
+*Where it stands (2026-10-19):* weeks 1 to 3 are done, with a search API, a website on Modal (on a Scaleway machine since 2026-11-03), outlines, drawn boxes and card levels in place of the cut-off. The full POP export is mapped but not indexed; detail search (F5), user tests and R4 have not started. An agentic search (step H5) was added.
 
 ## 12. Out of scope for the PoC
 

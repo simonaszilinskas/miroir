@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 #: Largest photo accepted, after base64 decoding. The page shrinks photos before sending.
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
-#: Longest wait on the search backend before the page is told to retry (Modal cuts at 150 s).
+#: Longest wait on the search backend before the page is told to retry (`_wait_for`).
 SEARCH_WAIT_S = 100.0
 #: Side of the small images under the large one on a record page.
 THUMB_SIDE = 200
@@ -67,7 +67,7 @@ class SearchBackend(Protocol):
     async def search(self, request: SearchRequest) -> SearchResponse: ...
 
     async def warm(self) -> None:
-        """Start the search container if it sleeps, without waiting for it."""
+        """Wake the search if it sleeps, without waiting for it."""
         ...
 
     async def detect(self, jpeg: bytes) -> Outlines:
@@ -405,11 +405,12 @@ async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outl
 
 
 async def _wait_for[T](work: Awaitable[T], what: str) -> T:
-    """The backend's answer, or 503 when the GPU container is still starting.
+    """The backend's answer, or 503 when the models are still loading.
 
-    Modal answers a request still open after 150 s with a redirect that loses the body, so a
-    call waiting on a starting container gives up first with 503 and the page retries. The
-    call itself goes on (shielded), so the container keeps starting.
+    Just after the demo machine powers on, the models may still be loading onto the GPU. Rather
+    than hold the request open that long, a call gives up after `SEARCH_WAIT_S` with 503 and
+    the page retries (Caddy, in front, waits for the site meanwhile). The call itself goes on
+    (shielded), so the models keep loading.
     """
     call = asyncio.ensure_future(work)
     try:

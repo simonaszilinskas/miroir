@@ -1,13 +1,12 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
 """The job server on a Scaleway GPU machine (`miroir scw serve`, inside the job image).
 
-The Modal functions of `miroir.jobs.modal_app` and the website's search class, behind one HTTP
+The GPU jobs (embedding, matching, detection, captions) and the website's search, behind one HTTP
 port on the machine's loopback; the Mac reaches it through an SSH tunnel
 (`miroir.jobs.scw_run`). A call is a pickle of (name, arguments) and its answer the pickled
-result, or HTTP 500 with the traceback. Calls run one at a time, as on Modal's single
-container per function.
+result, or HTTP 500 with the traceback. Calls run one at a time on the one GPU.
 
-Files: Object Storage buckets stand in for the Modal volumes (`miroir.jobs.objects`). The
+Files: Object Storage buckets, mirrored into the machine's folders (`miroir.jobs.objects`). The
 weights bucket is copied down at start and new weights go back after a call that loaded a
 model; a call's POP images come from the images bucket when it has them, and those fetched
 from POP go back after the call. The machine deletes itself past its deadline, so a Mac that
@@ -27,13 +26,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from miroir.config import (
-    MODAL_BENCHMARKS_MOUNT,
-    MODAL_IMAGES_MOUNT,
-    MODAL_WEB_INDEX_MOUNT,
-    MODAL_WEIGHTS_MOUNT,
+    BENCHMARKS_MOUNT,
+    IMAGES_MOUNT,
+    WEB_INDEX_MOUNT,
+    WEIGHTS_MOUNT,
     Settings,
 )
-from miroir.jobs.modal_spec import FILL_CONCURRENCY, ChunkResult, ModalOption, SuppliedImage
 from miroir.jobs.objects import (
     Bucket,
     bucket_name,
@@ -43,6 +41,7 @@ from miroir.jobs.objects import (
     upload_files,
     upload_tree,
 )
+from miroir.jobs.remote_spec import FILL_CONCURRENCY, ChunkResult, ModelOption, SuppliedImage
 from miroir.records.model import Image
 
 if TYPE_CHECKING:
@@ -89,10 +88,10 @@ class Worker:
         return bucket_name(self.settings, bucket)
 
     def start(self) -> None:
-        for mount in (MODAL_WEIGHTS_MOUNT, MODAL_IMAGES_MOUNT, MODAL_BENCHMARKS_MOUNT):
+        for mount in (WEIGHTS_MOUNT, IMAGES_MOUNT, BENCHMARKS_MOUNT):
             Path(mount).mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
-        count = download_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(MODAL_WEIGHTS_MOUNT))
+        count = download_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
         logger.info("weights: %d files in %.0f s", count, time.monotonic() - start)
         self.ready.set()
 
@@ -103,29 +102,29 @@ class Worker:
         if load_s <= 0:
             return
         try:
-            upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(MODAL_WEIGHTS_MOUNT))
+            upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
         except Exception:
             logger.exception("weights not saved to the bucket; the next machine downloads them")
 
     def _images_down(self, images: Sequence[Image]) -> set[str]:
         """Copy the images the bucket holds into the image folder. Returns the keys it lacks."""
         keys = [image_key(i.image_id) for i in images]
-        return download_keys(self.s3, self._bucket(Bucket.IMAGES), Path(MODAL_IMAGES_MOUNT), keys)
+        return download_keys(self.s3, self._bucket(Bucket.IMAGES), Path(IMAGES_MOUNT), keys)
 
     def _images_up(self, keys: set[str]) -> None:
         """Send back the images fetched from POP during the call."""
-        root = Path(MODAL_IMAGES_MOUNT)
+        root = Path(IMAGES_MOUNT)
         fetched = [root / k for k in keys if (root / k).exists()]
         upload_files(self.s3, self._bucket(Bucket.IMAGES), root, fetched)
 
     def persist(self) -> dict[str, int]:
-        weights = upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(MODAL_WEIGHTS_MOUNT))
+        weights = upload_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
         return {"weights": weights}
 
-    # --- the jobs (as in miroir.jobs.modal_app) -------------------------------------------
+    # --- the jobs ----------------------------------------------------------------------------
 
     def embed(
-        self, option: ModalOption, images: list[Image], supplied: list[SuppliedImage]
+        self, option: ModelOption, images: list[Image], supplied: list[SuppliedImage]
     ) -> ChunkResult:
         from miroir.remote.models import embed_images  # noqa: PLC0415
 
@@ -135,7 +134,7 @@ class Worker:
         self._save_weights(result.load_s)
         return result
 
-    def embed_texts(self, option: ModalOption, ids: list[str], texts: list[str]) -> ChunkResult:
+    def embed_texts(self, option: ModelOption, ids: list[str], texts: list[str]) -> ChunkResult:
         from miroir.remote.models import embed_texts  # noqa: PLC0415
 
         result = embed_texts(option, ids, texts)
@@ -157,17 +156,17 @@ class Worker:
     def amstertime_download(self) -> int:
         from miroir.eval import amstertime  # noqa: PLC0415
 
-        root = Path(MODAL_BENCHMARKS_MOUNT)
+        root = Path(BENCHMARKS_MOUNT)
         download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
         images = amstertime.download(root / "amstertime")
         upload_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
         return len(amstertime.image_ids(images))
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         from miroir.eval import amstertime  # noqa: PLC0415
         from miroir.remote.models import embed_files  # noqa: PLC0415
 
-        root = Path(MODAL_BENCHMARKS_MOUNT)
+        root = Path(BENCHMARKS_MOUNT)
         download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
         images = root / "amstertime" / "images"
         result = embed_files(option, [(i, images / i) for i in amstertime.image_ids(images)])
@@ -205,14 +204,14 @@ class Worker:
         self._save_weights(1.0)
         return result
 
-    # --- the website's search (as `Search` in miroir.web.modal_app) ------------------------
+    # --- the website's search (`miroir web dev --scw`) ---------------------------------------
 
     def _service(self, index: str) -> SearchService:
         from miroir.remote.search import SearchService  # noqa: PLC0415
 
         found = self._search.get(index)
         if found is None:
-            root = Path(MODAL_WEB_INDEX_MOUNT)
+            root = Path(WEB_INDEX_MOUNT)
             download_tree(self.s3, self._bucket(Bucket.INDEX), root, prefix=f"{index}/")
             found = SearchService(root / index)
             self._save_weights(1.0)

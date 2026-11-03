@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 from PIL import Image as PILImage
 from PIL import ImageOps
 
-from miroir.jobs.modal_spec import OPTIONS
+from miroir.jobs.remote_spec import OPTIONS
 from miroir.outlines import (
     DETECT_SIDE,
     SITE_DETECTOR,

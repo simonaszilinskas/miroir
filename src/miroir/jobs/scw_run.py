@@ -1,10 +1,10 @@
-"""Jobs on a Scaleway GPU machine, driven from the Mac: the Scaleway twin of `open_modal`.
+"""Jobs on a Scaleway GPU machine, driven from the Mac.
 
 `open_scaleway` starts a machine (`miroir.jobs.scaleway.gpu_machine`), lets the Mac in over
 SSH with a key made for this machine alone, builds the job image there (`docker/Dockerfile`,
 with this checkout's code), starts the worker (`miroir.remote.worker`) and opens an SSH tunnel
-to it. It yields `ScalewayCalls`, which has the calls of `ModalCalls`, so `ModalRunner` runs
-the same jobs here. When the block ends, new weights and images go back to their buckets and
+to it. It yields `ScalewayCalls`, the calls `GpuRunner` (`miroir.jobs.gpu_run`) and the step C,
+E1 and archive runs make. When the block ends, new weights and images go back to their buckets and
 the machine is deleted, whatever happened.
 
 The worker listens only on the machine's loopback; the tunnel is the one way in. Calls travel
@@ -32,14 +32,14 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from miroir.config import REPO_ROOT, Settings
-from miroir.jobs.modal_spec import (
+from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     LIGHTGLUE,
     MATCH_LIBRARIES,
     MODEL_LIBRARIES,
     ChunkResult,
     Machine,
-    ModalOption,
+    ModelOption,
     SuppliedImage,
 )
 from miroir.jobs.scaleway import (
@@ -95,7 +95,8 @@ CALL_TIMEOUT_S = CHUNK_TIMEOUT_S + 120
 TORCH_INDEXES = ((13.0, "cu130"), (12.8, "cu128"), (12.6, "cu126"))
 #: Files of the checkout the image is built from.
 CONTEXT_FILES = ("pyproject.toml", "README.md", "LICENSE")
-#: The bucket mirrors, mounted into the job containers at the Modal volumes' paths.
+#: The bucket mirrors, mounted into the job containers at the paths the model code reads
+#: (`config.WEIGHTS_MOUNT`, ...).
 MOUNTS = " ".join(
     f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "benchmarks", "web-index")
 )
@@ -223,7 +224,7 @@ def start_worker(
 ) -> None:
     """Send the keys and the build context, build the image, start the worker container.
 
-    `match` adds the keypoint-matching libraries (steps C and E1), as Modal's match image."""
+    `match` adds the keypoint-matching libraries (steps C and E1)."""
     build_image(shell, settings, match=match)
     shell.run(
         f"docker run -d --name miroir-worker --gpus all --shm-size 8g "
@@ -260,24 +261,19 @@ def build_image(shell: Shell, settings: Settings, *, match: bool = False) -> Non
 
 
 class ScalewayCalls:
-    """The calls of `ModalCalls`, sent to the worker through the tunnel."""
+    """The remote calls of a job, sent to the worker through the tunnel."""
 
     def __init__(self, url: str, machine: GpuMachine) -> None:
         self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S)
         self.gpu = machine
         self.busy_s = 0.0
-        """Seconds spent in calls, for the run costs (`ModalRunner(machine=...)`)."""
+        """Seconds spent in calls."""
 
     @property
     def machine(self) -> Machine:
-        """The whole machine at its price, in dollars, as `ModalRunner` counts."""
+        """The whole machine at its price, in dollars, as `GpuRunner` counts."""
         offer = self.gpu.offer
-        return Machine(
-            gpu=offer.commercial_type,
-            cpu=0.0,
-            memory_gib=0,
-            flat_usd_per_s=offer.eur_per_s * EUR_TO_USD,
-        )
+        return Machine(gpu=offer.commercial_type, usd_per_s=offer.eur_per_s * EUR_TO_USD)
 
     def close(self) -> None:
         self._http.close()
@@ -314,22 +310,17 @@ class ScalewayCalls:
         """Send new weights and images back to their buckets."""
         return cast("dict[str, int]", self.call("persist"))
 
-    # --- `RemoteCalls` (miroir.jobs.modal_run) and the rest of `ModalCalls` ------------------
+    # --- `RemoteCalls` (miroir.jobs.gpu_run) and the calls of steps C, E1 and the archive ------
 
     def embed(
-        self, option: ModalOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
+        self, option: ModelOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
     ) -> ChunkResult:
         return cast("ChunkResult", self.call("embed", option, list(images), list(supplied)))
 
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult:
         return cast("ChunkResult", self.call("embed_texts", option, list(ids), list(texts)))
-
-    def scale(self, option: ModalOption, containers: int) -> None:
-        """One GPU: chunks queue on it whatever `containers` says."""
-        if containers > 1:
-            logger.info("%s: one Scaleway GPU, chunks run one after another", option.id)
 
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
         return cast("dict[str, int]", self.call("fill_images", [list(c) for c in chunks]))
@@ -337,7 +328,7 @@ class ScalewayCalls:
     def amstertime_download(self) -> int:
         return cast("int", self.call("amstertime_download"))
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         return cast("ChunkResult", self.call("amstertime_embed", option))
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
@@ -367,7 +358,7 @@ class ScalewayCalls:
 class ScalewayBackend:
     """The website's search (`SearchBackend`) on the machine: `miroir web dev --scw`.
 
-    The index bundle comes from the index bucket (`miroir scw upload-index`)."""
+    The index bundle comes from the index bucket (`miroir web upload`)."""
 
     def __init__(self, calls: ScalewayCalls, index: str) -> None:
         self._calls = calls

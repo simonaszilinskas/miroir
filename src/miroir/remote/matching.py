@@ -1,5 +1,5 @@
 # pyright: basic, reportMissingImports=false, reportMissingModuleSource=false
-"""Keypoint matching for re-ranking (step E1). Runs only inside Modal containers.
+"""Keypoint matching for re-ranking (step E1). Runs only on a Scaleway GPU machine.
 
 ALIKED keypoints (BSD-3; SuperPoint's weights are non-commercial), LightGlue matching,
 then RANSAC (OpenCV MAGSAC) for a homography and a fundamental matrix. Images come from the
@@ -20,7 +20,7 @@ import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
 
-from miroir.config import MODAL_IMAGES_MOUNT
+from miroir.config import IMAGES_MOUNT
 from miroir.eval.rerank import CandidateMatch, MatchChunk, MatchTask, QueryMatches
 from miroir.images.fetch import ImageCache
 from miroir.parallel import bounded_map
@@ -121,7 +121,7 @@ def match_tasks(tasks: Sequence[MatchTask]) -> MatchChunk:
         _LOADED.append(Matcher())
         load_s = time.monotonic() - start
     matcher = _LOADED[0]
-    cache = ImageCache(Path(MODAL_IMAGES_MOUNT), None)
+    cache = ImageCache(Path(IMAGES_MOUNT), None)
     wanted = sorted({i for t in tasks for i in (t.image_id, *t.candidates)})
     read = dict(bounded_map(lambda i: (i, cache.get(i)), wanted, workers=VOLUME_READERS))
     missing = tuple(i for i, data in read.items() if data is None)
