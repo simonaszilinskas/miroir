@@ -285,7 +285,7 @@ def slice_queries(settings: Settings) -> list[Query]:
     return [q for s in SETS for q in load_queries(settings, s, "tune")]
 
 
-def prepare(settings: Settings, s3: S3Client) -> SliceSpec:
+def prepare(settings: Settings, s3: S3Client, *, a7_others: int = A7_DISTRACTORS) -> SliceSpec:
     """Pick the gallery from the `pop-all` index and send the spec, the supplied query
     vectors and the outside photos to the images bucket."""
     from miroir.eval.router3 import query_chroma  # noqa: PLC0415 (fetches photos)
@@ -302,7 +302,7 @@ def prepare(settings: Settings, s3: S3Client) -> SliceSpec:
     entity_of.update(_column_map(settings.commons_gallery_parquet("full"), "image_id", "entity_id"))
     file_of = _column_map(settings.scaleway_dir / IMAGE_FILES, "image_id", "file_id")
     queries = slice_queries(settings)
-    spec = build_spec(queries, index_ids, entity_of, file_of)
+    spec = build_spec(queries, index_ids, entity_of, file_of, a7_distractors=a7_others)
     logger.info("%s", spec.note)
 
     bucket = bucket_name(settings, Bucket.IMAGES)

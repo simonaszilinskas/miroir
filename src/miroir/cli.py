@@ -1879,7 +1879,14 @@ def scw_crop_slice_run() -> None:
 
 
 @scw_app.command("crop-slice")
-def scw_crop_slice(max_hours: MaxHours = 3.4) -> None:
+def scw_crop_slice(
+    max_hours: MaxHours = 3.4,
+    *,
+    l4: Annotated[bool, typer.Option("--l4", help="An L4 when no L40S is free.")] = False,
+    a7_others: Annotated[
+        int, typer.Option(help="Files of the sample of others that get EmbeddingGemma 2 crops.")
+    ] = 3000,
+) -> None:
     """Crop slice test (docs/search-levels.md): crops of a 50,000-image gallery on an L40S,
     scored against VET, PARTS, T2 and T3; the score tables land in the Scaleway folder."""
     from miroir.jobs.crop_slice import crop_launch, fetch_outputs, prepare  # noqa: PLC0415
@@ -1889,8 +1896,8 @@ def scw_crop_slice(max_hours: MaxHours = 3.4) -> None:
 
     settings = get_settings()
     s3 = s3_client(settings)
-    typer.echo(prepare(settings, s3).note)
-    offers = [o for o in OFFERS if o.zone == "fr-par-2" and "L40S" in o.commercial_type]
+    typer.echo(prepare(settings, s3, a7_others=a7_others).note)
+    offers = [o for o in OFFERS if ("L40S" in o.commercial_type) != l4]
     try:
         run_unattended(
             settings, crop_launch(settings), offers=offers, max_hours=max_hours, purpose="crops"
