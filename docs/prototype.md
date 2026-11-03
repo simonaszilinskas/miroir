@@ -81,6 +81,22 @@ Before: one "sure" or "not sure" answer for the whole search (cut-offs 0.934 arc
 
 The first index, `screening-v2` (21,785 publishable images), scored T1 50.7, T3 89.9, T5 61.2, T2 24.8, T2b 94.3 hit@10; switch back with `WEB_INDEX = "screening-v2"`.
 
+### Index of all of POP (`pop-all`, built 2026-11-03, not served yet)
+
+Every POP image the models could read: 2,257,225 image rows (Commons photos included), 2,135,437 records, 885,596 buildings and objects; 99.86% of records with an image have vectors (docs/search-levels.md, "What step 3 built"). Built on Scaleway with `miroir scw pop-index` (docs/developpement.md, "Scaleway"), 27.4 GB in the `miroir-index` bucket under `pop-all/`. MegaLoc is kept as a 1,024-number shortlist on the GPU (4.6 GB) and whole in int8 in memory (19.1 GB), so serving it needs about 20 GB of memory for the int8 vectors alone. The card levels and the sure rule are those of `full-f2`, not set again on this index.
+
+Tune halves, the bundle's own `report.json` (the July index `full-f2` in brackets):
+
+| Set | Hit@1 | Hit@3 | Hit@10 |
+|---|---|---|---|
+| T1 archive building | 45.7 (34.1) | 52.2 (38.4) | 59.4 (45.7) |
+| T3 painting in a room | 54.5 (55.6) | 72.7 (76.8) | 82.8 (86.9) |
+| T5 museum object, other view | 26.9 (27.2) | 34.7 (35.1) | 41.8 (43.2) |
+| T2 phone photo of a building | 53.7 (25.8) | 59.1 (32.6) | 64.9 (36.8) |
+| T2b museum work (Commons) | 78.0 (82.1) | 83.5 (88.7) | 88.0 (94.5) |
+
+Not-found sets, first card wrongly sure: T8 9.6%, T8c 4.7%. Buildings gain most, since many more of their photos are now in the index; objects lose a little among 15 times more images.
+
 End-to-end check on the deployed site (2026-10-13): photos fetched from POP and Commons and posted to `/api/search`. Collection photos (T1, T3, T5) find their own record first with confidence 1.00 (the query vector equals the stored one, so preprocessing matches the gallery's); Commons photos (T2, T2b) get the confidence computed offline from their stored query vectors (0.914, 0.859, 0.55…) and the right record first or second. Words: "nature morte au lièvre" puts "Nature morte avec homard et lièvre" and "Nature morte au lièvre" first; "Pont du Gard" first; English words do less well.
 
 Visitor check of phone photos of buildings (2026-10-13, on the deploy of `ccb4142`: G5 and `full-f2`, before captions). Ten T2 tune photos sent to the deployed search, seven without GPS, three with it (seeded draw). Before (index `full`, G4): the right building first for 2 of 10, in the top 10 for 3. After: **first for 7 of 10, top 3 for 7, top 10 for 8**; four of the seven were "sure" (the page then said so; card levels replaced that wording since). The three photos with GPS were all found first, with 1, 5 and 51 known places within the search radius. The two misses (a Paris hôtel particulier and an Avignon hôtel, both street façades among many alike) got no sure answer and the closest buildings, nearly all in the right town. After a missed building photo the page now says what helps: turn on "Utiliser ma position" or add the commune with "Préciser avec des mots", and photograph the whole façade. Words: "Pont du Gard", "moulin à vent", "nature morte au lièvre" and "cathedral rose window" (the four chips) all put a fitting record first. The Jeu de Paume example drew 14 outlines (the detector found 14; up to 20 are shown).
@@ -146,7 +162,7 @@ The agentic search also pays for the model: a turn cost about $0.02–0.04 throu
 
 - **Position.** Rose Valland works have no place (looted and moved), and Mémoire objects sit at their commune's centre, so with the position on they rank below precise neighbours. The visitor can turn the position off.
 
-- **Index.** The 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing.
+- **Index.** The site serves the 101,000 records of the July exports, not all of POP: most tester photos of places outside them will find nothing. The index of all of POP (`pop-all`, above) is built but not served yet.
 - **Phone photos of buildings.** Without the photo's position, the right building comes first for a quarter of photos (25.8%), in the top 3 for a third (32.6%) and in the top 10 for 36.8%. A building whose Commons photos are in the index is found far more often than one without (58.6% against 24.9% hit@10 on the screening gallery): 1,198 of 3,924 buildings have none. Interiors and close details stay hard. With the photo's GPS position (H2) the right building is in the top 10 for most photos.
 - **Levels are cautious.** About 30% of in-index photo searches get a "Très proche" first card and 11–18% a "Proche" one; the rest see "Ressemblance" cards to compare. Words never reach "Très proche". A caption read on an archive print raises T1 hit@1 from 34% to 71%, but the level reads the photo's cosines only, so it undersells those searches.
 - **Word search** finds the right record in the top 10 for about one description in six (T7: 17.6%; half and half scored 8.0%). Names work ("Pont du Gard" comes first); descriptions of common things (a church, a coin) match too many records, and Mémoire buildings are found only 7% of the time. A region in the words ("bourgogne") does not narrow the search; the region filter does. T6, written by hand, does not exist yet ([t6-guide.md](t6-guide.md)).

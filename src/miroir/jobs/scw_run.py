@@ -88,6 +88,10 @@ CALL_TIMEOUT_S = CHUNK_TIMEOUT_S + 120
 TORCH_INDEXES = ((13.0, "cu130"), (12.8, "cu128"), (12.6, "cu126"))
 #: Files of the checkout the image is built from.
 CONTEXT_FILES = ("pyproject.toml", "README.md", "LICENSE")
+#: The bucket mirrors, mounted into the job containers at the Modal volumes' paths.
+MOUNTS = " ".join(
+    f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "benchmarks", "web-index")
+)
 
 
 class Shell:
@@ -199,16 +203,32 @@ def worker_env(settings: Settings) -> str:
     return "".join(f"{k}={v}\n" for k, v in settings.scaleway_worker_env().items())
 
 
+def send_env(shell: Shell, settings: Settings) -> None:
+    """The worker's settings and keys, into a root-only file on the machine."""
+    shell.run(
+        f"umask 077 && mkdir -p {REMOTE_ROOT} && cat > {REMOTE_ROOT}/env",
+        stdin=worker_env(settings).encode(),
+    )
+
+
 def start_worker(
     shell: Shell, settings: Settings, machine: GpuMachine, *, match: bool = False
 ) -> None:
     """Send the keys and the build context, build the image, start the worker container.
 
     `match` adds the keypoint-matching libraries (steps C and E1), as Modal's match image."""
+    build_image(shell, settings, match=match)
     shell.run(
-        f"umask 077 && mkdir -p {REMOTE_ROOT} && cat > {REMOTE_ROOT}/env",
-        stdin=worker_env(settings).encode(),
+        f"docker run -d --name miroir-worker --gpus all --shm-size 8g "
+        f"--env-file {REMOTE_ROOT}/env -p 127.0.0.1:{WORKER_PORT}:{WORKER_PORT} {MOUNTS} "
+        f"{IMAGE_TAG} --port {WORKER_PORT} --server-id {machine.server_id} "
+        f"--zone {machine.offer.zone} --deadline {machine.deadline:.0f}"
     )
+
+
+def build_image(shell: Shell, settings: Settings, *, match: bool = False) -> None:
+    """Send the keys and the build context, and build the job image on the machine."""
+    send_env(shell, settings)
     smi = shell.run("nvidia-smi")
     logger.info("GPU: %s", " ".join(line.strip() for line in smi.splitlines()[2:4]))
     cuda = float(smi.split("CUDA Version:")[1].split()[0])
@@ -227,16 +247,6 @@ def start_worker(
         timeout=BUILD_TIMEOUT_S,
     )
     logger.info("image built in %.0f s", time.monotonic() - start)
-    mounts = " ".join(
-        f"-v {REMOTE_ROOT}/{name}:/{name}"
-        for name in ("weights", "images", "benchmarks", "web-index")
-    )
-    shell.run(
-        f"docker run -d --name miroir-worker --gpus all --shm-size 8g "
-        f"--env-file {REMOTE_ROOT}/env -p 127.0.0.1:{WORKER_PORT}:{WORKER_PORT} {mounts} "
-        f"{IMAGE_TAG} --port {WORKER_PORT} --server-id {machine.server_id} "
-        f"--zone {machine.offer.zone} --deadline {machine.deadline:.0f}"
-    )
 
 
 # --- the calls ------------------------------------------------------------------------------

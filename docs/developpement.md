@@ -115,6 +115,47 @@ against the bill in the Scaleway console, and fix them when they differ.
 Smoke test, 2026-11-02, L4-1-24G in fr-par-2: every A7 and A3 vector matched the July Modal
 vectors (cosine 1.0000); 6 minutes of machine, €0.08.
 
+All of POP (docs/search-levels.md, "Indexing") runs on machines that need the Mac only to
+start and watch them: each writes its progress and failures to the images bucket, and a
+rerun skips what is done (`src/miroir/jobs/bulk.py`). Start each one detached.
+
+```sh
+uv run miroir scw pop-download --shards 0,1,2,3 --of 8 --upload-list   # images, CPU machine
+uv run miroir scw pop-download --shards 4,5,6,7 --of 8                 # a second one
+uv run miroir scw pop-embed --first 0 --last 40 --check 64 --upload-list --l40s  # A7 + A3
+uv run miroir scw pop-index      # the pop-all bundle, on a machine with 128 GB of memory
+uv run miroir scw pop-coverage   # which records have vectors, and why the others do not
+```
+
+`pop-download` stores every distinct image file at most 1,024 px on its long side
+(`full/<id[:2]>/<id>.jpg`; POP serves no larger file). `pop-embed` embeds the files July did
+not, in 4,096 pieces (`--first`, `--last`), with July's preprocessing (512 px JPEG);
+`--check` embeds that many July files again to compare. Each machine also deletes itself at
+`--max-hours`.
+
+How the first full build ran (2026-11-03), and how to run it again:
+
+```sh
+MIROIR_SCW_BUDGET_EUR=62 nohup caffeinate -ims uv run miroir scw pop-embed \
+  --first 41 --last 1053 --a7-batch 64 --a7-streams 2 --l40s --max-hours 8 > embed-41-1053.log 2>&1 &
+# the same for 1054-2067, 2068-3081 and 3082-4095 (`miroir.jobs.bulk.piece_ranges`)
+MIROIR_SCW_BUDGET_EUR=50 nohup caffeinate -ims uv run miroir scw pop-index --max-hours 4 > pop-index.log 2>&1 &
+uv run miroir scw pop-coverage   # writes ~/miroir-data/index/coverage-pop-all.json
+```
+
+- An L40S embeds 23 images a second with A7 and A3 together; four machines side by side took
+  6 h 10 min for 2.0M images, €35 in all. An L4 does about 10 a second for about half the
+  price an hour, so it costs more per image.
+- `pop-index` runs on a machine with 128 GB of memory (POP2-HM-16C-128G, €1.05 an hour) for
+  about 65 minutes: 10 to gather the vectors, 50 to build and score the bundle, 2 to send it.
+  The bundle, `pop-all`, lands in the `miroir-index` bucket under `pop-all/` (27.4 GB), and
+  the list of files with vectors under `coverage/pop-all.json`.
+- Large files go up in parts of at least 8 MB and at most 1,000 parts
+  (`miroir.jobs.objects.part_bytes`): Scaleway refuses more, which first stopped the 19 GB
+  int8 file.
+- Keep the Mac on mains power and awake (`caffeinate -ims`): while it sleeps, finished
+  machines wait to be deleted and keep costing.
+
 The full POP export comes from public sources with a standalone script:
 `python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps).
 

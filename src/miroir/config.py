@@ -67,6 +67,9 @@ MODAL_CHAT_LOGS = "chat-logs"
 #: Switching index is this one line, then `miroir web build-index`, `upload` and `deploy`.
 WEB_INDEX = "full-f2"
 
+#: The variable that moves the data folder (`Settings.data_dir`), e.g. on a Scaleway machine.
+DATA_DIR_VARIABLE = "MIROIR_DATA_DIR"
+
 #: The `.env` file settings are read from. `miroir web secret` adds the app password to it.
 ENV_FILE = REPO_ROOT / ".env"
 #: The line of `.env` that holds the website's shared password.

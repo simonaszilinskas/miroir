@@ -1699,6 +1699,208 @@ def scw_serve(
     serve(get_settings(), port=port, server_id=server_id, zone=zone, deadline=deadline)
 
 
+@scw_app.command("watch", hidden=True)
+def scw_watch(
+    server_id: Annotated[str, typer.Option()],
+    zone: Annotated[str, typer.Option()],
+    deadline: Annotated[float, typer.Option(help="Unix time past which the machine is deleted.")],
+) -> None:
+    """Delete this machine at its deadline. Runs on a Scaleway machine, never on the Mac."""
+    from miroir.remote.worker import watch_deadline  # noqa: PLC0415 (machine only)
+
+    watch_deadline(get_settings(), server_id, zone, deadline)
+
+
+#: The July vectors every POP image reuses when it has one (`miroir scw pop-download`).
+JULY_A7_RUN = "A7-embeddinggemma-2-512-full+F2"
+Shards = Annotated[str, typer.Option(help="Shards this machine runs, e.g. 0,1.")]
+ShardCount = Annotated[int, typer.Option("--of", help="Shards in all.")]
+
+
+@scw_app.command("download", hidden=True)
+def scw_download(
+    shard: Annotated[int, typer.Option()],
+    of: ShardCount,
+    workers: Annotated[int, typer.Option(help="Parallel downloads.")] = 16,
+) -> None:
+    """Store one shard of the POP images in the images bucket. Runs on a Scaleway machine."""
+    from miroir.jobs.pop_download import run_download  # noqa: PLC0415
+
+    run_download(get_settings(), shard=shard, of=of, workers=workers)
+
+
+@scw_app.command("pop-download")
+def scw_pop_download(
+    shards: Shards,
+    of: ShardCount,
+    workers: Annotated[int, typer.Option(help="Parallel downloads per shard.")] = 16,
+    max_hours: MaxHours = 8.0,
+    *,
+    upload_list: Annotated[
+        bool, typer.Option(help="Write the image list to the bucket first.")
+    ] = False,
+) -> None:
+    """Download POP images to the images bucket on a machine without a GPU (resumable)."""
+    from miroir.jobs.scaleway import CPU_OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import (  # noqa: PLC0415
+        download_launch,
+        run_unattended,
+        upload_image_list,
+    )
+
+    settings = get_settings()
+    if upload_list:
+        from miroir.eval.vectors import read_vectors  # noqa: PLC0415
+
+        embedded = frozenset(read_vectors(settings.vectors_path(JULY_A7_RUN)).ids)
+        typer.echo(f"image list: {upload_image_list(settings, embedded):,} files")
+    picked = [int(k) for k in shards.split(",")]
+    launch = download_launch(settings, picked, of, workers)
+    done = run_unattended(
+        settings, launch, offers=CPU_OFFERS, max_hours=max_hours, purpose="download"
+    )
+    for status in done:
+        typer.echo(status.line())
+
+
+@scw_app.command("embed", hidden=True)
+def scw_embed(
+    first: Annotated[int, typer.Option()],
+    last: Annotated[int, typer.Option()],
+    *,
+    a7_batch: Annotated[int, typer.Option()] = 32,
+    a7_streams: Annotated[int, typer.Option()] = 1,
+    a3_batch: Annotated[int, typer.Option()] = 64,
+    check: Annotated[int, typer.Option()] = 0,
+    a7_trials: Annotated[str, typer.Option()] = "",
+) -> None:
+    """Embed pieces of the stored POP images with A7 and A3. Runs in the job image on a GPU."""
+    from miroir.remote.bulk_embed import run_embed  # noqa: PLC0415 (machine only)
+
+    run_embed(
+        get_settings(),
+        first=first,
+        last=last,
+        a7_batch=a7_batch,
+        a7_streams=a7_streams,
+        a3_batch=a3_batch,
+        check=check,
+        a7_trials=_trials(a7_trials),
+    )
+
+
+def _trials(text: str) -> list[tuple[int, int]]:
+    """ "32:1,64:2" -> [(32, 1), (64, 2)]: A7 batch sizes and streams to time."""
+    pairs = [t.split(":") for t in text.split(",") if t]
+    return [(int(b), int(s)) for b, s in pairs]
+
+
+@scw_app.command("pop-embed")
+def scw_pop_embed(
+    first: Annotated[int, typer.Option(help="First piece (0 to 4095).")],
+    last: Annotated[int, typer.Option(help="Last piece, included.")],
+    *,
+    a7_batch: Annotated[int, typer.Option(help="A7 images per batch.")] = 32,
+    a7_streams: Annotated[int, typer.Option(help="A7 batches run at once.")] = 1,
+    a3_batch: Annotated[int, typer.Option(help="A3 images per batch.")] = 64,
+    check: Annotated[int, typer.Option(help="July files embedded again to compare.")] = 0,
+    a7_trials: Annotated[
+        str, typer.Option(help='A7 "batch:streams" to time on the --check files, e.g. 32:1,64:2.')
+    ] = "",
+    max_hours: MaxHours = 12.0,
+    upload_list: Annotated[
+        bool, typer.Option(help="Write the list of files July embedded to the bucket first.")
+    ] = False,
+    l40s: Annotated[bool, typer.Option("--l40s", help="An L40S instead of an L4.")] = False,
+) -> None:
+    """Embed stored POP images with A7 and A3 on a GPU machine, unattended (resumable)."""
+    from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import (  # noqa: PLC0415
+        compare_check,
+        embed_launch,
+        run_unattended,
+        upload_july_list,
+    )
+
+    settings = get_settings()
+    if upload_list:
+        from miroir.eval.vectors import read_vectors  # noqa: PLC0415
+
+        ids = read_vectors(settings.vectors_path(JULY_A7_RUN)).ids
+        embedded = frozenset(i for i in ids if not i.startswith("commons-"))
+        typer.echo(f"July files: {upload_july_list(settings, embedded):,}")
+    launch = embed_launch(
+        settings,
+        first,
+        last,
+        a7_batch=a7_batch,
+        a7_streams=a7_streams,
+        a3_batch=a3_batch,
+        check=check,
+        a7_trials=a7_trials,
+    )
+    offers = [o for o in OFFERS if o.zone == "fr-par-2" and ("L40S" in o.commercial_type) == l40s]
+    done = run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="embed")
+    for status in done:
+        typer.echo(status.line())
+    if check:
+        for option_id, (count, low, median) in compare_check(settings, launch.job).items():
+            typer.echo(
+                f"{option_id}: {count} July files again, cosine min {low:.4f}, median {median:.4f}"
+            )
+
+
+@scw_app.command("build-pop-index", hidden=True)
+def scw_build_pop_index(
+    work: Annotated[Path, typer.Option(help="Scratch folder for the gathered vectors.")],
+) -> None:
+    """Gather the vectors and build the `pop-all` bundle. Runs on a Scaleway machine."""
+    from miroir.index.pop_all import build_on_machine  # noqa: PLC0415
+
+    build_on_machine(get_settings(), work)
+
+
+@scw_app.command("pop-index")
+def scw_pop_index(max_hours: MaxHours = 6.0) -> None:
+    """Build the `pop-all` index bundle on a machine with much memory; it lands in the index
+    bucket. The vectors must be in the images bucket (`pop-download`, `pop-embed`)."""
+    from miroir.index.pop_all import input_files, merged_tables, upload_inputs  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import MEMORY_OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import index_launch, run_unattended  # noqa: PLC0415
+
+    settings = get_settings()
+    merged = settings.scaleway_dir / "pop-all-tables"
+    records, images = merged_tables(settings, merged)
+    typer.echo(f"tables: {records:,} records, {images:,} image rows")
+    sent = upload_inputs(settings, s3_client(settings), input_files(settings, merged))
+    typer.echo(f"inputs: {sent} file(s) sent")
+    done = run_unattended(
+        settings,
+        index_launch(settings),
+        offers=MEMORY_OFFERS,
+        max_hours=max_hours,
+        purpose="pop-index",
+        poll_s=120.0,
+    )
+    for status in done:
+        typer.echo(status.line())
+
+
+@scw_app.command("pop-coverage")
+def scw_pop_coverage() -> None:
+    """Which records of the `pop-all` index have vectors, and why the others do not."""
+    from miroir.index.coverage import write_report  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+
+    settings = get_settings()
+    out = settings.index_dir / "coverage-pop-all.json"
+    tables = settings.scaleway_dir / "pop-all-tables"
+    report = write_report(settings, s3_client(settings), tables, out)
+    typer.echo(f"files with vectors: {report['files_with_vectors']:,} of {report['files']:,}")
+    typer.echo(f"written to {out}")
+
+
 @embed_app.command("scw")
 def embed_scw(
     option: Annotated[str, typer.Option(help="Modal option id, e.g. A7-embeddinggemma-2-512.")],

@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 from miroir.config import Settings
 from miroir.jobs import scaleway
+from miroir.jobs.objects import MAX_PARTS, MIN_PART_BYTES, part_bytes
 from miroir.jobs.scaleway import (
     JSON,
     InstanceApi,
@@ -201,3 +202,12 @@ def test_the_worker_env_holds_the_keys_and_nothing_unset(scw: Settings) -> None:
     lines = worker_env(scw).splitlines()
     assert "SCW_SECRET_KEY=test-secret" in lines
     assert not any(line.startswith("HF_TOKEN") for line in lines)
+
+
+def test_upload_parts_stay_within_scaleways_limit() -> None:
+    assert part_bytes(1) == MIN_PART_BYTES
+    assert part_bytes(5 * 1024**3) == MIN_PART_BYTES
+    for size in (19_069_036_928, 36_440_397_440):
+        part = part_bytes(size)
+        assert part % (1024 * 1024) == 0
+        assert -(-size // part) <= MAX_PARTS
