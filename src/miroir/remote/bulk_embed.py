@@ -43,8 +43,8 @@ from miroir.jobs.bulk import (
     piece_prefix,
     status_key,
 )
-from miroir.jobs.modal_spec import OPTIONS
 from miroir.jobs.objects import Bucket, bucket_name, download_tree, listing, s3_client, upload_tree
+from miroir.jobs.remote_spec import OPTIONS
 from miroir.parallel import bounded_map
 
 logger = logging.getLogger(__name__)

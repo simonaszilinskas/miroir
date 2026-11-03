@@ -15,20 +15,20 @@ from miroir.eval.rerank import CandidateMatch, MatchChunk, MatchTask, QueryMatch
 from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors
 from miroir.jobs.checkpoint import Checkpoint
-from miroir.jobs.modal_run import ModalRunner, load_modal_probe, output_runs, run_name
-from miroir.jobs.modal_spec import (
+from miroir.jobs.gpu_run import GpuRunner, load_gpu_probe, output_runs, run_name
+from miroir.jobs.privacy import PrivacyError
+from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     L4,
     MATCH_QUERIES,
     OPTIONS,
     R0_OPTIONS,
     ChunkResult,
-    ModalOption,
+    ModelOption,
     Resize,
     SuppliedImage,
     option,
 )
-from miroir.jobs.privacy import PrivacyError
 from miroir.jobs.spend import BudgetError, Service, SpendKind
 from miroir.records.build import build
 from miroir.records.model import Image
@@ -60,7 +60,7 @@ class FakeCalls:
 
     def embed(
         self,
-        option: ModalOption,
+        option: ModelOption,
         images: Sequence[Image],
         supplied: Sequence[SuppliedImage] = (),
     ) -> ChunkResult:
@@ -75,14 +75,14 @@ class FakeCalls:
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult:
         self.calls.append((f"texts {option.id}", len(texts)))
         self.clock.now += SECONDS_PER_CALL
         vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
         return ChunkResult(tuple(ids), vectors, {}, load_s=30.0, embed_s=1.0)
 
-    def scale(self, option: ModalOption, containers: int) -> None:
+    def scale(self, option: ModelOption, containers: int) -> None:
         self.calls.append((f"scale {option.id}", containers))
 
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
@@ -111,7 +111,7 @@ class FakeCalls:
         )
         return MatchChunk(done, load_s=5.0, missing=())
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         self.calls.append((option.id, 2 * amstertime.PAIRS))
         self.clock.now += SECONDS_PER_CALL
         places = [f"{n:04d}" for n in range(amstertime.PAIRS)]
@@ -133,13 +133,11 @@ def image_ids(settings: Settings, *, publishable: bool) -> list[str]:
 
 def runner(
     settings: Settings, *, key_usage: float | None = None, commons: FakeCommons | None = None
-) -> tuple[ModalRunner, FakeCalls]:
+) -> tuple[GpuRunner, FakeCalls]:
     clock = Clock()
     calls = FakeCalls(clock)
     fetcher = None if commons is None else commons.images(settings)
-    return ModalRunner(
-        settings, calls, key_usage_usd=key_usage, commons=fetcher, clock=clock
-    ), calls
+    return GpuRunner(settings, calls, key_usage_usd=key_usage, commons=fetcher, clock=clock), calls
 
 
 def test_options_name_their_model_and_machine() -> None:
@@ -161,7 +159,7 @@ def test_probe_then_run_writes_vectors_and_logs_modal_spend(built: Settings) -> 
     assert probe.images == len(ids)  # fewer than 100 in the fixtures
     assert probe.cost_usd == pytest.approx(SECONDS_PER_CALL * L4.usd_per_s)
     assert probe.fixed_s == pytest.approx(SECONDS_PER_CALL - 60.0)
-    assert load_modal_probe(built.probe_path(GEMMA)) == probe
+    assert load_gpu_probe(built.probe_path(GEMMA)) == probe
 
     (done,) = r.embed_gallery(GEMMA, "g")
     loaded = read_vectors(built.vectors_path(run_name(OPTIONS[GEMMA], "g")))
@@ -400,7 +398,7 @@ def test_parallel_chunks_reuse_earlier_vectors_and_may_send_private_images(
     write_gallery(built, "old", ids[:3])
     clock = Clock()
     calls = FakeCalls(clock)
-    r = ModalRunner(built, calls, clock=clock, all_images=True)
+    r = GpuRunner(built, calls, clock=clock, all_images=True)
     r.probe(GEMMA, "g")
     (old,) = r.embed_gallery(GEMMA, "old")
 

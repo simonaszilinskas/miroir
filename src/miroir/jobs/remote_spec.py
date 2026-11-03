@@ -149,7 +149,7 @@ FILL_TIMEOUT_S = 20 * 60
 
 
 @dataclass(frozen=True, slots=True)
-class ModalOption:
+class ModelOption:
     """One way to embed images on Modal."""
 
     id: str
@@ -178,8 +178,8 @@ class ModalOption:
 
 def _dino(
     id_: str, experiment: str, model: str, pooling: Pooling, *, gated: bool = False, crop: int = 224
-) -> ModalOption:
-    return ModalOption(
+) -> ModelOption:
+    return ModelOption(
         id_, experiment, Family.DINO, model, crop, pooling, DType.FLOAT32, 64, gated=gated
     )
 
@@ -189,9 +189,9 @@ _V3_HPLUS = "facebook/dinov3-vith16plus-pretrain-lvd1689m"
 _V3_7B = "facebook/dinov3-vit7b16-pretrain-lvd1689m"
 
 
-def _whole(id_: str, model: str, short: int, batch: int, *, gated: bool = True) -> ModalOption:
+def _whole(id_: str, model: str, short: int, batch: int, *, gated: bool = True) -> ModelOption:
     """A DINO model on the whole image, CLS and GeM in one pass, bf16 (R1 rerun, no crop)."""
-    return ModalOption(
+    return ModelOption(
         id_, id_[:2], Family.DINO, model, short, Pooling.CLS_GEM, DType.BFLOAT16, batch,
         gated=gated, resize=Resize.WHOLE,
     )  # fmt: skip
@@ -206,7 +206,7 @@ _ALL = (
     _dino("A2-dinov3-l-256-gem", "A2", _V3_L, Pooling.GEM, gated=True, crop=256),
     _dino("A2-dinov3-hplus-256-cls", "A2", _V3_HPLUS, Pooling.CLS, gated=True, crop=256),
     _dino("A2-dinov3-hplus-256-gem", "A2", _V3_HPLUS, Pooling.GEM, gated=True, crop=256),
-    ModalOption(
+    ModelOption(
         "A2-dinov3-7b-256-cls", "A2", Family.DINO, _V3_7B,
         256, Pooling.CLS, DType.BFLOAT16, 32, gated=True,  # float32 needs a 48 GB GPU
     ),
@@ -214,43 +214,43 @@ _ALL = (
     _whole("A2-dinov3-l-256-nocrop", _V3_L, 256, 128),
     _whole("A2-dinov3-hplus-256-nocrop", _V3_HPLUS, 256, 128),
     _whole("A2-dinov3-7b-256-nocrop", _V3_7B, 256, 64),
-    ModalOption(
+    ModelOption(
         "A3-megaloc-322", "A3", Family.MEGALOC, "gmberton/MegaLoc",
         322, Pooling.SALAD, DType.FLOAT32, 64,
     ),
-    ModalOption(
+    ModelOption(
         "A4-siglip2-so400m-384", "A4", Family.SIGLIP2, "google/siglip2-so400m-patch14-384",
         384, Pooling.HEAD, DType.BFLOAT16, 64,
     ),
-    ModalOption(
+    ModelOption(
         "A4-siglip2-giant-384", "A4", Family.SIGLIP2, "google/siglip2-giant-opt-patch16-384",
         384, Pooling.HEAD, DType.BFLOAT16, 32,
     ),
-    ModalOption(
+    ModelOption(
         "A5-pe-core-l-336", "A5", Family.PE_CORE, "timm/PE-Core-L-14-336",
         336, Pooling.HEAD, DType.BFLOAT16, 64,
     ),
-    ModalOption(
+    ModelOption(
         "A5-pe-core-g-448", "A5", Family.PE_CORE, "timm/PE-Core-bigG-14-448",
         448, Pooling.HEAD, DType.BFLOAT16, 16,
     ),
-    ModalOption(
+    ModelOption(
         "A7-embeddinggemma-2-512", "A7", Family.EMBEDDINGGEMMA, "google/embeddinggemma-2",
         512, Pooling.HEAD, DType.BFLOAT16, 32,
     ),
-    ModalOption(
+    ModelOption(
         "A8-qwen3-vl-embedding-2b-512", "A8", Family.QWEN3_VL, "Qwen/Qwen3-VL-Embedding-2B",
         512, Pooling.HEAD, DType.BFLOAT16, 16,
     ),
 )  # fmt: skip
 
-OPTIONS: dict[str, ModalOption] = {o.id: o for o in _ALL}
+OPTIONS: dict[str, ModelOption] = {o.id: o for o in _ALL}
 
 # Round R0 (T9): AmsterTime with the DINOv3 paper's protocol (§D.8): shorter side 256,
 # centre crop 224, CLS token, cosine. Expected mAP from its Tables 9 and 23.
-R0_OPTIONS: dict[str, ModalOption] = {
+R0_OPTIONS: dict[str, ModelOption] = {
     "dinov2-giant-224": _dino("R0-dinov2-giant-224", "A1", "facebook/dinov2-giant", Pooling.CLS),
-    "dinov3-vit7b16-224": ModalOption(
+    "dinov3-vit7b16-224": ModelOption(
         "R0-dinov3-vit7b16-224",
         "A2",
         Family.DINO,
@@ -265,7 +265,7 @@ R0_OPTIONS: dict[str, ModalOption] = {
 R0_EXPECTED_MAP: dict[str, float] = {"dinov2-giant-224": 48.9, "dinov3-vit7b16-224": 56.5}
 
 
-def option(option_id: str) -> ModalOption:
+def option(option_id: str) -> ModelOption:
     """Look up a gallery option or an R0 option by its id."""
     found = OPTIONS.get(option_id) or {o.id: o for o in R0_OPTIONS.values()}.get(option_id)
     if found is None:

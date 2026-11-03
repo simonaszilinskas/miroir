@@ -33,7 +33,6 @@ from miroir.config import (
     MODAL_WEIGHTS_MOUNT,
     Settings,
 )
-from miroir.jobs.modal_spec import FILL_CONCURRENCY, ChunkResult, ModalOption, SuppliedImage
 from miroir.jobs.objects import (
     Bucket,
     bucket_name,
@@ -43,6 +42,7 @@ from miroir.jobs.objects import (
     upload_files,
     upload_tree,
 )
+from miroir.jobs.remote_spec import FILL_CONCURRENCY, ChunkResult, ModelOption, SuppliedImage
 from miroir.records.model import Image
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ class Worker:
     # --- the jobs (as in miroir.jobs.modal_app) -------------------------------------------
 
     def embed(
-        self, option: ModalOption, images: list[Image], supplied: list[SuppliedImage]
+        self, option: ModelOption, images: list[Image], supplied: list[SuppliedImage]
     ) -> ChunkResult:
         from miroir.remote.models import embed_images  # noqa: PLC0415
 
@@ -135,7 +135,7 @@ class Worker:
         self._save_weights(result.load_s)
         return result
 
-    def embed_texts(self, option: ModalOption, ids: list[str], texts: list[str]) -> ChunkResult:
+    def embed_texts(self, option: ModelOption, ids: list[str], texts: list[str]) -> ChunkResult:
         from miroir.remote.models import embed_texts  # noqa: PLC0415
 
         result = embed_texts(option, ids, texts)
@@ -163,7 +163,7 @@ class Worker:
         upload_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
         return len(amstertime.image_ids(images))
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         from miroir.eval import amstertime  # noqa: PLC0415
         from miroir.remote.models import embed_files  # noqa: PLC0415
 

@@ -34,7 +34,7 @@ from miroir.eval.wire import (
     SiteMatches,
     SiteMatchTask,
 )
-from miroir.jobs.modal_spec import (
+from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     DOWNLOAD_MACHINE,
     DOWNLOAD_TIMEOUT_S,
@@ -52,7 +52,7 @@ from miroir.jobs.modal_spec import (
     SCALEDOWN_S,
     ChunkResult,
     Family,
-    ModalOption,
+    ModelOption,
     SuppliedImage,
 )
 from miroir.outlines import Box, DetectorOption
@@ -90,13 +90,13 @@ _MIB = 1024
 
 
 # --- POP images, one function per family ----------------------------------------------------
-# modal_spec.ModalOption.machine says what each asks for; max_containers=1 keeps one warm
+# remote_spec.ModelOption.machine says what each asks for; max_containers=1 keeps one warm
 # container that loads its model once and takes the chunks one after another. Images come
 # from the `miroir-images` volume when it holds them, else from POP. Commons query photos
 # come as bytes (`supplied`): the Mac fetches them from Wikimedia at its polite pace.
 
 
-def _embed(option: ModalOption, images: list[Image], supplied: list[SuppliedImage]) -> ChunkResult:
+def _embed(option: ModelOption, images: list[Image], supplied: list[SuppliedImage]) -> ChunkResult:
     from miroir.remote.models import embed_images  # noqa: PLC0415 (container only)
 
     result = embed_images(option, images, supplied)
@@ -117,7 +117,7 @@ def _embed(option: ModalOption, images: list[Image], supplied: list[SuppliedImag
     scaledown_window=SCALEDOWN_S,
 )
 def embed_dino(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -134,7 +134,7 @@ def embed_dino(
     scaledown_window=SCALEDOWN_S,
 )
 def embed_siglip2(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -151,7 +151,7 @@ def embed_siglip2(
     scaledown_window=SCALEDOWN_S,
 )
 def embed_pe_core(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -168,7 +168,7 @@ def embed_pe_core(
     scaledown_window=SCALEDOWN_S,
 )
 def embed_embeddinggemma(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -185,7 +185,7 @@ def embed_embeddinggemma(
     scaledown_window=SCALEDOWN_S,
 )
 def embed_qwen3_vl(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -202,7 +202,7 @@ def embed_qwen3_vl(
     scaledown_window=SCALEDOWN_S,
 )
 def embed_megaloc(
-    option: ModalOption, images: list[Image], supplied: list[SuppliedImage] | None = None
+    option: ModelOption, images: list[Image], supplied: list[SuppliedImage] | None = None
 ) -> ChunkResult:
     return _embed(option, images, supplied or [])
 
@@ -218,7 +218,7 @@ def embed_megaloc(
     max_containers=1,
     scaledown_window=SCALEDOWN_S,
 )
-def embed_texts(option: ModalOption, ids: list[str], texts: list[str]) -> ChunkResult:
+def embed_texts(option: ModelOption, ids: list[str], texts: list[str]) -> ChunkResult:
     """Search words (T7 and other word queries), as the website embeds them."""
     from miroir.remote.models import embed_texts as embed  # noqa: PLC0415 (container only)
 
@@ -389,7 +389,7 @@ def amstertime_download() -> int:
     volumes={MODAL_WEIGHTS_MOUNT: weights, MODAL_BENCHMARKS_MOUNT: benchmarks},
     secrets=[hf_secret],
 )
-def amstertime_embed(option: ModalOption) -> ChunkResult:
+def amstertime_embed(option: ModelOption) -> ChunkResult:
     """Embed every AmsterTime image from the volume, ids `old/NNNN.jpg` and `new/NNNN.png`."""
     from miroir.eval import amstertime  # noqa: PLC0415
     from miroir.remote.models import embed_files  # noqa: PLC0415
@@ -406,22 +406,22 @@ def amstertime_embed(option: ModalOption) -> ChunkResult:
 
 
 class ModalCalls:
-    """The remote calls a run makes, inside a running app. `miroir.jobs.modal_run` uses these."""
+    """The remote calls a run makes, inside a running app. `miroir.jobs.gpu_run` uses these."""
 
     def embed(
         self,
-        option: ModalOption,
+        option: ModelOption,
         images: Sequence[Image],
         supplied: Sequence[SuppliedImage] = (),
     ) -> ChunkResult:
         return FAMILY_FUNCTIONS[option.family].remote(option, list(images), list(supplied))
 
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult:
         return embed_texts.remote(option, list(ids), list(texts))
 
-    def scale(self, option: ModalOption, containers: int) -> None:
+    def scale(self, option: ModelOption, containers: int) -> None:
         """Let the option's function run `containers` containers at once, for this app run."""
         FAMILY_FUNCTIONS[option.family].update_autoscaler(max_containers=containers)
 
@@ -441,7 +441,7 @@ class ModalCalls:
     def amstertime_download(self) -> int:
         return amstertime_download.remote()
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         return amstertime_embed.remote(option)
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:

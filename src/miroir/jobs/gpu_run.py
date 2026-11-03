@@ -2,7 +2,7 @@
 
 Money (experiments.md §1 rule 5). Modal bills by the second for GPU, CPU and memory. Each
 remote call is timed on the Mac, from the call to its answer, and costs that many seconds at
-the function's published price (`modal_spec.Machine.usd_per_s`): a little more than Modal
+the function's published price (`remote_spec.Machine.usd_per_s`): a little more than Modal
 bills, since the clock also runs while the call travels. The cost goes into the one project
 ledger, tagged `modal`, even when the call fails. Before every call, total spend plus the
 call's worst case (its timeout at full price) must stay inside the usable budget. A gallery
@@ -44,7 +44,8 @@ from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
 from miroir.images.fetch import Fetched
 from miroir.jobs.checkpoint import Checkpoint
-from miroir.jobs.modal_spec import (
+from miroir.jobs.privacy import PublishableImages
+from miroir.jobs.remote_spec import (
     CHUNK_IMAGES,
     CHUNK_TEXTS,
     CHUNK_TIMEOUT_S,
@@ -63,12 +64,11 @@ from miroir.jobs.modal_spec import (
     ChunkResult,
     Family,
     Machine,
-    ModalOption,
+    ModelOption,
     Pooling,
     SuppliedImage,
     option,
 )
-from miroir.jobs.privacy import PublishableImages
 from miroir.jobs.spend import (
     PROBE_IMAGES,
     Budget,
@@ -102,22 +102,22 @@ class RemoteCalls(Protocol):
 
     def embed(
         self,
-        option: ModalOption,
+        option: ModelOption,
         images: Sequence[Image],
         supplied: Sequence[SuppliedImage] = (),
     ) -> ChunkResult: ...
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
-    def scale(self, option: ModalOption, containers: int) -> None: ...
+    def scale(self, option: ModelOption, containers: int) -> None: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
     def amstertime_download(self) -> int: ...
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult: ...
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult: ...
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk: ...
 
 
 @dataclass(frozen=True, slots=True)
-class ModalProbe:
+class GpuProbe:
     """Time and cost of embedding about 100 gallery images with one option on Modal."""
 
     __pydantic_config__ = ConfigDict(extra="forbid")
@@ -138,15 +138,15 @@ class ModalProbe:
         return (self.fixed_s + self.per_image_s * count) * self.usd_per_s
 
 
-_PROBE = TypeAdapter(ModalProbe)
+_PROBE = TypeAdapter(GpuProbe)
 
 
-def save_modal_probe(path: Path, probe: ModalProbe) -> None:
+def save_gpu_probe(path: Path, probe: GpuProbe) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_PROBE.dump_json(probe, indent=2) + b"\n")
 
 
-def load_modal_probe(path: Path) -> ModalProbe | None:
+def load_gpu_probe(path: Path) -> GpuProbe | None:
     if not path.exists():
         return None
     try:
@@ -156,11 +156,11 @@ def load_modal_probe(path: Path) -> ModalProbe | None:
         raise BudgetError(msg) from err
 
 
-def run_name(opt: ModalOption, gallery: str) -> str:
+def run_name(opt: ModelOption, gallery: str) -> str:
     return f"{opt.id}-{gallery}"
 
 
-def output_runs(opt: ModalOption, gallery: str) -> dict[str, Pooling]:
+def output_runs(opt: ModelOption, gallery: str) -> dict[str, Pooling]:
     """The vector runs a gallery run writes, with their pooling. CLS+GeM writes two."""
     if opt.pooling is Pooling.CLS_GEM:
         return {f"{opt.id}-{p.value}-{gallery}": p for p in (Pooling.CLS, Pooling.GEM)}
@@ -223,7 +223,7 @@ def paid_call[T](
     return Paid(result, wall * machine.usd_per_s, wall)
 
 
-class ModalRunner:
+class GpuRunner:
     """Runs embedding jobs on Modal and logs what each call costs."""
 
     def __init__(
@@ -256,7 +256,7 @@ class ModalRunner:
 
     # --- the three entry points -------------------------------------------------------------
 
-    def probe(self, option_id: str, gallery: str) -> tuple[ModalProbe, int]:
+    def probe(self, option_id: str, gallery: str) -> tuple[GpuProbe, int]:
         """Embed 100 images of `gallery`, store time and cost. Returns it and the gallery size."""
         opt = option(option_id)
         ids = self._gallery(gallery)
@@ -282,7 +282,7 @@ class ModalRunner:
             msg = f"probe for {opt.id}: no image could be embedded ({done.skips})"
             raise RuntimeError(msg)
         _check_chunk(done, opt)
-        result = ModalProbe(
+        result = GpuProbe(
             option=opt.id,
             model=opt.model,
             resolution=opt.resolution,
@@ -294,7 +294,7 @@ class ModalRunner:
             cost_usd=paid.cost_usd,
             created=_today(),
         )
-        save_modal_probe(self.settings.probe_path(opt.id), result)
+        save_gpu_probe(self.settings.probe_path(opt.id), result)
         logger.info(
             "probe %s: %d images, $%.4f (load %.0f s, %.3f s per image), skipped %s",
             opt.id,
@@ -644,7 +644,7 @@ class ModalRunner:
             yield [], supplied
 
     def _embed_chunks(
-        self, opt: ModalOption, run: str, todo: Sequence[str], workers: int
+        self, opt: ModelOption, run: str, todo: Sequence[str], workers: int
     ) -> Iterator[Paid[ChunkResult]]:
         """Send `todo` in chunks, `workers` at a time; yield each answer as it arrives."""
 
@@ -677,7 +677,7 @@ class ModalRunner:
                     future.cancel()
 
     def _reuse(
-        self, opt: ModalOption, name: str, wanted: set[str], held: set[str], checkpoint: Checkpoint
+        self, opt: ModelOption, name: str, wanted: set[str], held: set[str], checkpoint: Checkpoint
     ) -> int:
         """Copy the vectors of an earlier run into the checkpoint. Returns how many were taken.
 
@@ -701,18 +701,18 @@ class ModalRunner:
         logger.info("%s: reused %d vectors from %s", opt.id, len(rows), name)
         return len(rows)
 
-    def probe_for(self, opt: ModalOption) -> ModalProbe | None:
+    def probe_for(self, opt: ModelOption) -> GpuProbe | None:
         """The option's probe, else one of an option with the same model, size and resize.
 
         Pooling (CLS or GeM) does not change the cost, so one probe serves both.
         """
-        own = load_modal_probe(self.settings.probe_path(opt.id))
+        own = load_gpu_probe(self.settings.probe_path(opt.id))
         if own is not None:
             return own
         for other in OPTIONS.values():
             same = (other.model, other.resolution, other.resize)
             if same == (opt.model, opt.resolution, opt.resize):
-                found = load_modal_probe(self.settings.probe_path(other.id))
+                found = load_gpu_probe(self.settings.probe_path(other.id))
                 if found is not None:
                     logger.info("%s: using the probe of %s (same model and size)", opt.id, other.id)
                     return found
@@ -883,7 +883,7 @@ class ModalRunner:
 
     def _info(
         self,
-        opt: ModalOption,
+        opt: ModelOption,
         *,
         gallery: str,
         machine: Machine,
@@ -923,7 +923,7 @@ def _chunks(ids: Sequence[str]) -> Iterator[list[str]]:
 
 
 def _keep_chunk(
-    result: ChunkResult, opt: ModalOption, checkpoint: Checkpoint, skips: dict[str, int]
+    result: ChunkResult, opt: ModelOption, checkpoint: Checkpoint, skips: dict[str, int]
 ) -> None:
     """Check one answer, save its vectors to the checkpoint, add up what it skipped."""
     _check_chunk(result, opt)
@@ -934,7 +934,7 @@ def _keep_chunk(
     logger.info("%s: %d images embedded so far", opt.id, len(checkpoint.ids))
 
 
-def _check_chunk(result: ChunkResult, opt: ModalOption) -> None:
+def _check_chunk(result: ChunkResult, opt: ModelOption) -> None:
     rows = result.vectors.shape[0] if result.vectors.ndim == 2 else -1
     if rows != len(result.ids):
         msg = f"{opt.id}: {len(result.ids)} ids but vectors of shape {result.vectors.shape}"

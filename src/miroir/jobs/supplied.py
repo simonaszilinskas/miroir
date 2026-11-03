@@ -1,4 +1,4 @@
-"""Images the Mac sends to Modal as bytes (`ModalRunner.embed_supplied`).
+"""Images the Mac sends to Modal as bytes (`GpuRunner.embed_supplied`).
 
 Two sources: Commons photos added to a gallery (step F2), fetched politely from Wikimedia,
 and grey copies of POP images and Commons query photos (step F1), made here with Pillow

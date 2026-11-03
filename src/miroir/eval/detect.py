@@ -44,8 +44,8 @@ from miroir.eval.sets import load_queries
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import DetectChunk, DetectedRoom, Located, LocateTask, RoomPhoto
 from miroir.images.fetch import Fetched, to_jpeg
-from miroir.jobs.modal_run import PaidCall, paid_call
-from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4, L4_DINO
+from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, L4, L4_DINO
 from miroir.jobs.spend import SpendKind
 from miroir.outlines import (
     ALL_OUTLINES,

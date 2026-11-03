@@ -35,9 +35,9 @@ from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import CaptionChunk, CaptionPhoto
 from miroir.images.mount import crop_picture, find_picture
-from miroir.jobs.modal_run import PaidCall, paid_call
-from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4, OPTIONS, ChunkResult, ModalOption
-from miroir.jobs.modal_spec import SuppliedImage as Supplied
+from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, L4, OPTIONS, ChunkResult, ModelOption
+from miroir.jobs.remote_spec import SuppliedImage as Supplied
 from miroir.jobs.spend import SpendKind
 from miroir.records.model import Image
 from miroir.records.store import read_images
@@ -110,11 +110,11 @@ def archive_photos(settings: Settings) -> list[ArchivePhoto]:
 
 class ArchiveCalls(Protocol):
     def embed(
-        self, option: ModalOption, images: Sequence[Image], supplied: Sequence[Supplied] = ()
+        self, option: ModelOption, images: Sequence[Image], supplied: Sequence[Supplied] = ()
     ) -> ChunkResult: ...
 
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
 
     def read_captions(self, model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk: ...

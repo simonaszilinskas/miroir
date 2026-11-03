@@ -785,16 +785,16 @@ def embed_modal(
     Paid: probe first. Commons query photos are fetched on the Mac and sent as bytes.
     """
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
-    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
+    from miroir.jobs.remote_spec import option as find_option  # noqa: PLC0415
 
     find_option(option)  # fail before starting Modal
     if queries and probe:
         raise typer.BadParameter("--probe works with --gallery only")
     settings = get_settings()
     with open_commons_images(settings) as commons, open_modal(settings) as calls:
-        runner = ModalRunner(
+        runner = GpuRunner(
             settings,
             calls,
             key_usage_usd=_openrouter_key_usage(),
@@ -832,15 +832,15 @@ def embed_modal_f2(
     ] = None,
 ) -> None:
     """F2: embed the Commons photos added to a gallery's buildings (sent from the Mac)."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
     from miroir.jobs.supplied import open_gallery_photos  # noqa: PLC0415
     from miroir.records.store import read_commons  # noqa: PLC0415
 
     settings = get_settings()
     ids = [p.image_id for p in read_commons(settings.commons_gallery_parquet(gallery))]
     with open_gallery_photos(settings, gallery) as photos, open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, f"F2-{gallery}", ids, photos, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
@@ -853,15 +853,15 @@ def embed_modal_extra(
     ] = None,
 ) -> None:
     """Embed the images of the records in extra/ (`miroir records add`), sent from the Mac."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
     from miroir.jobs.supplied import open_extra_images  # noqa: PLC0415
     from miroir.records.extra import read_extra_images  # noqa: PLC0415
 
     settings = get_settings()
     ids = [i.image_id for i in read_extra_images(settings)]
     with open_extra_images(settings) as images, open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, "X", ids, images, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
@@ -878,15 +878,15 @@ def embed_modal_grey(
     ] = None,
 ) -> None:
     """F1: embed grey copies of every image with colour in a gallery and the query sets."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
     from miroir.jobs.supplied import grey_candidates, open_grey_copies  # noqa: PLC0415
 
     settings = get_settings()
     with open_grey_copies(settings) as grey:
         ids = grey.not_grey(grey_candidates(settings, gallery, queries or ()))
         with open_modal(settings) as calls:
-            runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+            runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
             done = runner.embed_supplied(option, f"grey-{gallery}", ids, grey, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
@@ -904,12 +904,12 @@ def embed_modal_images(
     ] = False,
 ) -> None:
     """Fetch a gallery's images once into the Modal image volume, so model runs read them there."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
 
     settings = get_settings()
     with open_modal(settings) as calls:
-        runner = ModalRunner(
+        runner = GpuRunner(
             settings, calls, key_usage_usd=_openrouter_key_usage(), all_images=all_images
         )
         counts = runner.fill_images(gallery)
@@ -923,12 +923,12 @@ def r0_run(
     ] = "dinov2-giant-224",
 ) -> None:
     """Download AmsterTime into a Modal volume and embed it there; vectors come back here."""
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
 
     settings = get_settings()
     with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.r0(model)
     run = settings.vectors_path(f"R0-{model}-amstertime").name
     typer.echo(f"{run}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
@@ -1222,13 +1222,13 @@ def words_embed(
 ) -> None:
     """Embed T7/T7en tune words and the refine communes with EmbeddingGemma 2 on Modal. Paid."""
     from miroir.eval.wordsearch import TEXT_LABEL, text_inputs  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
 
     settings = get_settings()
     ids, texts = text_inputs(settings)
     with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_texts(TEXT_OPTION, TEXT_LABEL, ids, texts, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
@@ -1301,14 +1301,14 @@ def rerank_modal(
     """Match each tune query against its top 50 entities' best images, on a Modal GPU. Paid."""
     from miroir.eval.rerank import tasks  # noqa: PLC0415
     from miroir.eval.run import matches_name, rerank_shortlists  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
 
     settings = get_settings()
     lists, _, _ = rerank_shortlists(settings, vector_run=vectors, set_id=test_set, gallery=gallery)
     name = matches_name(vectors, test_set)
     with open_modal(settings) as calls:
-        runner = ModalRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.match(name, tasks(lists), max_usd=max_usd)
     typer.echo(f"{name}: {done} queries matched; next: uv run miroir eval rerank ...")
 
@@ -1918,8 +1918,8 @@ def embed_scw(
 ) -> None:
     """`embed modal` on a Scaleway GPU machine: start it, run, delete it. Same vector runs."""
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
-    from miroir.jobs.modal_run import ModalRunner  # noqa: PLC0415
-    from miroir.jobs.modal_spec import option as find_option  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.remote_spec import option as find_option  # noqa: PLC0415
     from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Service  # noqa: PLC0415
 
@@ -1932,7 +1932,7 @@ def embed_scw(
         open_commons_images(settings) as commons,
         open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls,
     ):
-        runner = ModalRunner(
+        runner = GpuRunner(
             settings,
             calls,
             key_usage_usd=_openrouter_key_usage(),
@@ -1972,8 +1972,8 @@ app.add_typer(detect_app, name="detect")
 def detect_locate() -> None:
     """Find where each T3 tune artwork hangs in its room photos, on a Modal GPU. Paid."""
     from miroir.eval.detect import run_locate  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
@@ -1990,8 +1990,8 @@ def detect_rooms(
 ) -> None:
     """Run one detector on the room photos and search every box like the site. Paid."""
     from miroir.eval.detect import run_detector  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
@@ -2032,8 +2032,8 @@ def rerank_site(
     """E1 in the website: match object searches' top 30 on Modal with the site's code. Paid."""
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
     from miroir.eval.site_rerank import match_sets, search_sets  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
     from miroir.web.bundle import SiteBundle  # noqa: PLC0415
 
@@ -2065,8 +2065,8 @@ def detect_single(
     """Count the outlines the site would draw on photos of one object (T5, T2b). Paid."""
     from miroir.commons.images import open_commons_images  # noqa: PLC0415
     from miroir.eval.detect import run_single_objects  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()
@@ -2136,8 +2136,8 @@ def archive_remote(
     """On Modal: embed the T1 tune photos whole and cut from their mounts, read their
     captions. Paid; each part is kept and not asked again."""
     from miroir.eval.archive import run_remote  # noqa: PLC0415
+    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.modal_app import open_modal  # noqa: PLC0415 (imports the modal client)
-    from miroir.jobs.modal_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
 
     settings = get_settings()

@@ -31,8 +31,8 @@ from miroir.eval.scoring import QueryScore, ScoreResult, paired_bootstrap
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import SiteMatches, SiteMatchTask
 from miroir.images.fetch import Fetched
-from miroir.jobs.modal_run import PaidCall, paid_call
-from miroir.jobs.modal_spec import CHUNK_TIMEOUT_S, L4
+from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, L4
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.web.bundle import SiteBundle, SiteHit, asked_sets, site_search
 from miroir.web.engine import prepare_photo

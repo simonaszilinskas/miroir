@@ -3,7 +3,7 @@
 `open_scaleway` starts a machine (`miroir.jobs.scaleway.gpu_machine`), lets the Mac in over
 SSH with a key made for this machine alone, builds the job image there (`docker/Dockerfile`,
 with this checkout's code), starts the worker (`miroir.remote.worker`) and opens an SSH tunnel
-to it. It yields `ScalewayCalls`, which has the calls of `ModalCalls`, so `ModalRunner` runs
+to it. It yields `ScalewayCalls`, which has the calls of `ModalCalls`, so `GpuRunner` runs
 the same jobs here. When the block ends, new weights and images go back to their buckets and
 the machine is deleted, whatever happened.
 
@@ -32,14 +32,14 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from miroir.config import REPO_ROOT, Settings
-from miroir.jobs.modal_spec import (
+from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     LIGHTGLUE,
     MATCH_LIBRARIES,
     MODEL_LIBRARIES,
     ChunkResult,
     Machine,
-    ModalOption,
+    ModelOption,
     SuppliedImage,
 )
 from miroir.jobs.scaleway import (
@@ -266,11 +266,11 @@ class ScalewayCalls:
         self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S)
         self.gpu = machine
         self.busy_s = 0.0
-        """Seconds spent in calls, for the run costs (`ModalRunner(machine=...)`)."""
+        """Seconds spent in calls, for the run costs (`GpuRunner(machine=...)`)."""
 
     @property
     def machine(self) -> Machine:
-        """The whole machine at its price, in dollars, as `ModalRunner` counts."""
+        """The whole machine at its price, in dollars, as `GpuRunner` counts."""
         offer = self.gpu.offer
         return Machine(
             gpu=offer.commercial_type,
@@ -314,19 +314,19 @@ class ScalewayCalls:
         """Send new weights and images back to their buckets."""
         return cast("dict[str, int]", self.call("persist"))
 
-    # --- `RemoteCalls` (miroir.jobs.modal_run) and the rest of `ModalCalls` ------------------
+    # --- `RemoteCalls` (miroir.jobs.gpu_run) and the rest of `ModalCalls` ------------------
 
     def embed(
-        self, option: ModalOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
+        self, option: ModelOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
     ) -> ChunkResult:
         return cast("ChunkResult", self.call("embed", option, list(images), list(supplied)))
 
     def embed_texts(
-        self, option: ModalOption, ids: Sequence[str], texts: Sequence[str]
+        self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult:
         return cast("ChunkResult", self.call("embed_texts", option, list(ids), list(texts)))
 
-    def scale(self, option: ModalOption, containers: int) -> None:
+    def scale(self, option: ModelOption, containers: int) -> None:
         """One GPU: chunks queue on it whatever `containers` says."""
         if containers > 1:
             logger.info("%s: one Scaleway GPU, chunks run one after another", option.id)
@@ -337,7 +337,7 @@ class ScalewayCalls:
     def amstertime_download(self) -> int:
         return cast("int", self.call("amstertime_download"))
 
-    def amstertime_embed(self, option: ModalOption) -> ChunkResult:
+    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
         return cast("ChunkResult", self.call("amstertime_embed", option))
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:

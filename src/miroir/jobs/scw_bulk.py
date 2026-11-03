@@ -33,8 +33,8 @@ from miroir.jobs.bulk import (
     check_key,
     status_key,
 )
-from miroir.jobs.modal_spec import MODEL_LIBRARIES
 from miroir.jobs.objects import Bucket, bucket_name, s3_client
+from miroir.jobs.remote_spec import MODEL_LIBRARIES
 from miroir.jobs.scaleway import InstanceApi, Machine, Offer, gpu_machine
 from miroir.jobs.scw_run import (
     IMAGE_TAG,

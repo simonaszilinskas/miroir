@@ -18,8 +18,8 @@ import numpy as np
 
 from miroir.config import SEED, Settings
 from miroir.eval.vectors import read_vectors
-from miroir.jobs.modal_spec import OPTIONS
 from miroir.jobs.privacy import PublishableImages
+from miroir.jobs.remote_spec import OPTIONS
 from miroir.jobs.scw_run import ScalewayCalls
 from miroir.records.model import Image
 
