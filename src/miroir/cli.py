@@ -1804,6 +1804,10 @@ def embed_scw(
             help="Also images of records that are not publishable (full-sample index only).",
         ),
     ] = False,
+    reuse: Annotated[
+        list[str] | None,
+        typer.Option(help="Vector run of the same model and settings to take vectors from."),
+    ] = None,
     max_hours: MaxHours = 2.0,
 ) -> None:
     """Embed a gallery, or test sets' query images, with an open model on a Scaleway GPU.
@@ -1844,7 +1848,7 @@ def embed_scw(
                 f"${result.projected_usd(size):.2f}"
             )
             return
-        written = runner.embed_gallery(option, gallery, max_usd=max_usd)
+        written = runner.embed_gallery(option, gallery, max_usd=max_usd, reuse=reuse or ())
     for done in written:
         typer.echo(f"{done.info.gallery} ({done.info.pooling}): {len(done.ids)} vectors")
 
