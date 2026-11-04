@@ -1,20 +1,17 @@
-"""What the `miroir eval` commands do: score a vector run on a test set, a benchmark, or compare."""
+"""What the `miroir eval` commands do: score a vector run on a test set, or compare."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from miroir.commons.images import commons_photos
 from miroir.commons.model import View, is_commons_image
 from miroir.config import Settings, eval_result_path
-from miroir.eval import amstertime
-from miroir.eval.rerank import MIX_INLIERS, SHORTLIST, Rerank, read_matches, rerank, search_times
 from miroir.eval.results import (
-    RunResult,
     SetScore,
     find_set_score,
     read_result,
@@ -25,24 +22,19 @@ from miroir.eval.scoring import (
     Difference,
     Gallery,
     Interval,
+    NotFoundQuery,
     QueryScore,
-    ScoreResult,
     SearchQuery,
-    Shortlist,
     bootstrap,
     hits,
     paired_bootstrap,
     score,
-    shortlists,
 )
 from miroir.eval.sets import Query, cluster_of, load_queries, read_gallery, write_gallery
-from miroir.eval.vectors import VectorSet, merge_runs, read_vectors
-from miroir.jobs.spend import SpendKind, SpendLedger
+from miroir.eval.vectors import Route, RunInfo, VectorSet, merge_runs, read_vectors
 from miroir.records.store import read_commons, read_images, read_records
 
 logger = logging.getLogger(__name__)
-
-AMSTERTIME_SET = amstertime.GALLERY
 
 
 def score_test_set(
@@ -124,116 +116,58 @@ def entity_map(settings: Settings) -> dict[str, str]:
     return entity_of
 
 
-def rerank_shortlists(
-    settings: Settings, *, vector_run: str, set_id: str, gallery: str, top: int = SHORTLIST
-) -> tuple[tuple[Shortlist, ...], ScoreResult, VectorSet]:
-    """Each tune query's top entities (step E1), on the queries a closed model may see.
+@dataclass(frozen=True, slots=True)
+class Model:
+    """One model's gallery run, and where its query vectors are."""
 
-    Also returns the plain search score of the same queries and the vectors searched.
-    """
-    vectors = read_vectors(settings.vectors_path(vector_run))
-    searched, queries = _search_inputs(
-        settings,
-        vectors,
-        set_id=set_id,
-        gallery=gallery,
-        publishable_queries=True,
-    )
-    lists, plain = shortlists(vectors, searched, queries, top=top)
-    return lists, plain, vectors
+    run: str
+    vectors: VectorSet
+    gallery: Gallery
+    asking: VectorSet
+    """The query run, else the gallery run."""
 
 
-def matches_name(vector_run: str, set_id: str, top: int = SHORTLIST) -> str:
-    """Name of the file holding a shortlist's keypoint matches."""
-    return f"E1-{vector_run}-{set_id}-top{top}"
-
-
-def score_rerank(
+def load_model(
     settings: Settings,
+    run: str,
+    entity_of: dict[str, str],
+    ids: list[str],
     *,
-    round_id: str,
-    label: str,
-    vector_run: str,
-    set_id: str,
-    gallery: str,
-    top: int = SHORTLIST,
-) -> list[SetScore]:
-    """Score a shortlist re-ranked each way (`Rerank`), one result file per way.
+    query_run: str | None = None,
+) -> Model:
+    """A model's gallery, and where its query vectors are (`query_run`, else the gallery run)."""
+    vectors = read_vectors(settings.vectors_path(run))
+    asking = vectors if query_run is None else read_vectors(settings.vectors_path(query_run))
+    return Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids), asking)
 
-    Writes eval/results/<round>/E-E1-<label>-<way>.json. Matches must be on file
-    (`miroir rerank run`).
-    """
-    lists, plain, vectors = rerank_shortlists(
-        settings, vector_run=vector_run, set_id=set_id, gallery=gallery, top=top
+
+def combined_info(infos: Sequence[RunInfo], notes: str) -> RunInfo:
+    """One `RunInfo` for several models used together: costs and times add up."""
+    routes = {i.route for i in infos}
+    return RunInfo(
+        option="+".join(i.option for i in infos),
+        model=" + ".join(i.model for i in infos),
+        resolution=max(i.resolution for i in infos),
+        pooling="fusion",
+        gallery=infos[0].gallery,
+        created=max(i.created for i in infos),
+        cost_usd=sum(i.cost_usd for i in infos),
+        wall_time_s=sum(i.wall_time_s for i in infos),
+        route=routes.pop() if len(routes) == 1 else Route.HOSTED,
+        notes=notes,
     )
-    name = matches_name(vector_run, set_id, top)
-    matched = read_matches(settings.matches_path(name))
-    unmatched = [s.query_id for s in lists if s.query_id not in matched]
-    if unmatched:
-        msg = f"{name}: {len(unmatched)} queries have no matches yet, e.g. {unmatched[0]}"
+
+
+def not_found_queries(queries: Sequence[Query], set_id: str) -> list[NotFoundQuery]:
+    """A not-found set's queries (T8, T8c), each hiding its own entity's images."""
+    with_answer = sum(1 for q in queries if q.expected_entity_ids)
+    if with_answer:
+        msg = f"{with_answer} {set_id} queries have a right answer"
         raise ValueError(msg)
-    mine = [matched[s.query_id] for s in lists]
-    median_s, p95_s = search_times(mine)
-    cost = SpendLedger(settings.spend_ledger).total(SpendKind.RUN, run=name)
-    out: list[SetScore] = []
-    for how in Rerank:
-        per_query = tuple(rerank(s, matched[s.query_id], how) for s in lists)
-        result = replace(plain, per_query=per_query)
-        scored = set_score(result, test_set=set_id, half="tune", gallery=gallery)
-        info = replace(
-            vectors.info,
-            option="E1",
-            model=f"{vectors.info.model} + ALIKED/LightGlue",
-            cost_usd=cost,
-            wall_time_s=sum(m.search_s + m.candidates_s for m in mine),
-            notes=(
-                f"top {top} entities re-ranked by {how} (homography inliers"
-                f"{f', + cosine, inliers / {MIX_INLIERS:.0f}' if how is Rerank.MIX else ''}); "
-                f"adds {median_s * 1000:.0f} ms median, {p95_s * 1000:.0f} ms p95 per search "
-                "on an L4 GPU (gallery keypoints computed ahead)"
-            ),
-        )
-        write_result(
-            eval_result_path(round_id, "E", f"E1-{label}-{how}"),
-            round_id=round_id,
-            step="E",
-            option=f"E1-{label}-{how}",
-            vector_run=vector_run,
-            query_vector_run=vector_run,
-            vectors=info,
-            scores=[scored],
-            today=_today(),
-        )
-        out.append(scored)
-    return out
-
-
-def score_amstertime(
-    settings: Settings, *, vector_run: str, option: str, round_id: str = "R0", step: str = "A"
-) -> RunResult:
-    """Score a vector run of AmsterTime in all three directions and write one result file."""
-    vectors = read_vectors(settings.vectors_path(vector_run))
-    amstertime.check_ids(vectors.ids)
-    scores = [
-        set_score(
-            amstertime.score_amstertime(vectors, direction),
-            test_set=f"{AMSTERTIME_SET}-{direction.value}",
-            half="all",
-            gallery=AMSTERTIME_SET,
-        )
-        for direction in amstertime.Direction
+    return [
+        NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids, hidden_entity=q.entity_id)
+        for q in queries
     ]
-    return write_result(
-        eval_result_path(round_id, step, option),
-        round_id=round_id,
-        step=step,
-        option=option,
-        vector_run=vector_run,
-        query_vector_run=vector_run,
-        vectors=vectors.info,
-        scores=scores,
-        today=_today(),
-    )
 
 
 def compare(

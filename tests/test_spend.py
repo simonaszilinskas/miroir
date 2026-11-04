@@ -21,6 +21,7 @@ from miroir.jobs.spend import (
     Service,
     SpendKind,
     SpendLedger,
+    check_headroom,
     check_probe,
     check_run,
     load_probe,
@@ -263,3 +264,12 @@ def test_a_run_stops_once_past_its_limit(tmp_path: Path) -> None:
     with pytest.raises(BudgetError, match="over its"), spend.call(3):
         pass
     assert spend.spent_usd == pytest.approx(0.6)
+
+
+def test_headroom_refuses_a_run_whose_limit_could_pass_the_budget(tmp_path: Path) -> None:
+    led = ledger(tmp_path, (SpendKind.RUN, 40.0))
+    check_headroom(BUDGET, led, None, max_usd=5.0)
+    with pytest.raises(BudgetError, match="usable budget"):
+        check_headroom(BUDGET, led, None, max_usd=5.5)
+    with pytest.raises(BudgetError, match=r"spent \$44\.00"):
+        check_headroom(BUDGET, led, 44.0, max_usd=1.5)

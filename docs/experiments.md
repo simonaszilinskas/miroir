@@ -32,7 +32,7 @@ Finding the right heritage record from a photo is a research problem before it i
 | A10 | Voyage multimodal 3.5; Nemotron Embed VL (`nvidia/llama-nemotron-embed-vl-1b-v2`, 1.7B despite the name) | no / yes | OpenRouter | More reference points. Nemotron is on OpenRouter only as a free variant, capped at 20 requests a minute and 1,000 a day: about 138 days for every image at one per request. It was trained on document pages, not photos |
 | A11 | RootSIFT + VLAD, and perceptual hash | yes | hosted (TBD) | Classic floor. The hash also flags exact duplicates |
 
-Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU, until 2026-11-03; since then they run on a Scaleway GPU machine (`miroir embed scw`, technical spec §4). Only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac. **deferred**: needs Hugging Face Jobs, which are not approved yet.
+Routes: **OpenRouter** where it serves the model. **Modal**: open models on a rented GPU, until 2026-11-03; since then they run on a Scaleway GPU machine (`miroir embed scw`, technical spec §4). Only `publishable` images go there, so open models also search `screening-20k-publishable`. **hosted (TBD)**: no runner written yet; not on the Mac.
 
 **Status (2026-10-19).** Run: A1, A2, A3, A4 (so400m), A5 (PE-Core L), A7, A8 (2B), A9, A10 (Voyage). Not run: A6, A8b, A10 Nemotron, A11. Kept: A7 and A3.
 
@@ -129,8 +129,8 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 | H1 | Ask a vision model "what is this monument or artwork, and where is it?" and look its answer up in POP with BM25. Qwen3-VL 30B-A3B (on OpenRouter) against one closed model |
 | H2 | Use the photo's GPS position to keep only records within 2 km. Tested on T2 photos that carry GPS. Needs coordinates for records (POP coordinates where present, else the commune centre) |
 | H3 | H1 or H2 as one more signal into G3 |
-| H4 | A vision model leads the search: it sees the photo, calls image search, text search and filters as tools, looks at the results and picks the top 10. Mistral Large 4 (open, on OpenRouter), four ways: one plan (S1), plan then review (S2), free loop (S3), ask the visitor up to 3 questions then search (S4). Technical spec §7.4 |
-| H5 | H4 on the website, with real visitors: the agentic search (`#/agentique` on the site; `/chat` leads there). The visitor gives a photo or words and says what they want (this exact thing, similar things, the same place, who made it); the site's usual search starts at once and Mistral Large 4 gets its first results, asks questions that fit the subject, searches the live index with the tools (soft filters, a refused repeat, a cap of 8 searches a message) and shows its picks as result cards. After the first hosted test (a gold Roman dish not in the index: the model ignored close first results and drifted on long guessed queries), the code enforces a method: look at the first results before searching, say why at each step, follow a seen record with `more_like` instead of guessed words, stop after 3 searches without a sure match, and say plainly when the thing is not there. Since 2026-10-29 the model runs on Mistral's own API with a little reasoning, and a `read_record` tool lets it read the full records of the results it weighs before it shows them. Each conversation is logged without images. Technical spec §8.1 |
+| H4 | A vision model leads the search: it sees the photo, calls image search, text search and filters as tools, looks at the results and picks the top 10. Mistral Large 4 (open, on OpenRouter), four ways: one plan (S1), plan then review (S2), free loop (S3), ask the visitor up to 3 questions then search (S4). Since 2026-11-04 `miroir vlm h4` runs the deployed H5 agent instead, offline on stored vectors with a simulated visitor (option `H5-offline`); H4's scores came from its own looser agent, now deleted, and predate that. Technical spec §7.4 |
+| H5 | H4 on the website, with real visitors: the agentic search (the site's "Approfondi" search). The visitor gives a photo or words; the site's usual search starts at once and Mistral Large 4 gets its first results, asks questions that fit the subject, searches the live index with the tools (soft filters, a refused repeat, a cap of 8 searches a message) and shows its picks as result cards. After the first hosted test (a gold Roman dish not in the index: the model ignored close first results and drifted on long guessed queries), the code enforces a method: look at the first results before searching, say why at each step, follow a seen record with `more_like` instead of guessed words, stop after 3 searches without a sure match, and say plainly when the thing is not there. Since 2026-10-29 the model runs on Mistral's own API with a little reasoning, and a `read_record` tool lets it read the full records of the results it weighs before it shows them. Each conversation is logged without images. The same agent is scored offline on the T sets (`miroir vlm h4`, technical spec §7.4); not run yet. Technical spec §8.1 |
 
 ## 3. Test sets
 
@@ -174,3 +174,19 @@ Status (2026-10-19): R0, R1 and R2 done. R3 done for C, G and H (H1 to H5); D no
 **Why T9 is AmsterTime only.** Met cannot serve as a 2-point check here: its database is 29.7 GB, its score comes from a kNN classifier with tuning and PCA-whitening that MIROIR never uses, and the DINOv2 and DINOv3 papers report GAP 36.8 and 44.6 for the *same* model. AmsterTime is 2,462 images (0.9 GB, CC0), and the DINOv3 paper writes down its preprocessing. AnyLoc does not report AmsterTime.
 
 Before each round, write in `docs/results.md` what we expect to see and why. Comparing that guess with the result is how we learn.
+
+## 6. Retired code
+
+The code of finished steps whose results are committed, and that neither the site nor R4 runs, was removed on 2026-11-04. Their result files stay in `eval/results/`. The last commit that has all of it is `c5feb366b0`: `git show c5feb366b0:src/miroir/cli.py`, or `git checkout c5feb366b0 -- <path>` to bring a module back.
+
+| Step | Commands | Modules |
+|---|---|---|
+| R0 (T9, AmsterTime) | `miroir r0 run`, `eval amstertime score` | `eval/amstertime.py`; the machine's AmsterTime calls |
+| C (detectors on the room photos) | `miroir detect locate`, `detect rooms`, `detect single`, `eval detect`, `eval detect-order` | `eval/detect.py`, `eval/wire.py`, `remote/rooms.py` |
+| E1 (keypoint re-rank) | `miroir rerank run`, `rerank site`, `eval rerank`, `eval rerank-site` | `eval/rerank.py`, `eval/site_rerank.py`, `remote/matching.py`, `remote/rerank.py`; the matching image build (kornia, OpenCV, LightGlue) |
+| E5 (query expansion), G1, G2 | `miroir eval stack` | `eval/expansion.py`, `eval/stack.py` |
+| G4, G5 weight searches | `miroir eval route`, `eval route3` | the grid halves of `eval/router.py` and `eval/router3.py` |
+| F1 (grey copies) | `miroir embed grey`, `eval overlay-vectors` | grey copies in `jobs/supplied.py`, `eval.vectors.overlay_runs` |
+| H1, H3 scoring | `miroir vlm score` | all of `eval/vlm.py` but what H4 imports |
+| T1 archive prints (mount cut, caption readers) | `miroir archive remote`, `archive score` | `eval/archive.py`; the machine's caption batches |
+| R1 model viewer | `miroir eval viewer` | `eval/viewer.py`, `eval/viewer.html` |

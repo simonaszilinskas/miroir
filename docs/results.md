@@ -707,6 +707,8 @@ The switch is `IndexSpec.a3_shortlist_dims` (`miroir.web.store`); bundle `full-f
 
 ## H4: a vision model leads the search (2026-10-16)
 
+> Everything below comes from H4's own agent, deleted on 2026-11-04: its tools, brief, schemas and lenient filters had drifted from the site's, and it had none of the site's method. Since then `miroir vlm h4` runs the deployed agentic search (H5) offline (technical spec §7.4), and it has not been run: the deployed method has never been scored on the test sets. Expected cost, from H4's S3 and S4 ($0.015–0.017 a photo at up to 8 tool calls) and the site's smoke tests ($0.003–0.005 a call, 17–18 calls for 3 conversations), the deployed agent making 6–12 calls a query: about $0.04 a query, so $0.3–0.5 for the 10-photo test (`uv run miroir vlm h4 --max-usd 1`), about $1 for `--per-set 5` (20 queries), and $35–60 for all 1,196 tune queries (`--all`), more than the usable budget had left when H4 ran: a full run is a project decision.
+
 Method: technical spec §7.4. Mistral Large 4 (open) sees the photo and drives image search (A7, A3, or a mix), text search (BM25) and filters (boost or hard cut), three ways: one plan carried out by code (S1), the plan then a review of its top 20 as thumbnails (S2), a free loop of up to 8 tool calls (S3). Baselines on the same queries: G5 with F2 photos, and H1 redone with the same model (its words alone, and mixed with A7 as H3). Gallery `screening-v2-publishable-fetched+F2`; tune halves a closed model may see (T1 138, T2 516, T3 99, T5 443).
 
 Expected (written 2026-10-16, before any paid call). G5 stands at hit@1 / hit@10: T1 37.0 / 50.7, T2 31.2 / 40.5, T3 56.6 / 89.9, T5 39.7 / 61.2.

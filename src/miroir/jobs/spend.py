@@ -359,6 +359,20 @@ def _spent(lines: Sequence[SpendLine], key_usage_usd: float | None) -> float:
     return openrouter + others
 
 
+def check_headroom(
+    budget: Budget, ledger: SpendLedger, key_usage_usd: float | None, max_usd: float
+) -> None:
+    """Refuse to start a run that may spend up to `max_usd` when that could pass the usable
+    budget (a run with no probe, which stops itself at `max_usd`)."""
+    spent = spent_usd(ledger, key_usage_usd)
+    if spent + max_usd > budget.usable_usd:
+        msg = (
+            f"spent ${spent:.2f}; ${max_usd:.2f} more would pass the ${budget.usable_usd:.2f} "
+            "usable budget. Ask the project lead."
+        )
+        raise BudgetError(msg)
+
+
 def check_probe(budget: Budget, ledger: SpendLedger, key_usage_usd: float | None) -> float:
     """Refuse a probe once probes have used their cap. Returns what a probe may still spend."""
     left = budget.probe_cap_usd - ledger.total(SpendKind.PROBE)

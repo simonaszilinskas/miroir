@@ -33,7 +33,7 @@ from numpy.typing import NDArray
 from pydantic import ConfigDict, TypeAdapter
 
 from miroir.config import Settings
-from miroir.jobs.bulk import PIECES, piece_prefix
+from miroir.jobs.bulk import PIECES, JobStatus, piece_prefix
 from miroir.jobs.crop_slice import Grid, QuerySource, SliceSpec, read_spec
 from miroir.jobs.objects import Bucket, bucket_name, listing
 
@@ -360,3 +360,72 @@ def crop_launch(
         probe="nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader "
         "&& cat /proc/loadavg",
     )
+
+
+def run_crop_job(
+    settings: Settings,
+    name: str,
+    first: int,
+    last: int,
+    *,
+    max_hours: float,
+    any_gpu: bool,
+    reverse: bool = False,
+) -> list[JobStatus]:
+    """One machine for pieces `first`..`last` of crop job `name`, the best offer in stock (a
+    RENDER-S only with `any_gpu`); deleted at the end. Raises `NoMachineError` when no GPU is
+    in stock."""
+    from miroir.jobs.scaleway import InstanceApi, NoMachineError  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    api = InstanceApi(settings)
+    try:
+        offers = in_stock(api, crop_offers())
+    finally:
+        api.close()
+    if not any_gpu:
+        offers = [o for o in offers if o.commercial_type != "RENDER-S"]
+    if not offers:
+        msg = "no GPU in stock: nothing started"
+        raise NoMachineError(msg)
+    launch = crop_launch(settings, name, first, last, reverse=reverse)
+    return run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
+
+
+def write_full_spec(settings: Settings, precision: Precision, dims: int) -> CropSpec:
+    """The spec of the crop run over all of POP, in the images bucket: 3x3 crops projected on
+    the first `dims` axes of the `pop-all` MegaLoc PCA, copied beside the spec."""
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+
+    s3 = s3_client(settings)
+    key = f"{PREFIX}/{FULL_NAME}/projection.npz"
+    s3.copy(
+        {"Bucket": bucket_name(settings, Bucket.INDEX), "Key": "pop-all/a3_projection.npz"},
+        bucket_name(settings, Bucket.IMAGES),
+        key,
+    )
+    spec = full_spec(precision, key, dims)
+    put_spec(settings, s3, spec)
+    return spec
+
+
+def run_slice_crops(settings: Settings, *, max_hours: float, any_gpu: bool) -> CropSpec:
+    """The 3x3 crop vectors of the crop slice and its queries' MegaLoc vectors, for
+    `miroir eval crop-short`; they land in `crops_dir(settings, SLICE_NAME)`."""
+    from miroir.jobs.crop_slice import slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+
+    folder = slice_dir(settings)
+    ids = (folder / "ids.txt").read_text(encoding="utf-8").split()
+    spec = slice_spec(folder / "spec.json", ids)
+    s3 = s3_client(settings)
+    put_spec(settings, s3, spec)
+    logger.info("%s: %d pieces", spec.note, len(spec.pieces()))
+    try:
+        run_crop_job(
+            settings, spec.name, 0, len(spec.pieces()) - 1, max_hours=max_hours, any_gpu=any_gpu
+        )
+    finally:
+        got = fetch_job(settings, s3, spec.name)
+        logger.info("%d files in %s", len(got), crops_dir(settings, spec.name))
+    return spec

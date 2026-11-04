@@ -78,10 +78,6 @@ class Picture:
     """Width and height of the whole photo."""
     height: int
 
-    @property
-    def area_share(self) -> float:
-        return (self.right - self.left) * (self.bottom - self.top) / (self.width * self.height)
-
     def scaled(self, width: int, height: int) -> Picture:
         """The same box on a copy of the photo at another size."""
         sx, sy = width / self.width, height / self.height

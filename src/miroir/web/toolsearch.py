@@ -1,12 +1,13 @@
 """The searches the conversation page's model calls (step H5), run where the engine runs.
 
-Step H4 gave a vision model tools over saved vectors. Here the same tools search the live
-index with a visitor's new photo, so they run beside the models: on the GPU machine
-(`miroir.remote.search`), with fake models on the Mac.
+They search the live index with a visitor's new photo, so they run beside the models: on
+the GPU machine (`miroir.remote.search`), with fake models on the Mac. The offline
+evaluation runs them over a bundle with each test photo's stored vectors
+(`ToolQuery.vectors`, `ToolQuery.exclude_images`; `miroir.eval.offline`).
 
 - image search: the photo's cosines from both models (`Engine.photo_cosines`), mixed per
   entity as the site mixes them (`ranking.fuse`), at G5's routed weight or the one asked for;
-- text search: BM25 over record text, as H4's `text_search`;
+- text search: BM25 over record text;
 - view: each entity's images, closest to the photo first, so the page can show the model
   thumbnails (it checks which may go out, `miroir.web.publishable`);
 - like: the records that look like one the model has already seen, by that record's own
@@ -32,12 +33,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from miroir.eval.bm25 import tokens
+from miroir.images.colour import chroma_spread
 from miroir.images.mount import crop_picture, find_picture
 from miroir.records.bases import Base, base_of, place_key
 from miroir.records.model import Collection
 from miroir.web import facets, ranking
 from miroir.web.catalog import CARD_SIDE, COLLECTION_LABELS, MATCHED_LABELS, display_url
-from miroir.web.engine import Engine, PhotoCosines, weighted
+from miroir.web.engine import Engine, PhotoCosines, prepare_photo, weighted
 from miroir.web.nearby import Position
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,12 @@ class ToolQuery:
     """View: the entities to show. Like: the one entity to start from."""
     image_id: str | None = None
     """Like: the entity's image to start from (the one the model saw); None: its cover."""
+    vectors: tuple[Floats, Floats] | None = None
+    """Measurement only: the stored (EmbeddingGemma 2, MegaLoc) vectors of `image`, used
+    instead of running the models on it (the offline agent, `miroir.eval.offline`)."""
+    exclude_images: tuple[str, ...] = ()
+    """Measurement only: images taken out of the index, such as a test query's own shoot.
+    They never score and are never offered to the model."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,16 +226,17 @@ class ToolSearch:
         if query.image is None:
             msg = "an image search needs a photo"
             raise ValueError(msg)
-        cosines, mount = self._cosines(query.image)
+        cosines, mount = self._cosines(query.image, query.vectors)
         w = cosines.bucket.a7_weight if query.a7_weight is None else query.a7_weight
         w = min(max(w, 0.0), 1.0)
         catalog = self.engine.catalog
+        a7, a3 = self._shown(cosines.a7, query), self._shown(cosines.a3, query)
         signals = [
-            ranking.Signal(ranking.entity_max(cosines.a7, catalog), w),
-            ranking.Signal(ranking.entity_max(cosines.a3, catalog), 1 - w),
+            ranking.Signal(ranking.entity_max(a7, catalog), w),
+            ranking.Signal(ranking.entity_max(a3, catalog), 1 - w),
         ]
         fused = ranking.fuse([s for s in signals if s.weight > 0])
-        per_image = weighted(cosines.a7, cosines.a3, w)
+        per_image = weighted(a7, a3, w)
         found = self._ranked(fused, per_image, query)
         return ToolHits(
             found.hits,
@@ -251,6 +260,7 @@ class ToolSearch:
         per_image = np.where(records >= 0, per_record[np.maximum(records, 0)], 0.0).astype(
             np.float32
         )
+        per_image = self._shown(per_image, query)
         # Only entities holding a word are listed.
         best = ranking.entity_max(per_image, catalog)
         fused = ranking.min_max(np.where(best > 0, best, -np.inf).astype(np.float32))
@@ -267,6 +277,7 @@ class ToolSearch:
             raise ValueError(msg)
         row = self.start_row(entity, query.image_id)
         a7, a3 = self.engine.stored_cosines(row)
+        a7, a3 = self._shown(a7, query), self._shown(a3, query)
         w = 0.5 if query.a7_weight is None else min(max(query.a7_weight, 0.0), 1.0)
         signals = [
             ranking.Signal(ranking.entity_max(a7, catalog), w),
@@ -295,33 +306,61 @@ class ToolSearch:
         catalog = self.engine.catalog
         per_image: Floats | None = None
         if query.image is not None:
-            cosines, _ = self._cosines(query.image)
+            cosines, _ = self._cosines(query.image, query.vectors)
             per_image = weighted(cosines.a7, cosines.a3, cosines.bucket.a7_weight)
+        hidden = self._hidden(query)
         hits: list[Hit] = []
         for entity_id in dict.fromkeys(query.entity_ids):
             row = catalog.entity_row.get(entity_id)
             if row is None:
                 continue
-            hit = self._hit(row, per_image, 0.0)
+            hit = self._hit(row, per_image, 0.0, hidden=hidden)
             if hit is not None:
                 hits.append(hit)
         return ToolHits(tuple(hits))
 
-    def _cosines(self, image: bytes) -> tuple[PhotoCosines, bool]:
+    def _cosines(
+        self, image: bytes, vectors: tuple[Floats, Floats] | None = None
+    ) -> tuple[PhotoCosines, bool]:
         """The photo's cosines with every image (its print alone when it shows an archive
-        print on its card), and whether it did; kept for the last `PHOTOS_KEPT` photos."""
+        print on its card), and whether it did; kept for the last `PHOTOS_KEPT` photos.
+        With `vectors`, the photo's stored ones stand in for the models."""
         key = hashlib.sha256(image).hexdigest()
+        if vectors is not None:
+            key += "+" + hashlib.sha256(vectors[0].tobytes() + vectors[1].tobytes()).hexdigest()
         with self._lock:
             if key in self._photos:
                 self._photos.move_to_end(key)
                 return self._photos[key]
         photo, mount = _print_alone(image)
-        found = (self.engine.photo_cosines(photo), mount)
+        if vectors is None:
+            found = (self.engine.photo_cosines(photo), mount)
+        else:
+            engine = self.engine
+            every = np.ones(len(engine.catalog.images), dtype=bool)
+            chroma = chroma_spread(prepare_photo(photo))
+            found = (engine.vector_cosines(*vectors, chroma, every, {}), mount)
         with self._lock:
             self._photos[key] = found
             while len(self._photos) > PHOTOS_KEPT:
                 self._photos.popitem(last=False)
         return found
+
+    def _hidden(self, query: ToolQuery) -> Bools | None:
+        """The images `query` takes out of the index (None when it takes none)."""
+        if not query.exclude_images:
+            return None
+        rows = self.engine.catalog.image_row
+        out = np.zeros(len(self.engine.catalog.images), dtype=bool)
+        out[[rows[i] for i in query.exclude_images if i in rows]] = True
+        return out
+
+    def _shown(self, per_image: Floats, query: ToolQuery) -> Floats:
+        """`per_image` with the images `query` takes out at -inf."""
+        hidden = self._hidden(query)
+        if hidden is None:
+            return per_image
+        return np.where(hidden, -np.inf, per_image).astype(np.float32)
 
     # --- ranking and filters ---------------------------------------------------------------------
 
@@ -351,10 +390,15 @@ class ToolSearch:
             if prior is not None:
                 scores = (scores + prior).astype(np.float32)
         top = ranking.top_entities(scores, min(max(query.top_k, 1), MAX_TOP_K))
+        hidden = self._hidden(query)
         hits = [
             hit
             for row in top
-            if (hit := self._hit(int(row), per_image, float(scores[row]), matches=bool(mask[row])))
+            if (
+                hit := self._hit(
+                    int(row), per_image, float(scores[row]), matches=bool(mask[row]), hidden=hidden
+                )
+            )
         ]
         matching = None if filters.empty else int((mask & alive).sum())
         return _Ranked(tuple(hits), matching, near_ignored)
@@ -450,10 +494,20 @@ class ToolSearch:
     # --- one entity ---------------------------------------------------------------------------
 
     def _hit(
-        self, entity: int, per_image: Floats | None, score: float, *, matches: bool = False
+        self,
+        entity: int,
+        per_image: Floats | None,
+        score: float,
+        *,
+        matches: bool = False,
+        hidden: Bools | None = None,
     ) -> Hit | None:
         catalog = self.engine.catalog
         rows = catalog.entity_image_rows(entity)
+        if hidden is not None and len(rows):
+            rows = rows[~hidden[rows]]
+            if not len(rows):  # only hidden images: it cannot be found
+                return None
         records = catalog.entity_records(entity)
         if not records:
             return None

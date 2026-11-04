@@ -425,3 +425,36 @@ def crop_launch(settings: Settings, torch_tag: str = "") -> Launch:
 #: Scaleway's public price of a RENDER-S (Tesla P100 16 GB, 10 cores), rounded up: the only
 #: GPU in stock on 2026-11-03, when every L4, L40S and H100 was short.
 RENDER_OFFER = Offer("fr-par-2", "RENDER-S", 1.25)
+
+
+def run_slice(
+    settings: Settings,
+    *,
+    max_hours: float,
+    l4: bool,
+    render: bool,
+    a7_others: int,
+    size: int,
+    t2_queries: int,
+) -> list[Path]:
+    """The crop slice test (docs/search-levels.md) on one machine: an L40S (an L4 with `l4`,
+    a RENDER-S with MegaLoc crops only with `render`); the score tables it wrote come back to
+    `slice_dir`, also when the run fails. Returns them."""
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    s3 = s3_client(settings)
+    spec = prepare(
+        settings, s3, a7_others=0 if render else a7_others, size=size, t2_queries=t2_queries
+    )
+    logger.info("%s", spec.note)
+    offers = (
+        [RENDER_OFFER] if render else [o for o in OFFERS if ("L40S" in o.commercial_type) != l4]
+    )
+    launch = crop_launch(settings, torch_tag="cu126" if render else "")
+    try:
+        run_unattended(settings, launch, offers=offers, max_hours=max_hours, purpose="crops")
+    finally:
+        got = fetch_outputs(settings, s3)
+    return got

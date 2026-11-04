@@ -49,8 +49,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 GEM_P = 3.0
 #: Parallel image reads on the machine (image folder, else POP), running ahead of the GPU.
 FETCH_CONCURRENCY = 32
-#: Parallel file reads from the machine's image folder.
-VOLUME_READERS = 32
 #: Threads decoding and preparing images (resize, normalise) for the GPU.
 PREPARE_WORKERS = 8
 
@@ -340,21 +338,6 @@ def fill_image_volume(images: Sequence[Image], concurrency: int) -> dict[str, in
             key = "ok" if item.skip is None else f"fetch_{item.skip.value}"
             counts[key] = counts.get(key, 0) + 1
     return counts
-
-
-def embed_files(option: ModelOption, files: Sequence[tuple[str, Path]]) -> ChunkResult:
-    """Embed images read from disk (a benchmark in the machine's folder), keyed by the given ids."""
-    model, load_s = encoder(option)
-    start = time.monotonic()
-    # Volume files load lazily and one read waits on the network: read many at once.
-    prepared = bounded_map(
-        lambda item: (item[0], model.prepare(_open(item[1].read_bytes()))),
-        files,
-        workers=VOLUME_READERS,
-        window=max(2 * VOLUME_READERS, 2 * option.batch_size),
-    )
-    ids, vectors = _embed_batches(model, prepared, option.batch_size)
-    return ChunkResult(ids, vectors, {}, load_s, time.monotonic() - start)
 
 
 def _fetched(items: Iterable[Fetched], skips: dict[str, int]) -> Iterator[tuple[str, bytes]]:

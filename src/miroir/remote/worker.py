@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from miroir.config import (
-    BENCHMARKS_MOUNT,
     IMAGES_MOUNT,
     WEB_INDEX_MOUNT,
     WEIGHTS_MOUNT,
@@ -66,13 +65,6 @@ class Worker:
             "embed": self.embed,
             "embed_texts": self.embed_texts,
             "fill_images": self.fill_images,
-            "amstertime_download": self.amstertime_download,
-            "amstertime_embed": self.amstertime_embed,
-            "match": self.match,
-            "detect_rooms": self.detect_rooms,
-            "locate_artworks": self.locate_artworks,
-            "match_site": self.match_site,
-            "read_captions": self.read_captions,
             "search": self.search,
             "detect": self.detect,
             "tool_search": self.tool_search,
@@ -84,7 +76,7 @@ class Worker:
         return bucket_name(self.settings, bucket)
 
     def start(self) -> None:
-        for mount in (WEIGHTS_MOUNT, IMAGES_MOUNT, BENCHMARKS_MOUNT):
+        for mount in (WEIGHTS_MOUNT, IMAGES_MOUNT):
             Path(mount).mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
         count = download_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
@@ -148,57 +140,6 @@ class Worker:
             for key, n in counts.items():
                 totals[key] = totals.get(key, 0) + n
         return totals
-
-    def amstertime_download(self) -> int:
-        from miroir.eval import amstertime  # noqa: PLC0415
-
-        root = Path(BENCHMARKS_MOUNT)
-        download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        images = amstertime.download(root / "amstertime")
-        upload_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        return len(amstertime.image_ids(images))
-
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        from miroir.eval import amstertime  # noqa: PLC0415
-        from miroir.remote.models import embed_files  # noqa: PLC0415
-
-        root = Path(BENCHMARKS_MOUNT)
-        download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        images = root / "amstertime" / "images"
-        result = embed_files(option, [(i, images / i) for i in amstertime.image_ids(images)])
-        self._save_weights(result.load_s)
-        return result
-
-    def match(self, tasks: list) -> object:
-        from miroir.remote.matching import match_tasks  # noqa: PLC0415
-
-        result = match_tasks(tasks)
-        self._save_weights(result.load_s)
-        return result
-
-    def detect_rooms(self, option, photos: list, given: dict) -> object:
-        from miroir.remote.rooms import detect_rooms  # noqa: PLC0415
-
-        result = detect_rooms(option, photos, given)
-        self._save_weights(result.load_s)
-        return result
-
-    def locate_artworks(self, scenes: list, tasks: list) -> object:
-        from miroir.remote.rooms import locate_artworks  # noqa: PLC0415
-
-        return locate_artworks(scenes, tasks)
-
-    def match_site(self, tasks: list) -> object:
-        from miroir.remote.rerank import match_site_tasks  # noqa: PLC0415
-
-        return match_site_tasks(tasks)
-
-    def read_captions(self, model: str, photos: list) -> object:
-        from miroir.remote.caption import read_captions  # noqa: PLC0415
-
-        result = read_captions(model, photos)
-        self._save_weights(1.0)
-        return result
 
     # --- the website's search (`miroir web dev --scw`) ---------------------------------------
 

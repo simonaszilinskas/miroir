@@ -185,7 +185,7 @@ uv run miroir web dev --scw     # the same page searching on a Scaleway GPU star
 
 To switch index: add it to `INDEXES` in `src/miroir/web/bundle.py`, set `DEMO_INDEX` (the demo machine) or `WEB_INDEX` (the Mac) in `src/miroir/config.py`, then build-index, upload and `miroir demo install`.
 
-**Agentic search (H5, `#/agentique`).** Needs the Mistral key (or the OpenRouter key) on the machine and the list of images that may go to the model in the bundle:
+**Agentic search (H5, "Approfondi").** Needs the Mistral key (or the OpenRouter key) on the machine and the list of images that may go to the model in the bundle:
 
 ```sh
 uv run miroir web publishable --upload   # writes publishable.txt.gz into the bundle, copies it to the index bucket

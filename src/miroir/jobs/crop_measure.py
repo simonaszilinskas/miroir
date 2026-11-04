@@ -263,3 +263,43 @@ def measure_launch(settings: Settings, index: str) -> Launch:
         probe="nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader "
         "&& free -g | sed -n 2p && df -h / | tail -1",
     )
+
+
+def run_measure(settings: Settings, index: str, *, max_hours: float) -> Path:
+    """T1, T2, T2b, T3, T5, PARTS and VET (tune halves) searched on a GPU machine with the
+    site's code, crops off and on; writes eval/results/R3/SL-<index>.json, returns its path."""
+    import json  # noqa: PLC0415
+
+    from miroir.config import eval_result_path  # noqa: PLC0415
+    from miroir.jobs.crop_embed import crop_offers, in_stock  # noqa: PLC0415
+    from miroir.jobs.crop_slice import slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import InstanceApi  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import run_unattended  # noqa: PLC0415
+
+    s3 = s3_client(settings)
+    ids = (slice_dir(settings) / "ids.txt").read_text(encoding="utf-8").split()
+    spec = prepare(settings, s3, index, ids)
+    logger.info("%d queries (%d without vectors left out)", len(spec.queries), len(spec.skipped))
+    api = InstanceApi(settings)
+    try:
+        offers = [o for o in in_stock(api, crop_offers()) if o.commercial_type != "RENDER-S"]
+    finally:
+        api.close()
+    run_unattended(
+        settings, measure_launch(settings, index), offers=offers, max_hours=max_hours,
+        purpose="crop measure",
+    )  # fmt: skip
+    out = read_out(fetch_out(settings, s3, index).read_bytes())
+    result = {
+        "index": index,
+        "gpu": out.gpu,
+        "sets": summarize(out),
+        "photo_search_ms": {k: list(v) for k, v in out.photo_search_ms.items()},
+        "memory_gb": dict(out.memory_gb),
+        "skipped": list(spec.skipped),
+        "vet_ranks": {r.query_id: [r.off, r.on] for r in out.ranks if r.set_id == "VET"},
+    }
+    path = eval_result_path("R3", "SL", index)
+    path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    return path

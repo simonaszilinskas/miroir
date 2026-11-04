@@ -58,8 +58,6 @@ WIKIMEDIA_USER_AGENT = (
 # exist only there; each mirrors a bucket (`miroir.jobs.objects`).
 #: Model weights (Hugging Face and torch caches), shared by every run.
 WEIGHTS_MOUNT = "/weights"
-#: Public benchmarks (AmsterTime), downloaded on the machine.
-BENCHMARKS_MOUNT = "/benchmarks"
 #: POP images resized to 512 px, filled once (`miroir embed images`) so model runs read
 #: images there instead of from POP.
 IMAGES_MOUNT = "/images"
@@ -394,32 +392,21 @@ class Settings(BaseSettings):
         return self.data_root / "vlm" / f"{model_slug}.jsonl"
 
     def h4_calls_path(self, model_slug: str) -> Path:
-        """Every reply of a vision model leading the search (step H4), one JSON line per call,
-        keyed by its request, so a rerun replays them instead of paying again."""
+        """Every answer of the agent run offline (steps H4 and H5, `miroir.eval.h4`), one JSON
+        line per call, keyed by its request, so a rerun replays them instead of paying again."""
         _check_name(model_slug)
         return self.data_root / "vlm" / "h4" / f"{model_slug}-calls.jsonl"
 
     def h4_report_dir(self, label: str) -> Path:
-        """One H4 run's traces (one JSON line per query and scenario) and its cost report."""
+        """One offline agent run's traces (one JSON line per conversation) and its report."""
         _check_name(label)
         return self.data_root / "vlm" / "h4" / label
 
     def matches_path(self, name: str) -> Path:
-        """Keypoint matches of each query against its shortlist (step E1), one query per line."""
+        """A cache of searches on the site's bundle (`eval.sure`, `eval.levels`). The folder
+        name dates from step E1, which wrote keypoint matches there first."""
         _check_name(name)
         return self.data_root / "matches" / f"{name}.jsonl"
-
-    @property
-    def detect_dir(self) -> Path:
-        """Step C: room photos at the page's size, where each T3 artwork hangs in them, and
-        each detector's boxes with their crops' vectors."""
-        return self.data_root / "detect"
-
-    @property
-    def archive_dir(self) -> Path:
-        """Archive prints (T1): the query photos as POP serves them, what the caption reader
-        read, and the vectors of the prints cut from their mounts."""
-        return self.data_root / "archive"
 
     @property
     def index_dir(self) -> Path:

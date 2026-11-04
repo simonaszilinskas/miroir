@@ -19,8 +19,6 @@ MODULES = sorted(SRC.rglob("*.py"))
 BUILDERS = {"eval/build_sets.py", "eval/words.py", "eval/parts.py", "eval/sets.py"}
 #: The one module that reads a sealed half, once R4 is frozen.
 R4 = {"eval/r4.py"}
-#: `.sealed` also names the count of sealed queries in build reports, which the CLI prints.
-COUNTS = {"cli.py"}
 
 
 def _name(module: Path) -> str:
@@ -59,7 +57,7 @@ def test_only_set_builders_touch_a_sealed_half(module: Path) -> None:
         for n in ast.walk(_tree(module))
         if isinstance(n, ast.Attribute) and n.attr == "sealed"
     ]
-    if _name(module) not in BUILDERS | R4 | COUNTS:
+    if _name(module) not in BUILDERS | R4:
         assert not uses, f"{_name(module)}:{uses}: reads a sealed half outside its builders"
 
 

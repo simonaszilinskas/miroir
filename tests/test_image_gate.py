@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import pickle
+from dataclasses import replace
 
 import httpx
 import pytest
 
 from miroir.config import Settings
-from miroir.eval.wire import CaptionPhoto, RoomPhoto, SiteMatchTask
 from miroir.jobs.gpu_run import PaidCall, paid_call
 from miroir.jobs.privacy import ImageGate, PrivacyError, PublishableImages
-from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S
+from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, OPTIONS
 from miroir.jobs.scaleway import OFFERS
 from miroir.jobs.scaleway import Machine as GpuMachine
 from miroir.jobs.scw_run import ScalewayCalls
 from miroir.jobs.spend import Budget, SpendKind, SpendLedger
 from miroir.records.build import build
+from miroir.records.model import Image
 from miroir.records.store import read_records
+
+GEMMA = "A7-embeddinggemma-2-512"
 
 
 @pytest.fixture
@@ -26,9 +29,9 @@ def built(settings: Settings) -> Settings:
     return settings
 
 
-def image_ids(settings: Settings, *, publishable: bool) -> list[str]:
+def images(settings: Settings, *, publishable: bool) -> list[Image]:
     records = read_records(settings.records_parquet, settings.images_parquet)
-    return [i.image_id for r in records if r.publishable == publishable for i in r.images]
+    return [i for r in records if r.publishable == publishable for i in r.images]
 
 
 def calls(settings: Settings, sent: list[str], *, all_images: bool = False) -> ScalewayCalls:
@@ -42,48 +45,36 @@ def calls(settings: Settings, sent: list[str], *, all_images: bool = False) -> S
     return ScalewayCalls("http://worker.test", machine, gate, transport=httpx.MockTransport(worker))
 
 
-def test_an_eval_step_cannot_send_a_private_image_through_a_paid_call(built: Settings) -> None:
-    """Step C, E1 and the archive call the machine through `paid_call` themselves."""
+def test_a_paid_call_cannot_send_a_private_image(built: Settings) -> None:
     sent: list[str] = []
     remote = calls(built, sent)
-    private = image_ids(built, publishable=False)[0]
+    private = images(built, publishable=False)[0]
     paid = PaidCall(SpendLedger(built.spend_ledger), Budget.from_settings(built))
     with pytest.raises(PrivacyError, match="not publishable"):
         paid_call(
             paid,
-            lambda: remote.detect_rooms(None, [RoomPhoto(private, b"jpeg")], {}),
+            lambda: remote.embed(OPTIONS[GEMMA], [private]),
             machine=remote.machine,
             timeout_s=CHUNK_TIMEOUT_S,
             kind=SpendKind.RUN,
-            option="C",
-            run="C-test",
+            option="A7",
+            run="A7-test",
             model="m",
             items=1,
         )
     with pytest.raises(PrivacyError):
-        remote.read_captions("qwen", [CaptionPhoto(private, b"jpeg")])
-    with pytest.raises(PrivacyError):
-        remote.read_captions("qwen", [CaptionPhoto(f"{private}#cut", b"jpeg")])
+        remote.fill_images([[private]])
     assert sent == []
-
-
-def test_a_query_photo_sent_as_bytes_must_say_which_image_it_is(built: Settings) -> None:
-    sent: list[str] = []
-    remote = calls(built, sent)
-    public = image_ids(built, publishable=True)[0]
-    with pytest.raises(PrivacyError, match="without an image id"):
-        remote.match_site([SiteMatchTask("q", (public,), jpeg=b"jpeg")])
-    remote.match_site([SiteMatchTask("q", (public,), image_id=public)])
-    assert sent == ["match_site"]
 
 
 def test_the_full_sample_index_may_send_every_known_image(built: Settings) -> None:
     sent: list[str] = []
-    private = image_ids(built, publishable=False)[0]
-    calls(built, sent, all_images=True).read_captions("qwen", [CaptionPhoto(private, b"j")])
-    assert sent == ["read_captions"]
+    private = images(built, publishable=False)[0]
+    calls(built, sent, all_images=True).fill_images([[private]])
+    assert sent == ["fill_images"]
+    unknown = replace(private, image_id="nope")
     with pytest.raises(KeyError, match="neither"):
-        calls(built, sent, all_images=True).read_captions("q", [CaptionPhoto("nope", b"j")])
+        calls(built, sent, all_images=True).fill_images([[unknown]])
 
 
 def test_the_website_calls_are_the_only_raw_calls(built: Settings) -> None:

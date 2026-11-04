@@ -226,6 +226,23 @@ def jpeg_data_url(jpeg_b64: str) -> str:
 # --- the client -------------------------------------------------------------------
 
 
+def key_usage_usd(
+    api_key: SecretStr | None, *, transport: httpx.BaseTransport | None = None
+) -> float | None:
+    """What OpenRouter says the key has spent, for the project-wide cap; None without a key,
+    or when OpenRouter cannot say (the ledger alone then counts)."""
+    if api_key is None:
+        return None
+    client = OpenRouterClient(api_key, transport=transport)
+    try:
+        return client.key_spend().usage_usd
+    except (OpenRouterError, httpx.HTTPError) as err:
+        logger.warning("could not read OpenRouter's spend (%s); counting the ledger only", err)
+        return None
+    finally:
+        client.close()
+
+
 class OpenRouterClient:
     def __init__(
         self,
@@ -270,22 +287,6 @@ class OpenRouterClient:
         payload: dict[str, JSON] = {**body, "model": model}
         response = self._parse(_ChatResponse, self._call("POST", "/chat/completions", payload))
         return _chat_answer(response, need_cost=need_cost)
-
-    def chat_batch(
-        self,
-        model: str,
-        requests: Mapping[str, Mapping[str, JSON]],
-        *,
-        poll_s: float = 30.0,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> tuple[dict[str, ChatAnswer], BatchOutcome]:
-        """Chat completions `{custom_id: body}` through the Batch API (half price); waits.
-
-        Images work here, unlike batch embeddings (checked 2026-10-12).
-        """
-        return self.wait_chat_batch(
-            self.submit_batch("/v1/chat/completions", model, requests), poll_s=poll_s, sleep=sleep
-        )
 
     def wait_chat_batch(
         self,

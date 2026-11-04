@@ -1,7 +1,7 @@
 """Set the margin that makes an object search "sure" (`miroir.web.sure`), on tune halves.
 
-The site's own ranking on its index (`miroir.eval.site_rerank.search_sets`, cached) gives each
-tune query its top entities and their confidences. The margin chosen is the smallest on a
+The site's own ranking on its index (`search_sets`, kept on disk) gives each tune query its
+top entities and their confidences. The margin chosen is the smallest on a
 grid that keeps both promises:
 
 - right: at least `RIGHT_TARGET` of sure object answers are the right record, on T3, T5
@@ -18,13 +18,16 @@ import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 import numpy as np
+from pydantic import ConfigDict, TypeAdapter
 
 from miroir.config import WEB_INDEX, Settings, eval_result_path
-from miroir.eval.site_rerank import Searched
+from miroir.web.bundle import INDEXES
 from miroir.web.calibrate import WRONG_TARGET
 from miroir.web.levels import gap_of
+from miroir.web.measure import SiteBundle, SiteHit, site_search, tune_sets
 from miroir.web.routing import PhotoType
 from miroir.web.sure import SURE_FILE, SureRule, write_sure
 
@@ -33,6 +36,49 @@ logger = logging.getLogger(__name__)
 RIGHT_TARGET = 0.70
 RANKED = ("T3", "T5", "T2b")
 GRID = tuple(round(0.005 * i, 3) for i in range(81))  # 0 to 0.4
+#: Sets searched: the ranked ones and T8 (whole entity removed, so every answer is wrong).
+SETS = (*RANKED, "T8")
+#: Entities kept per search: the gap is measured over `SureRule.over` of them.
+TOP = 30
+
+
+@dataclass(frozen=True, slots=True)
+class Searched:
+    """One set's tune queries searched by the site."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    set_id: str
+    query_ids: tuple[str, ...]
+    query_image_ids: tuple[str, ...]
+    hits: tuple[SiteHit, ...]
+
+
+_SEARCHED = TypeAdapter(list[Searched])
+
+
+def searched_path(settings: Settings, index: str = WEB_INDEX) -> Path:
+    # The name predates this module: the step E1 site re-rank wrote it first.
+    return settings.matches_path(f"E1-site-{index}-searched")
+
+
+def search_sets(settings: Settings, bundle: SiteBundle, index: str = WEB_INDEX) -> list[Searched]:
+    """The site's top entities for every tune query; kept on disk (the search takes minutes)."""
+    path = searched_path(settings, index)
+    if path.exists():
+        return _SEARCHED.validate_json(path.read_bytes())
+    asked = tune_sets(settings, INDEXES[index], bundle.catalog)
+    out: list[Searched] = []
+    for set_id in SETS:
+        if set_id not in asked:
+            continue
+        a = asked[set_id]
+        hits = site_search(bundle, a, top=TOP)
+        out.append(Searched(set_id, a.query_ids, a.query_image_ids, tuple(hits)))
+        logger.info("%s: %d queries searched", set_id, len(hits))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_SEARCHED.dump_json(out))
+    return out
 
 
 @dataclass(frozen=True, slots=True)

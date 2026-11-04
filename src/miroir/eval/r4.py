@@ -30,9 +30,9 @@ from pydantic import ConfigDict, TypeAdapter
 
 from miroir.config import REPO_ROOT, Settings, eval_result_path
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
+from miroir.eval.run import combined_info
 from miroir.eval.scoring import QueryScore, ScoreResult
 from miroir.eval.sets import Query, load_queries
-from miroir.eval.stack import combined_info
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.web.bundle import MANIFEST_FILE
 from miroir.web.catalog import CATALOG_FILE

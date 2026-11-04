@@ -28,7 +28,7 @@ from enum import StrEnum
 
 from pydantic import TypeAdapter, ValidationError
 
-from miroir.config import SEED, Half, Settings
+from miroir.config import SEED, WEB_INDEX, Half, Settings
 from miroir.eval.build_sets import (
     JEU_DE_PAUME_PREFIX,
     Sizes,
@@ -287,7 +287,13 @@ def other_halves(settings: Settings, records: Sequence[Record]) -> dict[str, Hal
     return halves_of(splits)
 
 
-def draw_from_settings(settings: Settings, index_ids: set[str]) -> tuple[Draw, ...]:
+def draw_from_settings(settings: Settings) -> tuple[Draw, ...]:
+    """The draw over the images the website's index holds (`WEB_INDEX`): T7 asks for images
+    the site can find."""
+    from miroir.web.measure import IDS_FILE  # noqa: PLC0415 (the site imports this module)
+
+    path = settings.web_index_dir(WEB_INDEX) / IDS_FILE
+    index_ids = set(path.read_text(encoding="utf-8").split())
     records = read_records(settings.records_parquet, settings.images_parquet)
     return draw(records, index_ids, other_halves(settings, records))
 

@@ -47,8 +47,8 @@ Data and images are never stored in the repository. Secrets are never committed.
 ## The `miroir` command
 
 Every entry point is a subcommand: `uv run miroir --help` lists the groups (`records`, `testsets`,
-`embed`, `eval`, `web`, …). Models never run on the development machine: embedding, captioning and
-re-ranking run on a Scaleway GPU machine or on OpenRouter (on Modal before 2026-11-03).
+`embed`, `eval`, `web`, …). Models never run on the development machine: embedding and captioning
+run on a Scaleway GPU machine or on OpenRouter (on Modal before 2026-11-03).
 
 ```sh
 uv run miroir records build      # exports -> records.parquet + images.parquet (about 6 s)
@@ -57,16 +57,14 @@ uv run miroir testsets build     # records -> test sets T1, T3, T5, T8 + galleri
 uv run miroir testsets commons   # Commons photos -> T2, T2b, T8c (cached; 20 s)
 uv run miroir embed scw --option A7-embeddinggemma-2-512 --probe   # open model on a Scaleway GPU
 uv run miroir eval run ...       # score a vector run on a test set (technical spec §7.2)
-uv run miroir eval stack ...     # fuse models (G1, G2), expand queries (E5), score T8
 uv run miroir eval summary       # rebuild the results table in docs/results.md
-uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir web dev            # the website at http://localhost:8000 with fake models
 uv run miroir web mcp-token NAME # a token for the MCP connector (ChatGPT, Claude), kept in .env
 ```
 
 To put the website online: see [prototype.md](prototype.md), section Hosting.
 
-Paid runs (`embed`, `rerank`, `vlm ask`, `words ask`) start with a probe and stop at a cost
+Paid runs (`embed`, `vlm ask`, `vlm h4`, `words ask`) start with a probe and stop at a cost
 limit (`--probe`, `--max-usd`).
 Start any run longer than a minute detached and follow its log:
 
@@ -87,13 +85,12 @@ with its volume and IP: on success, on error and on Ctrl-C. The machine also del
 machine that lives on is the website's demo machine (`miroir demo`, prototype.md, section
 Hosting): `scw ps` lists it as `demo` and `scw cleanup` leaves it alone.
 
-Four Object Storage buckets hold the files the machines and the website read
+Three Object Storage buckets hold the files the machines and the website read
 (`src/miroir/jobs/objects.py`):
 
 | Bucket | Holds |
 |---|---|
 | `miroir-weights` | Hugging Face and torch model caches |
-| `miroir-benchmarks` | AmsterTime |
 | `miroir-images` | POP images at 512 px |
 | `miroir-index` | The website's index bundles |
 
@@ -109,11 +106,9 @@ uv run miroir scw cleanup        # delete them (asks first; --yes does not)
 ```
 
 Every command that runs a GPU job starts its own machine: `embed scw`, `embed f2`,
-`embed extra`, `embed grey`, `embed images`, `r0 run`, `words embed`, `rerank run`,
-`rerank site`, `detect locate`, `detect rooms`, `detect single` and `archive remote`.
-`--max-hours` sets a machine's longest life: 1 hour for `scw up`, `scw smoke`, `web dev --scw`,
-`r0 run`, `words embed`, the `detect` commands and `archive remote`; 2 for the `embed` and
-`rerank` commands.
+`embed extra`, `embed images`, `eval r4 embed` and `words embed`.
+`--max-hours` sets a machine's longest life: 1 hour for `scw up`, `scw smoke`, `web dev --scw`
+and `words embed`; 2 for the `embed` commands.
 
 **Money.** Each machine's life goes to its own ledger, `~/miroir-data/scaleway/spend.jsonl`,
 in euros, rounded up to the minute. It is kept apart from the dollar budget (`MIROIR_BUDGET_USD`):

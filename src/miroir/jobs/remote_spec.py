@@ -29,23 +29,10 @@ MODEL_LIBRARIES = (
     "pydantic==2.14.1",
     "pydantic-settings==2.15.0",
 )
-#: Keypoint matching (step E1) on top of those, and LightGlue from its repository, pinned,
-#: installed without its own dependencies (it asks for the GUI build of OpenCV).
-MATCH_LIBRARIES = ("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
-LIGHTGLUE = (
-    "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8"
-)
-
 #: Images per remote call. The Mac logs spend and checks the budget between calls.
 CHUNK_IMAGES = 500
 #: A call may run this long, model download included (the tunnel waits a little longer).
 CHUNK_TIMEOUT_S = 20 * 60
-#: AmsterTime download (0.9 GB) and unpacking.
-DOWNLOAD_TIMEOUT_S = 30 * 60
-#: Embedding the 2,462 AmsterTime images, model download included.
-R0_TIMEOUT_S = 30 * 60
-#: Queries per keypoint-matching call (step E1), each with its shortlist of 50.
-MATCH_QUERIES = 40
 #: EmbeddingGemma 2's prompt for words searched against images: the website's query side
 #: (`miroir.remote.search`) and the T7 query runs (`embed_texts`) both use it.
 TEXT_PROMPT = "SearchQuery"
@@ -211,28 +198,10 @@ _ALL = (
 
 OPTIONS: dict[str, ModelOption] = {o.id: o for o in _ALL}
 
-# Round R0 (T9): AmsterTime with the DINOv3 paper's protocol (§D.8): shorter side 256,
-# centre crop 224, CLS token, cosine. Expected mAP from its Tables 9 and 23.
-R0_OPTIONS: dict[str, ModelOption] = {
-    "dinov2-giant-224": _dino("R0-dinov2-giant-224", "A1", "facebook/dinov2-giant", Pooling.CLS),
-    "dinov3-vit7b16-224": ModelOption(
-        "R0-dinov3-vit7b16-224",
-        "A2",
-        Family.DINO,
-        _V3_7B,
-        224,
-        Pooling.CLS,
-        DType.BFLOAT16,  # 26.9 GB in float32 would need a 48 GB GPU
-        32,
-        gated=True,
-    ),
-}
-R0_EXPECTED_MAP: dict[str, float] = {"dinov2-giant-224": 48.9, "dinov3-vit7b16-224": 56.5}
-
 
 def option(option_id: str) -> ModelOption:
-    """Look up a gallery option or an R0 option by its id."""
-    found = OPTIONS.get(option_id) or {o.id: o for o in R0_OPTIONS.values()}.get(option_id)
+    """Look up a gallery option by its id."""
+    found = OPTIONS.get(option_id)
     if found is None:
         msg = f"unknown model option {option_id!r}; known: {', '.join(OPTIONS)}"
         raise ValueError(msg)

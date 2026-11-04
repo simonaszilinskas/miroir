@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from pydantic import SecretStr
 
-from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError, image_input
+from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError, image_input, key_usage_usd
 from tests.fakes import COST_PER_INPUT, NO_WAIT, FakeOpenRouter
 
 
@@ -139,3 +139,14 @@ def test_chat_reads_tool_calls_and_cached_tokens() -> None:
     ]
     assert got.cached_tokens == 512
     assert got.cost_usd == pytest.approx(0.0007)
+
+
+def test_key_usage_reads_the_key_and_is_none_without_one_or_on_failure() -> None:
+    fake = FakeOpenRouter(key_usage=3.5)
+    assert key_usage_usd(SecretStr("k"), transport=httpx.MockTransport(fake.handler)) == 3.5
+    assert key_usage_usd(None) is None
+
+    def down(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"message": "no key"}})
+
+    assert key_usage_usd(SecretStr("k"), transport=httpx.MockTransport(down)) is None

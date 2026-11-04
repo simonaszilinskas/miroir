@@ -84,7 +84,7 @@ def remote_imports_off_the_machine(path: Path) -> list[str]:
     """Imports of `miroir.remote` anywhere but in the body of a hidden CLI command."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     allowed: set[int] = set()
-    if path.name == "cli.py":
+    if path.parent.name == "cli":  # the `miroir` command package
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and _hidden_command(fn):
                 allowed.update(id(n) for n in ast.walk(fn))
@@ -106,7 +106,8 @@ def test_remote_code_is_imported_only_by_the_machines_own_commands() -> None:
 
 
 def test_an_import_in_a_mac_side_function_is_caught(tmp_path: Path) -> None:
-    module = tmp_path / "cli.py"
+    module = tmp_path / "cli" / "scw.py"
+    module.parent.mkdir()
     module.write_text(
         "import typer\n"
         "app = typer.Typer()\n"
@@ -118,4 +119,4 @@ def test_an_import_in_a_mac_side_function_is_caught(tmp_path: Path) -> None:
         "    from miroir.remote.models import encoder\n",
         encoding="utf-8",
     )
-    assert remote_imports_off_the_machine(module) == ["cli.py:8"]
+    assert remote_imports_off_the_machine(module) == ["scw.py:8"]

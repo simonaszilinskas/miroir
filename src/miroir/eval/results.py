@@ -90,6 +90,11 @@ class SetScore:
     def key(self) -> tuple[str, str, str]:
         return (self.test_set, self.half, self.gallery)
 
+    def line(self) -> str:
+        """One line: the set, its half and gallery, and each measure with its interval."""
+        cells = "  ".join(f"{name} {i.percent()}" for name, i in self.metrics().items())
+        return f"{self.test_set}/{self.half} on {self.gallery} ({self.queries} queries): {cells}"
+
     def metrics(self) -> dict[str, Interval]:
         return {
             "hit@1": self.hit_at_1,
@@ -245,7 +250,7 @@ def summary_table(results: Sequence[RunResult]) -> str:
                 str(result.vectors.resolution),
                 result.vectors.pooling,
                 f"{s.queries:,}",
-                *(_pct(i) for i in (s.hit_at_1, s.hit_at_5, s.hit_at_10, s.map)),
+                *(i.percent() for i in (s.hit_at_1, s.hit_at_5, s.hit_at_10, s.map)),
             ]
             sort_key = (result.round, s.test_set, s.half, s.gallery, -s.map.value)
             rows.append((sort_key, "| " + " | ".join(cells) + " |"))
@@ -279,8 +284,8 @@ def not_found_table(results: Sequence[RunResult]) -> str:
                 " + ".join(s.in_index_sets),
                 f"{len(s.in_index):,}",
                 f"{len(s.not_found):,}",
-                _pct(s.wrong_confident),
-                _pct(s.match_rate_at_target),
+                s.wrong_confident.percent(),
+                s.match_rate_at_target.percent(),
             ]
             sort_key = (result.round, s.test_set, s.half, s.gallery, s.wrong_confident.value)
             rows.append((sort_key, "| " + " | ".join(cells) + " |"))
@@ -313,7 +318,3 @@ def rebuild_summary(directory: Path, markdown: Path) -> int:
         text = text.rstrip("\n") + f"\n\n## Summary of all runs\n\n{block}\n"
     markdown.write_text(text, encoding="utf-8")
     return len(files)
-
-
-def _pct(interval: Interval) -> str:
-    return f"{100 * interval.value:.1f} [{100 * interval.low:.1f}, {100 * interval.high:.1f}]"

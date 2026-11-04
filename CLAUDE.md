@@ -8,7 +8,8 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 ## Layout
 
 - `src/miroir/config.py`: every setting and path. Ask it for paths; never build one by hand.
-- `src/miroir/cli.py`: the `miroir` command. Add subcommands here.
+- `src/miroir/cli/`: the `miroir` command, one module per group (`records.py`, `eval.py`, `web.py`,
+  `scw.py`…). Add a subcommand to its group's module and keep it thin: the work goes in the library.
 - `src/miroir/records/`: record model (`model.py`), mappers per POP base, Parquet store.
 - `src/miroir/remote/`: model code that runs only on a Scaleway GPU machine (the job worker
   `worker.py`, the demo site `site.py`). The one place torch may be imported.

@@ -24,7 +24,7 @@ import socket
 import subprocess
 import tarfile
 import time
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -32,11 +32,9 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from miroir.config import REPO_ROOT, WEB_UI_BUILD, WEB_UI_SOURCE, Settings
-from miroir.jobs.privacy import ImageGate, PrivacyError, PublishableImages
+from miroir.jobs.privacy import ImageGate, PublishableImages
 from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
-    LIGHTGLUE,
-    MATCH_LIBRARIES,
     MODEL_LIBRARIES,
     ChunkResult,
     Machine,
@@ -55,18 +53,7 @@ from miroir.records.model import Image
 from miroir.web.pagebuild import check_built
 
 if TYPE_CHECKING:
-    from miroir.eval.rerank import MatchChunk, MatchTask
-    from miroir.eval.wire import (
-        CaptionChunk,
-        CaptionPhoto,
-        DetectChunk,
-        Located,
-        LocateTask,
-        RoomPhoto,
-        SiteMatches,
-        SiteMatchTask,
-    )
-    from miroir.outlines import Box, DetectorOption, Outlines
+    from miroir.outlines import Outlines
     from miroir.web.engine import SearchRequest, SearchResponse
     from miroir.web.toolsearch import ToolHits, ToolQuery
 
@@ -102,9 +89,7 @@ TORCH_INDEXES = ((13.0, "cu130"), (12.8, "cu128"), (12.6, "cu126"))
 CONTEXT_FILES = ("pyproject.toml", "README.md", "LICENSE")
 #: The bucket mirrors, mounted into the job containers at the paths the model code reads
 #: (`config.WEIGHTS_MOUNT`, ...).
-MOUNTS = " ".join(
-    f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "benchmarks", "web-index")
-)
+MOUNTS = " ".join(f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "web-index"))
 
 
 class Shell:
@@ -196,8 +181,6 @@ def build_context(*, page: bool = False) -> bytes:
                 tar.add(path, arcname=str(path.relative_to(REPO_ROOT)))
         texts = {
             "requirements.txt": requirements(),
-            "match.txt": "\n".join(MATCH_LIBRARIES) + "\n",
-            "lightglue.txt": LIGHTGLUE + "\n",
         }
         for name, text in texts.items():
             data = text.encode()
@@ -229,13 +212,9 @@ def send_env(shell: Shell, settings: Settings) -> None:
     )
 
 
-def start_worker(
-    shell: Shell, settings: Settings, machine: GpuMachine, *, match: bool = False
-) -> None:
-    """Send the keys and the build context, build the image, start the worker container.
-
-    `match` adds the keypoint-matching libraries (steps C and E1)."""
-    build_image(shell, settings, match=match)
+def start_worker(shell: Shell, settings: Settings, machine: GpuMachine) -> None:
+    """Send the keys and the build context, build the image, start the worker container."""
+    build_image(shell, settings)
     shell.run(
         f"docker run -d --name miroir-worker --gpus all --shm-size 8g "
         f"--env-file {REMOTE_ROOT}/env -p 127.0.0.1:{WORKER_PORT}:{WORKER_PORT} {MOUNTS} "
@@ -248,7 +227,6 @@ def build_image(
     shell: Shell,
     settings: Settings,
     *,
-    match: bool = False,
     torch_tag: str = "",
     page: bool = False,
 ) -> None:
@@ -274,8 +252,7 @@ def build_image(
     logger.info("building the job image on the machine (a few minutes)")
     shell.run(
         f"cd {REMOTE_ROOT}/build && docker build -t {IMAGE_TAG} "
-        f"--build-arg TORCH_INDEX={shlex.quote(index)} "
-        f"--build-arg MATCH={int(match)} . "
+        f"--build-arg TORCH_INDEX={shlex.quote(index)} . "
         f"> {REMOTE_ROOT}/build.log 2>&1 || (tail -40 {REMOTE_ROOT}/build.log; exit 1)",
         timeout=BUILD_TIMEOUT_S,
     )
@@ -303,8 +280,6 @@ class ScalewayCalls:
         self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S, transport=transport)
         self.gpu = machine
         self.gate = gate
-        self.busy_s = 0.0
-        """Seconds spent in calls."""
 
     @property
     def machine(self) -> Machine:
@@ -333,11 +308,7 @@ class ScalewayCalls:
         raise TimeoutError(msg)
 
     def _call(self, name: str, *args: object) -> object:
-        start = time.monotonic()
-        try:
-            response = self._http.post("/call", content=pickle.dumps((name, args)))
-        finally:
-            self.busy_s += time.monotonic() - start
+        response = self._http.post("/call", content=pickle.dumps((name, args)))
         if response.status_code != 200:
             msg = f"{name} failed on the machine:\n{response.text[-3000:]}"
             raise RuntimeError(msg)
@@ -370,48 +341,6 @@ class ScalewayCalls:
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
         self.gate.check([i.image_id for c in chunks for i in c])
         return cast("dict[str, int]", self._call("fill_images", [list(c) for c in chunks]))
-
-    def amstertime_download(self) -> int:
-        return cast("int", self._call("amstertime_download"))
-
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        return cast("ChunkResult", self._call("amstertime_embed", option))
-
-    def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
-        self.gate.check([i for t in tasks for i in (t.image_id, *t.candidates)])
-        return cast("MatchChunk", self._call("match", list(tasks)))
-
-    def detect_rooms(
-        self,
-        option: DetectorOption | None,
-        photos: Sequence[RoomPhoto],
-        given: Mapping[str, tuple[Box, ...]] | None = None,
-    ) -> DetectChunk:
-        self.gate.check([p.image_id for p in photos])
-        result = self._call("detect_rooms", option, list(photos), dict(given or {}))
-        return cast("DetectChunk", result)
-
-    def locate_artworks(
-        self, scenes: Sequence[RoomPhoto], tasks: Sequence[LocateTask]
-    ) -> list[Located]:
-        self.gate.check([*(p.image_id for p in scenes), *(i for t in tasks for i in t.image_ids)])
-        return cast("list[Located]", self._call("locate_artworks", list(scenes), list(tasks)))
-
-    def match_site(self, tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]:
-        """Each query photo is checked by its `image_id`, also when it goes as bytes. The
-        candidates are images of the site's index, which the machine reads from its own images
-        bucket (`ImageGate.check_held`)."""
-        unnamed = [t.query_id for t in tasks if t.image_id is None]
-        if unnamed:
-            msg = f"{len(unnamed)} query photo(s) without an image id, e.g. {unnamed[0]}"
-            raise PrivacyError(msg)
-        self.gate.check([t.image_id for t in tasks if t.image_id is not None])
-        self.gate.check_held([c for t in tasks for c in t.candidates])
-        return cast("list[SiteMatches]", self._call("match_site", list(tasks)))
-
-    def read_captions(self, model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
-        self.gate.check([p.image_id for p in photos])
-        return cast("CaptionChunk", self._call("read_captions", model, list(photos)))
 
 
 class ScalewayBackend:
@@ -451,12 +380,10 @@ def open_scaleway(
     max_hours: float,
     purpose: str,
     offers: Sequence[Offer] = OFFERS,
-    match: bool = False,
     all_images: bool = False,
 ) -> Generator[ScalewayCalls]:
     """Start a GPU machine with the worker on it, yield its calls, then delete the machine.
 
-    `match` builds the image with the keypoint-matching libraries (`start_worker`).
     `all_images` lets images of records that are not publishable go to the machine: the
     full-sample index only (technical spec §9)."""
     gate = ImageGate(lambda: PublishableImages.load(settings), all_images=all_images)
@@ -475,7 +402,7 @@ def open_scaleway(
         ) as machine:
             shell = Shell(machine.ip, key, keys / "known_hosts")
             shell.wait()
-            start_worker(shell, settings, machine, match=match)
+            start_worker(shell, settings, machine)
             with shell.tunnel(WORKER_PORT) as port:
                 calls = ScalewayCalls(f"http://127.0.0.1:{port}", machine, gate)
                 try:

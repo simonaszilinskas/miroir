@@ -73,6 +73,12 @@ def piece_ranges(first: int, last: int, parts: int) -> list[tuple[int, int]]:
     return [(a, b) for a, b in bounds if b >= a]
 
 
+def parse_trials(text: str) -> list[tuple[int, int]]:
+    """ "32:1,64:2" -> [(32, 1), (64, 2)]: A7 batch sizes and streams to time."""
+    pairs = [t.split(":") for t in text.split(",") if t]
+    return [(int(b), int(s)) for b, s in pairs]
+
+
 def status_key(job: str, shard: int) -> str:
     return f"status/{job}-{shard}.json"
 

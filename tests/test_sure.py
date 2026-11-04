@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from miroir.eval.site_rerank import Searched
-from miroir.eval.sure import choose, sure_rows
+from miroir.eval.sure import Searched, choose, sure_rows
 from miroir.web.engine import Engine, SearchRequest
 from miroir.web.levels import Level, gap_of
 from miroir.web.measure import SiteHit

@@ -19,6 +19,7 @@ Two measures:
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from miroir.config import Settings, eval_result_path
 from miroir.eval.scoring import first_rank, tie_ranks
 from miroir.jobs.crop_slice import A7_SETS
 from miroir.web import ranking
@@ -611,3 +613,22 @@ def target_photo_cases(
         hidden = np.union1d(case.hidden_rows, np.asarray(others, dtype=np.int64))
         out.append(replace(case, hidden_rows=hidden.astype(np.int64), answer_only=True))
     return out
+
+
+def score_slice(settings: Settings) -> Path:
+    """Score the crop slice test from the tables `miroir scw crop-slice` brought back; write
+    eval/results/R3/SL-crop-slice.json and return its path."""
+    from miroir.eval.parts import VET, VET_TARGET_REF  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries, vet_refs  # noqa: PLC0415
+
+    folder = slice_dir(settings)
+    spec = read_spec((folder / "spec.json").read_bytes())
+    scores = load_scores(folder, spec)
+    cases = cases_of(spec, slice_queries(settings))
+    refs = vet_refs(settings, spec)
+    target = target_photo_cases(scores, spec, cases, set_id=VET, ref_of=refs, ref=VET_TARGET_REF)
+    path = eval_result_path("R3", "SL", "crop-slice")
+    path.write_text(
+        json.dumps(report(scores, [*cases, *target]), indent=2, ensure_ascii=False) + "\n"
+    )
+    return path

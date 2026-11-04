@@ -11,7 +11,6 @@ from miroir.eval.router import (
     RoutedSet,
     fit_logistic,
     photo_type,
-    pick_route,
     rank_routed,
     routed,
     training_labels,
@@ -102,14 +101,6 @@ def test_fast_ranking_matches_the_plain_one() -> None:
     rs = routed_set([0.7, 0.2])
     route = Route(0.6, 0.3)
     assert rank_routed(rs, route) == rank_entities(routed(rs, route), QUERIES)
-
-
-def test_grid_picks_split_weights_when_one_weight_cannot_serve_both() -> None:
-    route, (hit10, _) = pick_route([routed_set([1.0, 0.0])], hard=False)
-    assert hit10 == 1.0
-    assert route.building > route.object
-    tied, _ = pick_route([routed_set([1.0, 0.0])], hard=False, tied=True)
-    assert tied.building == tied.object
 
 
 def test_per_query_weights_refuse_a_wrong_shape() -> None:

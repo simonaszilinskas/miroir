@@ -9,8 +9,10 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
    the full POP export from public sources. It cannot import `miroir.config`, so rule 5 does not
    bind it: it reads `MIROIR_DATA_DIR` and `MIROIR_EXPORTS_DIR` itself, from the environment or
    `.env`, with the same defaults. `make check` lints, types and tests it like the package.
-2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
-   Group by area: `miroir records build`, `miroir embed scw`, `miroir eval run`.
+2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli/`, Typer): one
+   module per group, `miroir records build` in `cli/records.py`. A command parses its options,
+   calls one library function and prints its result; logic, network calls and report
+   formatting live in the library, with tests.
 3. No ML model is ever loaded or run on the development machine, not even for a test: ruff bans importing torch,
    transformers, timm, open_clip, sentence_transformers and mlx. Models run on hosted services.
    The one exception is `src/miroir/remote/`, code that runs only on a Scaleway GPU machine,
@@ -61,5 +63,5 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 18. Results are written with `config.eval_result_path(round, step, option)` and committed.
 19. Test sets are read only with `miroir.eval.sets.load_queries`. Its sealed half needs
     `allow_sealed=True`, and only R4 code may pass it. `tests/test_conventions.py` fails on any
-    other caller; the exceptions are `write_set`, which writes the sealed half and never reads it,
-    and the CLI's `allow_sealed=round_id == "R4"`.
+    other caller; the one exception is `write_set`, which writes the sealed half and never
+    reads it.

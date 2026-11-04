@@ -11,17 +11,11 @@ RUN pip install --no-cache-dir uv==0.11.29
 
 ARG TORCH_INDEX
 ENV UV_SYSTEM_PYTHON=1 UV_NO_CACHE=1
-COPY requirements.txt match.txt lightglue.txt /build/
+COPY requirements.txt /build/
 # torch first, from the index built for the machine's CUDA; the rest from PyPI keeps it.
 RUN grep -E '^(torch|torchvision)==' /build/requirements.txt > /build/torch.txt \
     && uv pip install --index-url "$TORCH_INDEX" -r /build/torch.txt \
     && uv pip install -r /build/requirements.txt
-# Keypoint matching (MATCH=1) only: OpenCV pulls numpy below the embedding image's pin, so
-# the embedding image leaves it out.
-ARG MATCH=0
-RUN if [ "$MATCH" = "1" ]; then \
-        uv pip install -r /build/match.txt && uv pip install --no-deps -r /build/lightglue.txt; \
-    fi
 
 COPY pyproject.toml README.md LICENSE /app/
 COPY src /app/src

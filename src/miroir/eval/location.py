@@ -38,7 +38,13 @@ from miroir.eval.notfound import Confidence, NotFoundScore, not_found_score
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
 from miroir.eval.router import QUERY_SETS, features, guess_report, photo_types
 from miroir.eval.router3 import Bucket, asking_run, bucket_of, query_chroma
-from miroir.eval.run import entity_map, publishable_only, search_queries
+from miroir.eval.run import (
+    combined_info,
+    entity_map,
+    not_found_queries,
+    publishable_only,
+    search_queries,
+)
 from miroir.eval.scoring import (
     Asked,
     Difference,
@@ -53,7 +59,6 @@ from miroir.eval.scoring import (
     tie_ranks,
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.stack import combined_info, not_found_queries
 from miroir.eval.vectors import RunInfo, VectorSet, read_vectors
 from miroir.geo.model import distance_km, moved
 from miroir.records.mappers import PlaceHint
@@ -330,6 +335,41 @@ class LocationReport:
     soft_choice: tuple[float, float]
     soft_split: Mapping[str, float]
     results: tuple[RunResult, ...]
+
+    def lines(self) -> list[str]:
+        """Coverage, the soft prior chosen, then each policy's hit@10 against no position."""
+        placed, total = self.placed
+        out = [
+            f"gallery entities with a place: {placed:,} of {total:,}",
+            "photos with a position: "
+            + ", ".join(f"{s} {n} of {t}" for s, (n, t) in self.gps_queries.items()),
+        ]
+        out += [
+            f"within {radius:g} km: median {median:g} gallery entities around a T2 photo; "
+            f"{100 * empty:.0f}% of T8c photos have none"
+            for radius, (median, empty) in self.nearby.items()
+        ]
+        bonus, scale = self.soft_choice
+        out.append(
+            f"soft prior picked: bonus {bonus:g}, scale {scale:g} km; split-half hit@10 "
+            + ", ".join(f"{s} {100 * v:.1f}" for s, v in self.soft_split.items())
+        )
+        for policy in (*self.known, *self.gps):
+            row = "; ".join(
+                f"{s} {score.hit_at_10.percent()} "
+                f"({100 * policy.differences[s].diff.value:+.1f} "
+                f"[{100 * policy.differences[s].diff.low:+.1f}, "
+                f"{100 * policy.differences[s].diff.high:+.1f}])"
+                for s, score in policy.scores.items()
+            )
+            out.append(f"{policy.option:<34}{row}")
+            if policy.not_found is not None:
+                nf = policy.not_found
+                out.append(
+                    f"{'':<34}T8c wrong-but-confident {nf.wrong_confident.percent()}, "
+                    f"matched at 5% wrong {nf.match_rate_at_target.percent()}"
+                )
+        return out
 
 
 def score_location(

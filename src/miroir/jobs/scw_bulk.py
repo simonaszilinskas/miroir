@@ -63,6 +63,8 @@ VENV = "/opt/venv"
 SETUP_TIMEOUT_S = 20 * 60
 #: Every image row with the file that holds it, written by `upload_image_list`.
 IMAGE_FILES = "image-files.parquet"
+#: The July vectors every POP image reuses when it has one (`miroir scw pop-download`).
+JULY_A7_RUN = "A7-embeddinggemma-2-512-full+F2"
 
 
 def cpu_requirements() -> str:
@@ -309,6 +311,13 @@ def download_launch(settings: Settings, shards: Sequence[int], of: int, workers:
         alive="pgrep -fc 'miroir scw [d]ownload' || true",
         logs=f"tail -n 30 {REMOTE_ROOT}/download-*.log",
     )
+
+
+def july_ids(settings: Settings) -> frozenset[str]:
+    """Every image id of the July A7 run (`JULY_A7_RUN`), Commons photos included."""
+    from miroir.eval.vectors import read_vectors  # noqa: PLC0415
+
+    return frozenset(read_vectors(settings.vectors_path(JULY_A7_RUN)).ids)
 
 
 def upload_july_list(settings: Settings, embedded: frozenset[str]) -> int:

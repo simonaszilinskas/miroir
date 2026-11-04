@@ -140,6 +140,10 @@ class SearchRequest:
     exclude_images: tuple[str, ...] = ()
     """Measurement only (not in the API): images taken out of the gallery, such as a test
     query's own shoot."""
+    vectors: tuple[Floats, Floats] | None = None
+    """Measurement only (not in the API): the photo's stored (EmbeddingGemma 2, MegaLoc)
+    vectors, used instead of running the models on it (the offline agent,
+    `miroir.eval.offline`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,19 +253,14 @@ class Engine:
             msg = "a search needs a photo or words"
             raise ValueError(msg)
         timings: dict[str, float] = {}
-        mask = self.catalog.image_mask(request.filters)
-        if request.exclude_images:
-            row = self.catalog.image_row
-            mask = mask.copy()
-            mask[[row[i] for i in request.exclude_images if i in row]] = False
+        mask = self._mask(request)
         signals: list[ranking.Signal] = []
         per_image: Floats | None = None
         photo: _Photo | None = None
         words_found: bool | None = None
         archive = _Archive()
         if request.image is not None:
-            archive = self._archive(request, timings)
-            photo = self._photo(archive.query, mask, timings)
+            archive, photo = self._photo_of_request(request, mask, timings)
             signals += photo.signals
             per_image = photo.per_image
         if archive.caption and self.archive.words > 0:
@@ -311,6 +310,32 @@ class Engine:
             caption_read=archive.read,
             caption_place=None if place is None else place.label,
         )
+
+    def photo_scores(self, request: SearchRequest) -> Floats:
+        """Measurement: the photo's routed score per entity, as `search` ranks it before
+        words, a caption or a position count (-inf for an entity filtered or hidden)."""
+        _, photo = self._photo_of_request(request, self._mask(request), {})
+        return photo.ranking.fused
+
+    def _mask(self, request: SearchRequest) -> NDArray[np.bool_]:
+        mask = self.catalog.image_mask(request.filters)
+        if request.exclude_images:
+            row = self.catalog.image_row
+            mask = mask.copy()
+            mask[[row[i] for i in request.exclude_images if i in row]] = False
+        return mask
+
+    def _photo_of_request(
+        self, request: SearchRequest, mask: NDArray[np.bool_], timings: dict[str, float]
+    ) -> tuple[_Archive, _Photo]:
+        """The photo's mount and caption, and its two signals (from `request.vectors` when it
+        brings stored ones)."""
+        archive = self._archive(request, timings)
+        if request.vectors is None:
+            return archive, self._photo(archive.query, mask, timings)
+        a7, a3 = request.vectors
+        chroma = chroma_spread(archive.query)
+        return archive, self.photo_of(self.vector_cosines(a7, a3, chroma, mask, timings))
 
     def _levels(
         self, photo: _Photo | None, unplaced: Floats, fused: Floats, top: ranking.Ints
