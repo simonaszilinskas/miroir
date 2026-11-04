@@ -75,13 +75,29 @@ export type EntityPage = {
   photo_count: number;
 };
 
+/** A record as a step or the shortlist shows it: a small image and a title. */
+export type Thumb = { entity_id: string; title: string; image_url: string | null };
+
 /** One thing the agent did or said (`miroir.web.chat`, `/api/chat/events`), with its number
  * in the conversation (`n`, on what the turn wrote). */
 export type ChatEvent = (
   | { type: "status"; text: string }
-  | { type: "step"; id: number; state?: string; label: string; summary?: string; why?: string; error?: boolean; thumbs?: { entity_id: string; title: string; image_url: string }[] }
+  | {
+      type: "step";
+      id: number;
+      /** The tool's name, or "first_look". */
+      tool?: string;
+      state?: string;
+      label: string;
+      summary?: string;
+      why?: string;
+      error?: boolean;
+      thumbs?: Thumb[];
+      /** The model's best-so-far after this step. */
+      shortlist?: Thumb[];
+    }
   | { type: "say"; text: string }
-  | { type: "question"; text: string; choices: string[] }
+  | { type: "question"; text: string; choices: string[]; about?: string; position?: boolean; region?: boolean }
   | { type: "region"; text: string }
   | { type: "results"; cards: Card[]; found: string | null }
   | { type: "limit"; text: string }
