@@ -240,7 +240,9 @@ class FakeGuide:
         if fresh and not thumbnails:
             why = "Je regarde de près les premiers résultats nouveaux."
             ids: list[JSON] = list[JSON](fresh)
-            return _answer("", [("view_results", {"entity_ids": ids, "why": why})])
+            # It keeps the first two it looks at as its best so far: the page's shortlist.
+            view: dict[str, JSON] = {"entity_ids": ids, "why": why, "best": ids[:2]}
+            return _answer("", [("view_results", view)])
         if searched and not asked and "ask_visitor" in tools:
             return _answer("Je ne suis pas encore sûr : une précision m’aiderait.", [_QUESTION])
         return _answer("", [("show_results", _shown(listed))])
