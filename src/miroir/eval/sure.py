@@ -23,7 +23,7 @@ import numpy as np
 
 from miroir.config import WEB_INDEX, Settings, eval_result_path
 from miroir.eval.site_rerank import Searched
-from miroir.web.bundle import WRONG_TARGET
+from miroir.web.calibrate import WRONG_TARGET
 from miroir.web.routing import PhotoType
 from miroir.web.sure import SURE_FILE, SureRule, margin_of, write_sure
 

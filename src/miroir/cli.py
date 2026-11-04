@@ -1306,7 +1306,7 @@ def words_score(
 
 def _web_index_ids() -> set[str]:
     """Image ids of the website's index (`WEB_INDEX`): T7 draws only images the site holds."""
-    from miroir.web.bundle import IDS_FILE  # noqa: PLC0415
+    from miroir.web.measure import IDS_FILE  # noqa: PLC0415
 
     path = get_settings().web_index_dir(WEB_INDEX) / IDS_FILE
     return set(path.read_text(encoding="utf-8").split())
@@ -2295,7 +2295,7 @@ def rerank_site(
     from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
     from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
     from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+    from miroir.web.measure import SiteBundle  # noqa: PLC0415
 
     settings = get_settings()
     bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
@@ -2313,7 +2313,7 @@ def rerank_site(
 def eval_rerank_site(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
     """Score E1 in the website on T3, T5, T2b; set the object cut-off again on T8."""
     from miroir.eval.site_rerank import search_sets, write_report  # noqa: PLC0415
-    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+    from miroir.web.measure import SiteBundle  # noqa: PLC0415
 
     settings = get_settings()
     bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
@@ -2351,7 +2351,7 @@ def web_sure(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
     """Set when an object search counts as sure (margin rule) on the tune halves."""
     from miroir.eval.site_rerank import search_sets  # noqa: PLC0415
     from miroir.eval.sure import write_sure_rule  # noqa: PLC0415
-    from miroir.web.bundle import SiteBundle  # noqa: PLC0415
+    from miroir.web.measure import SiteBundle  # noqa: PLC0415
 
     settings = get_settings()
     bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))

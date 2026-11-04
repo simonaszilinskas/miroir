@@ -8,9 +8,9 @@ import pytest
 
 from miroir.eval.site_rerank import Searched
 from miroir.eval.sure import choose, sure_rows
-from miroir.web.bundle import SiteHit
 from miroir.web.engine import Engine, SearchRequest
 from miroir.web.levels import Level
+from miroir.web.measure import SiteHit
 from miroir.web.routing import PhotoType
 from miroir.web.sure import SureRule, margin_of, read_sure, write_sure
 from tests import web_helpers as h

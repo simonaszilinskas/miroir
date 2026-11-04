@@ -63,7 +63,7 @@ from miroir.outlines import (
 )
 from miroir.records.model import Record
 from miroir.records.store import read_records
-from miroir.web.bundle import SiteBundle, SiteHit, site_search
+from miroir.web.measure import SiteBundle, SiteHit, site_search
 
 logger = logging.getLogger(__name__)
 

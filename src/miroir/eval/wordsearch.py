@@ -36,9 +36,10 @@ from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors
 from miroir.eval.words import EN_SET_ID, SET_ID, WRITER
 from miroir.web import ranking
-from miroir.web.bundle import INDEXES, entity_cosines
+from miroir.web.bundle import INDEXES
 from miroir.web.catalog import CATALOG_FILE, Catalog, read_catalog
 from miroir.web.engine import A3_FILE, A7_FILE, record_text, word_signals
+from miroir.web.measure import entity_cosines
 from miroir.web.routing import GUESS_FILE, ROUTING_FILE, TextWeights, read_guess, read_routing
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,8 @@ from miroir.config import Settings
 from miroir.geo.model import Place, PlaceSource
 from miroir.records.store import write_places as write_places_parquet
 from miroir.web import facets, ranking
-from miroir.web.bundle import add_places, cutoff_for
+from miroir.web.bundle import add_places
+from miroir.web.calibrate import cutoff_for
 from miroir.web.catalog import CATALOG_FILE, CatalogData, Filters, write_catalog
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
 from miroir.web.levels import WORDS_ROUTE, Level, Levels, RouteLevels

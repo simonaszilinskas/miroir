@@ -42,8 +42,8 @@ from miroir.jobs.spend import SpendKind
 from miroir.records.model import Image
 from miroir.records.store import read_images
 from miroir.web.archive import ArchiveRule
-from miroir.web.bundle import SiteBundle
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
+from miroir.web.measure import SiteBundle
 from miroir.web.nearby import EntityPlaces
 from miroir.web.routing import TextWeights
 

@@ -38,7 +38,8 @@ from miroir.eval.vectors import read_vectors
 from miroir.eval.words import SET_ID as WORDS_SET_ID
 from miroir.eval.wordsearch import TEXT_LABEL, WebIndex, text_vectors, word_query_signals
 from miroir.web import ranking
-from miroir.web.bundle import WRONG_TARGET, SiteBundle, asked_sets, entity_cosines
+from miroir.web.bundle import INDEXES
+from miroir.web.calibrate import WRONG_TARGET
 from miroir.web.levels import (
     LEVELS_FILE,
     WORDS_ROUTE,
@@ -48,6 +49,7 @@ from miroir.web.levels import (
     gap_of,
     write_levels,
 )
+from miroir.web.measure import SiteBundle, asked_sets, entity_cosines
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,7 @@ def rank_tune_sets(settings: Settings, index: str = WEB_INDEX) -> list[Ranked]:
 def _photo_searches(settings: Settings, index: str) -> Iterable[Ranked]:
     bundle = SiteBundle.load(settings.web_index_dir(index))
     catalog, vectors = bundle.catalog, bundle.vectors
-    asked = asked_sets(settings, index)
+    asked = asked_sets(settings, INDEXES[index])
     for set_id in PHOTO_SETS:
         a = asked.get(set_id)
         if a is None or not a.query_ids:

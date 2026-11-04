@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 
 from miroir.eval.vectors import Route, RunInfo, write_vectors
-from miroir.web.bundle import right_rank, write_shortlist_store
+from miroir.web.bundle import write_shortlist_store
 from miroir.web.engine import A3_FILE, SearchRequest, read_projection
+from miroir.web.measure import right_rank
 from miroir.web.store import (
     ExactStore,
     quantize_rows,

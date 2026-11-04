@@ -39,8 +39,8 @@ from miroir.jobs.crop_slice import QuerySource
 from miroir.jobs.objects import Bucket, bucket_name, download_tree, s3_client
 from miroir.remote.search import load_search
 from miroir.web import ranking
-from miroir.web.bundle import right_rank
 from miroir.web.engine import Engine, SearchRequest, prepare_photo, unit
+from miroir.web.measure import right_rank
 
 logger = logging.getLogger(__name__)
 
