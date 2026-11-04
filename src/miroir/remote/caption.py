@@ -7,12 +7,10 @@ Qwen3-VL Instruct is asked to copy the caption line that names the place
 
 from __future__ import annotations
 
-import gc
 import io
 import logging
 import threading
 import time
-from collections.abc import Sequence
 
 import torch
 from PIL import Image as PILImage
@@ -25,7 +23,6 @@ from miroir.caption import (
     CAPTION_TOKENS,
     clean_caption,
 )
-from miroir.eval.wire import CaptionChunk, CaptionPhoto
 
 logger = logging.getLogger(__name__)
 
@@ -72,42 +69,6 @@ class CaptionReader:
             out[:, inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )[0]
         return clean_caption(answer)
-
-
-_READER: dict[str, CaptionReader] = {}
-"""The reader loaded on this machine, by model: one at a time."""
-
-
-def caption_reader(model: str) -> tuple[CaptionReader, float]:
-    """The model's reader, loaded once per machine, and the seconds this call spent loading."""
-    if model in _READER:
-        return _READER[model], 0.0
-    _READER.clear()  # free the last reader before loading another
-    gc.collect()
-    torch.cuda.empty_cache()
-    _READER[model] = CaptionReader(model)
-    return _READER[model], _READER[model].load_s
-
-
-def read_captions(model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
-    """Every photo's caption, and the time each took on the GPU."""
-    if not photos:
-        return CaptionChunk(ids=(), texts=(), seconds=(), load_s=0.0)
-    reader, load_s = caption_reader(model)
-    reader.read(photos[0].jpeg)  # warm the kernels: the timings are of a warm reader
-    texts: list[str] = []
-    seconds: list[float] = []
-    for photo in photos:
-        tick = time.monotonic()
-        texts.append(reader.read(photo.jpeg))
-        torch.cuda.synchronize()
-        seconds.append(time.monotonic() - tick)
-    return CaptionChunk(
-        ids=tuple(p.image_id for p in photos),
-        texts=tuple(texts),
-        seconds=tuple(seconds),
-        load_s=load_s,
-    )
 
 
 class BackgroundCaptions:

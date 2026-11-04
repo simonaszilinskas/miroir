@@ -209,7 +209,7 @@ def test_the_build_context_holds_the_dockerfile_pins_and_package() -> None:
         requirements = tar.extractfile("requirements.txt")
         assert requirements is not None
         pins = requirements.read().decode().split()
-    assert {"Dockerfile", "pyproject.toml", "src/miroir/cli.py", "match.txt"} <= names
+    assert {"Dockerfile", "pyproject.toml", "src/miroir/cli.py"} <= names
     assert not any("__pycache__" in n for n in names)
     assert "torch==2.14.1" in pins
     assert "boto3==1.43.123" in pins

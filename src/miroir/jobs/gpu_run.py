@@ -43,7 +43,6 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from miroir.commons.images import CommonsImages, split_commons
 from miroir.config import SEED, Settings
-from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
 from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
 from miroir.images.fetch import Fetched
@@ -53,7 +52,6 @@ from miroir.jobs.remote_spec import (
     CHUNK_TEXTS,
     CHUNK_TIMEOUT_S,
     FILL_TIMEOUT_S,
-    MATCH_QUERIES,
     OPTIONS,
     TEXT_PROMPT,
     ChunkResult,
@@ -117,7 +115,6 @@ class RemoteCalls(Protocol):
         self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
-    def match(self, tasks: Sequence[MatchTask]) -> MatchChunk: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,37 +493,6 @@ class GpuRunner:
         )
         logger.info("images bucket: %s for %s, $%.4f", paid.result, gallery, paid.cost_usd)
         return paid.result
-
-    def match(self, name: str, tasks: Sequence[MatchTask], *, max_usd: float) -> int:
-        """Keypoint matches of each query against its shortlist (step E1), on the GPU machine.
-
-        Each answer is appended to `Settings.matches_path(name)` as it arrives, so a stopped
-        run resumes. Stops before a call once the run has cost `max_usd`. Returns queries done.
-        """
-        path = self.settings.matches_path(name)
-        held = read_matches(path)
-        todo = [t for t in tasks if t.query_id not in held]
-        self._calls.gate.check(sorted({i for t in todo for i in (t.image_id, *t.candidates)}))
-        logger.info("%s: %d queries to match (%d saved before)", name, len(todo), len(held))
-        spend = self._spend(SpendKind.RUN, "E1", name, "aliked+lightglue", limit_usd=max_usd)
-        missing: set[str] = set()
-        for chunk in batched(todo, MATCH_QUERIES):
-            if spend.spent_usd >= max_usd:
-                msg = f"{name}: cost ${spend.spent_usd:.4f}, at its ${max_usd:.2f} limit; stopped"
-                raise BudgetError(msg)
-            asked = {t.query_id for t in chunk}
-            paid = self._timed(spend, lambda chunk=chunk: self._calls.match(chunk), chunk)
-            answered = [q.query_id for q in paid.result.queries]
-            if len(set(answered)) != len(answered) or not set(answered) <= asked:
-                msg = f"{name}: the answer holds queries that were not asked, or twice"
-                raise ValueError(msg)
-            append_matches(path, paid.result.queries)
-            missing.update(paid.result.missing)
-            held.update({q.query_id: q for q in paid.result.queries})
-            logger.info("%s: %d/%d queries, $%.4f", name, len(held), len(tasks), spend.spent_usd)
-        if missing:
-            logger.warning("%s: %d image(s) could not be read on the machine", name, len(missing))
-        return len(held)
 
     # --- the one resumable run --------------------------------------------------------------
 

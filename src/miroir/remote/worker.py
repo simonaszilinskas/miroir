@@ -65,11 +65,6 @@ class Worker:
             "embed": self.embed,
             "embed_texts": self.embed_texts,
             "fill_images": self.fill_images,
-            "match": self.match,
-            "detect_rooms": self.detect_rooms,
-            "locate_artworks": self.locate_artworks,
-            "match_site": self.match_site,
-            "read_captions": self.read_captions,
             "search": self.search,
             "detect": self.detect,
             "tool_search": self.tool_search,
@@ -145,37 +140,6 @@ class Worker:
             for key, n in counts.items():
                 totals[key] = totals.get(key, 0) + n
         return totals
-
-    def match(self, tasks: list) -> object:
-        from miroir.remote.matching import match_tasks  # noqa: PLC0415
-
-        result = match_tasks(tasks)
-        self._save_weights(result.load_s)
-        return result
-
-    def detect_rooms(self, option, photos: list, given: dict) -> object:
-        from miroir.remote.rooms import detect_rooms  # noqa: PLC0415
-
-        result = detect_rooms(option, photos, given)
-        self._save_weights(result.load_s)
-        return result
-
-    def locate_artworks(self, scenes: list, tasks: list) -> object:
-        from miroir.remote.rooms import locate_artworks  # noqa: PLC0415
-
-        return locate_artworks(scenes, tasks)
-
-    def match_site(self, tasks: list) -> object:
-        from miroir.remote.rerank import match_site_tasks  # noqa: PLC0415
-
-        return match_site_tasks(tasks)
-
-    def read_captions(self, model: str, photos: list) -> object:
-        from miroir.remote.caption import read_captions  # noqa: PLC0415
-
-        result = read_captions(model, photos)
-        self._save_weights(1.0)
-        return result
 
     # --- the website's search (`miroir web dev --scw`) ---------------------------------------
 

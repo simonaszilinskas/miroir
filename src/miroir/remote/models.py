@@ -49,8 +49,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 GEM_P = 3.0
 #: Parallel image reads on the machine (image folder, else POP), running ahead of the GPU.
 FETCH_CONCURRENCY = 32
-#: Parallel file reads from the machine's image folder.
-VOLUME_READERS = 32
 #: Threads decoding and preparing images (resize, normalise) for the GPU.
 PREPARE_WORKERS = 8
 

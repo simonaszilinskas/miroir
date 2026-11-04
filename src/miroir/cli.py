@@ -31,8 +31,6 @@ testsets_app = typer.Typer(
 app.add_typer(testsets_app, name="testsets")
 embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote models.")
 app.add_typer(embed_app, name="embed")
-rerank_app = typer.Typer(no_args_is_help=True, help="Step E1: re-rank shortlists by keypoints.")
-app.add_typer(rerank_app, name="rerank")
 index_app = typer.Typer(
     no_args_is_help=True, help="Full-sample index for the website: PCA and the guess."
 )
@@ -1337,58 +1335,6 @@ def _web_index_ids() -> set[str]:
     return set(path.read_text(encoding="utf-8").split())
 
 
-@rerank_app.command("run")
-def rerank_run(
-    *,
-    vectors: Annotated[str, typer.Option(help="Vector run whose search gives the shortlists.")],
-    test_set: Annotated[str, typer.Option("--set", help="Test set id; tune half only.")],
-    max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],
-    gallery: Annotated[str, typer.Option(help="Gallery list.")] = (
-        "screening-20k-publishable-fetched"
-    ),
-    max_hours: MaxHours = 2.0,
-) -> None:
-    """Match each tune query against its top 50 entities' best images, on a GPU. Paid."""
-    from miroir.eval.rerank import tasks  # noqa: PLC0415
-    from miroir.eval.run import matches_name, rerank_shortlists  # noqa: PLC0415
-    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-
-    settings = get_settings()
-    lists, _, _ = rerank_shortlists(settings, vector_run=vectors, set_id=test_set, gallery=gallery)
-    name = matches_name(vectors, test_set)
-    purpose = f"rerank {name}"
-    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
-        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
-        done = runner.match(name, tasks(lists), max_usd=max_usd)
-    typer.echo(f"{name}: {done} queries matched; next: uv run miroir eval rerank ...")
-
-
-@eval_app.command("rerank")
-def eval_rerank(
-    *,
-    round_id: Annotated[str, typer.Option("--round", help="R2...")],
-    label: Annotated[str, typer.Option(help="Shortlist label, e.g. A7-embeddinggemma-2-512.")],
-    vectors: Annotated[str, typer.Option(help="Vector run whose search gave the shortlists.")],
-    test_set: Annotated[str, typer.Option("--set", help="Test set id; tune half only.")],
-    gallery: Annotated[str, typer.Option(help="Gallery list.")] = (
-        "screening-20k-publishable-fetched"
-    ),
-) -> None:
-    """Score shortlists re-ranked by keypoint matches; one result file per way (E1)."""
-    from miroir.eval.run import score_rerank  # noqa: PLC0415
-
-    scores = score_rerank(
-        get_settings(),
-        round_id=round_id,
-        label=label,
-        vector_run=vectors,
-        set_id=test_set,
-        gallery=gallery,
-    )
-    _echo_scores(scores)
-
-
 @index_app.command("pca")
 def index_pca(
     *,
@@ -2256,139 +2202,10 @@ def main() -> None:
     app()
 
 
-detect_app = typer.Typer(
-    no_args_is_help=True, help="Step C: object outlines on the Jeu de Paume room photos."
-)
-app.add_typer(detect_app, name="detect")
-
-
-@detect_app.command("locate")
-def detect_locate(max_hours: MaxHours = 1.0) -> None:
-    """Find where each T3 tune artwork hangs in its room photos, on a GPU. Paid."""
-    from miroir.eval.detect import run_locate  # noqa: PLC0415
-    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-
-    settings = get_settings()
-    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    purpose = "detect locate"
-    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
-        located = run_locate(settings, calls, paid)
-    found = sum(x.box is not None for x in located)
-    typer.echo(f"{found} of {len(located)} (room photo, artwork) pairs located")
-
-
-@detect_app.command("rooms")
-def detect_rooms(
-    option: Annotated[str, typer.Option(help="Detector id (C1-owlv2-base...) or C0-located.")],
-    max_hours: MaxHours = 1.0,
-) -> None:
-    """Run one detector on the room photos and search every box like the site. Paid."""
-    from miroir.eval.detect import run_detector  # noqa: PLC0415
-    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-
-    settings = get_settings()
-    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    purpose = f"detect {option}"
-    with open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls:
-        found = run_detector(settings, calls, paid, option)
-    boxes = sum(len(r.boxes) for r in found.rooms)
-    typer.echo(f"{option}: {boxes} raw boxes on {len(found.rooms)} photos, ${found.cost_usd:.4f}")
-
-
-@eval_app.command("detect")
-def eval_detect(
-    option: Annotated[str, typer.Option(help="Detector id whose boxes `detect rooms` saved.")],
-    round_id: Annotated[str, typer.Option("--round")] = "R3",
-) -> None:
-    """Score one detector end to end on T3 tune (tapped outline in the top 5), rule tuned."""
-    from miroir.eval.detect import summary, write_scores  # noqa: PLC0415
-
-    tried = write_scores(get_settings(), option, round_id=round_id)
-    for score in tried[:3]:
-        typer.echo(f"every outline: {summary(score.every)}")
-        typer.echo(f"first view: top 5 {score.first.hit_at(5):.3f}")
-
-
-@eval_app.command("detect-order")
-def eval_detect_order() -> None:
-    """Score orders of the site's outlines on T3 tune: which ones the first view shows."""
-    from miroir.eval.detect import write_order_report  # noqa: PLC0415
-
-    path = write_order_report(get_settings())
-    typer.echo(f"wrote {path} and C-detail/order.json beside it")
-
-
-@rerank_app.command("site")
-def rerank_site(
-    max_usd: Annotated[float, typer.Option(help="Stop once matching has cost this much.")],
-    max_hours: MaxHours = 2.0,
-) -> None:
-    """E1 in the website: match object searches' top 30 on a GPU with the site's code. Paid."""
-    from miroir.commons.images import open_commons_images  # noqa: PLC0415
-    from miroir.eval.site_rerank import match_sets, search_sets  # noqa: PLC0415
-    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-    from miroir.web.measure import SiteBundle  # noqa: PLC0415
-
-    settings = get_settings()
-    bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
-    searched = search_sets(settings, bundle)
-    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with (
-        open_commons_images(settings) as photos,
-        open_scaleway(settings, max_hours=max_hours, purpose="rerank site", match=True) as calls,
-    ):
-        cost = match_sets(settings, searched, calls, paid, photos, max_usd=max_usd)
-    typer.echo(f"site re-rank matched, ${cost:.4f}; next: uv run miroir eval rerank-site")
-
-
-@eval_app.command("rerank-site")
-def eval_rerank_site(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
-    """Score E1 in the website on T3, T5, T2b; set the object cut-off again on T8."""
-    from miroir.eval.site_rerank import search_sets, write_report  # noqa: PLC0415
-    from miroir.web.measure import SiteBundle  # noqa: PLC0415
-
-    settings = get_settings()
-    bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
-    summary = write_report(settings, bundle, search_sets(settings, bundle), round_id=round_id)
-    typer.echo(summary)
-
-
-@detect_app.command("single")
-def detect_single(
-    option: Annotated[str, typer.Option(help="Detector id, e.g. C2-gdino-tiny.")],
-    max_hours: MaxHours = 1.0,
-) -> None:
-    """Count the outlines the site would draw on photos of one object (T5, T2b). Paid."""
-    from miroir.commons.images import open_commons_images  # noqa: PLC0415
-    from miroir.eval.detect import run_single_objects  # noqa: PLC0415
-    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-
-    settings = get_settings()
-    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    purpose = f"detect single {option}"
-    with (
-        open_commons_images(settings) as commons,
-        open_scaleway(settings, max_hours=max_hours, purpose=purpose, match=True) as calls,
-    ):
-        counts = run_single_objects(settings, calls, paid, option, commons)
-    for set_id, found in counts.items():
-        none = sum(n == 0 for n in found)
-        typer.echo(f"{set_id}: {none} of {len(found)} photos with no outline; counts {found}")
-
-
 @web_app.command("sure")
 def web_sure(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None:
     """Set when an object search counts as sure (margin rule) on the tune halves."""
-    from miroir.eval.site_rerank import search_sets  # noqa: PLC0415
-    from miroir.eval.sure import write_sure_rule  # noqa: PLC0415
+    from miroir.eval.sure import search_sets, write_sure_rule  # noqa: PLC0415
     from miroir.web.measure import SiteBundle  # noqa: PLC0415
 
     settings = get_settings()
@@ -2424,57 +2241,6 @@ def web_levels(round_id: Annotated[str, typer.Option("--round")] = "R3") -> None
     for set_id, share in not_found_shares(rows, reports).items():
         typer.echo(f"{set_id} (record not in the index): 'Très proche' on {share:.1%}")
     typer.echo("levels.json written into the bundle; `miroir web upload` sends it.")
-
-
-archive_app = typer.Typer(
-    no_args_is_help=True,
-    help="T1 archive prints: search the print without its mount, read its caption.",
-)
-app.add_typer(archive_app, name="archive")
-
-
-@archive_app.command("remote")
-def archive_remote(
-    model: Annotated[
-        list[str], typer.Option(help="Caption reader(s), from miroir.caption.CAPTION_MODELS.")
-    ],
-    max_hours: MaxHours = 1.0,
-) -> None:
-    """On a GPU: embed the T1 tune photos whole and cut from their mounts, read their
-    captions. Paid; each part is kept and not asked again."""
-    from miroir.eval.archive import run_remote  # noqa: PLC0415
-    from miroir.jobs.gpu_run import PaidCall  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, SpendLedger  # noqa: PLC0415
-
-    settings = get_settings()
-    paid = PaidCall(SpendLedger(settings.spend_ledger), Budget.from_settings(settings))
-    with open_scaleway(settings, max_hours=max_hours, purpose="archive remote") as calls:
-        cost = run_remote(settings, calls, paid, model)
-    typer.echo(f"done, ${cost:.4f}")
-
-
-@archive_app.command("score")
-def archive_score(
-    model: Annotated[str, typer.Option(help="Caption reader whose captions to use.")],
-    only: Annotated[
-        list[str] | None, typer.Option(help="Rules to score (miroir.eval.archive.RULES).")
-    ] = None,
-    caption_a7: Annotated[
-        list[float] | None,
-        typer.Option(help="Caption words' text-vector weight to try (BM25 gets the rest)."),
-    ] = None,
-) -> None:
-    """Score each way of using the mount and caption on T1 tune, with the site's search."""
-    from miroir.eval.archive import RULES, score  # noqa: PLC0415
-
-    rules = {k: v for k, v in RULES.items() if not only or k in only}
-    rows = score(get_settings(), model, rules, caption_a7 or ())
-    for row in rows:
-        hits = ", ".join(f"hit@{k} {100 * v:.1f}" for k, v in row.hits.items())
-        typer.echo(f"{row.label}: {hits} ({row.queries} queries)")
-    named, right = rows[0].with_place, rows[0].right_place
-    typer.echo(f"captions naming a known commune: {named}, the right one: {right}")
 
 
 # --- the demo machine (`miroir.jobs.demo`) ---------------------------------------------------

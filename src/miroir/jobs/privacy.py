@@ -118,8 +118,3 @@ class ImageGate:
             self.store.check_known(sources)
         else:
             self.store.check(sources, self._service)
-
-    def check_held(self, image_ids: Iterable[str]) -> None:
-        """Images the machine reads from its own images bucket, where the full-sample index
-        put every image (site re-rank candidates): they must be known, nothing more."""
-        self.store.check_known([i.split(DERIVED, 1)[0] for i in image_ids])

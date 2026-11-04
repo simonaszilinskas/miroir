@@ -29,19 +29,10 @@ MODEL_LIBRARIES = (
     "pydantic==2.14.1",
     "pydantic-settings==2.15.0",
 )
-#: Keypoint matching (step E1) on top of those, and LightGlue from its repository, pinned,
-#: installed without its own dependencies (it asks for the GUI build of OpenCV).
-MATCH_LIBRARIES = ("kornia==0.8.3", "opencv-python-headless==4.12.0.88", "packaging")
-LIGHTGLUE = (
-    "lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8"
-)
-
 #: Images per remote call. The Mac logs spend and checks the budget between calls.
 CHUNK_IMAGES = 500
 #: A call may run this long, model download included (the tunnel waits a little longer).
 CHUNK_TIMEOUT_S = 20 * 60
-#: Queries per keypoint-matching call (step E1), each with its shortlist of 50.
-MATCH_QUERIES = 40
 #: EmbeddingGemma 2's prompt for words searched against images: the website's query side
 #: (`miroir.remote.search`) and the T7 query runs (`embed_texts`) both use it.
 TEXT_PROMPT = "SearchQuery"
