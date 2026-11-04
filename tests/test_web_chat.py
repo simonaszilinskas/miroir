@@ -16,6 +16,7 @@ from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import Outlines
 from miroir.records.bases import place_key
 from miroir.web import chat as chat_module
+from miroir.web import chat_method
 from miroir.web.app import create_app
 from miroir.web.catalog import Filters
 from miroir.web.chat import (
@@ -86,15 +87,23 @@ class CountingBackend:
         self.counts = {"search": 0, "tool": 0}
         self.queries: list[ToolQuery] = []
         self.requests: list[SearchRequest] = []
+        self.failures: list[Exception] = []
+        """Raised by the next tool searches, one each, before any runs."""
+        self.search_failure: Exception | None = None
+        """Raised by the usual search (the first look)."""
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
         self.requests.append(request)
+        if self.search_failure is not None:
+            raise self.search_failure
         return await self.local.search(request)
 
     async def tool_search(self, query: ToolQuery) -> ToolHits:
         self.counts["tool"] += 1
         self.queries.append(query)
+        if self.failures:
+            raise self.failures.pop(0)
         return await self.local.tool_search(query)
 
     async def warm(self) -> None:
@@ -403,8 +412,8 @@ def test_a_repeated_search_is_not_run_and_the_model_is_told() -> None:
 
 
 def test_searches_stop_at_the_cap_for_one_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(chat_module, "MAX_TOOL_CALLS", 8)  # a script short enough to read
-    monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # the tiny index has nothing new to add
+    monkeypatch.setattr(chat_method, "MAX_TOOL_CALLS", 8)  # a script short enough to read
+    monkeypatch.setattr(chat_method, "MAX_STALE", 99)  # the tiny index has nothing new to add
     words = [
         "vase",
         "église",
@@ -678,7 +687,7 @@ def test_an_empty_reply_is_not_sent_back_to_the_model() -> None:
 
 
 def test_looks_at_thumbnails_have_their_own_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(chat_module, "MAX_VIEWS", 3)
+    monkeypatch.setattr(chat_method, "MAX_VIEWS", 3)
     views = [searching("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2")]
     script = [
         *views,
@@ -767,10 +776,11 @@ def test_openrouter_asks_mistral_to_reason_a_little_never_none() -> None:
     sent: list[Mapping[str, JSON]] = []
     model = OpenRouterModel(SecretStr("sk-or-test"))
 
-    def chat(name: str, body: Mapping[str, JSON]) -> ChatAnswer:
+    def chat(name: str, body: Mapping[str, JSON], *, need_cost: bool = True) -> ChatAnswer:
         assert name == model.model
+        assert not need_cost  # an answer without a cost is priced, not refused
         sent.append(body)
-        return ChatAnswer("ok", 0.0, 1, 1, "stop")
+        return ChatAnswer("ok", 0.001, 1, 1, "stop")
 
     model._client.chat = chat  # type: ignore[method-assign]
     asyncio.run(model.complete({"messages": [], "max_tokens": 800}))
@@ -808,6 +818,6 @@ def test_the_model_reads_the_outlines_and_sees_the_image_it_searched() -> None:
 
 def test_the_step_caps_leave_room_for_a_thorough_run() -> None:
     """Raised 2026-11-03: the spending caps, not the step caps, end a long run."""
-    assert chat_module.MAX_TOOL_CALLS >= 20
+    assert chat_method.MAX_TOOL_CALLS >= 20
     assert chat_module.MAX_MODEL_CALLS >= 25
-    assert chat_module.MAX_SEARCHES >= 10
+    assert chat_method.MAX_SEARCHES >= 10

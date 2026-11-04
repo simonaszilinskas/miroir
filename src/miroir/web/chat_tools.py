@@ -20,6 +20,7 @@ says whether the very thing was found (`found`), and says so plainly when it was
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -105,6 +106,8 @@ MAX_QUERY_WORDS = 5
 #: Characters kept of a `why`, of a summary.
 WHY_CHARS = 200
 SUMMARY_CHARS = 700
+#: Most ids the best-so-far holds (`best` on a search or a look).
+BEST = 5
 #: What a "not found" summary starts with when the model did not say it.
 NOT_FOUND = "Je ne trouve pas cet objet précis dans les collections."
 
@@ -201,6 +204,8 @@ class ToolOutcome:
     error: bool = False
     counted: bool = True
     """It used one of the turn's tool calls (searches and views do; questions do not)."""
+    signature: Signature | None = None
+    """What makes it the same search as another, once it has run (`ToolContext.repeats`)."""
 
 
 class ToolContext(Protocol):
@@ -223,7 +228,8 @@ class ToolContext(Protocol):
         ...
 
     def repeats(self, signature: Signature) -> int | None:
-        """The step number of an earlier call this one repeats, else None (and noted)."""
+        """The step number of an earlier call this one repeats, else None. A call is noted
+        once it has run (`ToolOutcome.signature`), so one that failed may be tried again."""
         ...
 
     def viewed_image(self, entity_id: str) -> str | None:
@@ -447,6 +453,11 @@ class Signature:
         return shared / max(len(self.words | other.words), 1) >= SAME_WORDS
 
 
+def _digest(data: bytes) -> str:
+    """Tells two framed regions apart, whatever their size."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 def _repeated(step: int, what: str) -> ToolOutcome:
     return ToolOutcome(
         f"not run: this repeats step {step} ({what}). Its results are above. Change the "
@@ -481,7 +492,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
                 source,
                 weight,
                 _filters_key(filters),
-                len(ctx.region or b""),
+                _digest(image) if source == "region" else None,
                 None if asked is None else repr(asked.transform),
             ]
         ),
@@ -494,7 +505,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     head = f"image_search {source}, model {model}"
     viewed: tuple[Thumbnail, ...] = ()
     if asked is not None:
-        image, viewed = _transformed(ctx, image, asked)
+        image, viewed = await _transformed(ctx, image, asked)
         label = f"{asked.french}, puis cherche par image ({used})"
         head += f", on the photo {asked.english} (the image searched follows)"
     if source == "region":
@@ -513,7 +524,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     if found.mount:
         head += "; an archive print on its card: the print alone was searched"
     listed = _listing(ctx, head, label, filters, found)
-    return replace(listed, thumbnails=viewed) if viewed else listed
+    return replace(listed, thumbnails=viewed, signature=signature)
 
 
 def running_label(name: str, args: Mapping[str, object]) -> str | None:
@@ -573,15 +584,21 @@ class _Crop:
     english: str
 
 
-def _transformed(
+async def _transformed(
     ctx: ToolContext, image: bytes, asked: AskedTransform
 ) -> tuple[bytes, tuple[Thumbnail, ...]]:
-    """The image with the transform done, and the thumbnail of it the model looks at next."""
-    try:
+    """The image with the transform done, and the thumbnail of it the model looks at next;
+    the image work runs off the event loop."""
+
+    def work() -> tuple[bytes, bytes]:
         done = apply(image, asked.transform, TRANSFORM_SIDE)
+        return done, to_jpeg(done, TRANSFORM_VIEW_SIDE)
+
+    try:
+        done, small = await asyncio.to_thread(work)
     except (TransformError, OSError) as err:
         raise ArgumentError(str(err)) from err
-    key = ctx.keep_query_image(to_jpeg(done, TRANSFORM_VIEW_SIDE))
+    key = ctx.keep_query_image(small)
     return done, (Thumbnail(f"The image searched: {asked.english}", key),)
 
 
@@ -706,18 +723,33 @@ async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
         ToolQuery(SearchKind.TEXT, text=query, filters=filters, top_k=_top_k(args))
     )
     label = f"Recherche par mots « {query[:60]} »"
+    _known_filters(found)
     if found.words_found is False:
         return ToolOutcome(
             f"text_search {query!r}: no record holds these words. Try other French words "
             "(as records write them) or another approach.",
             Step(label, "aucune notice ne contient ces mots"),
+            signature=signature,
         )
-    return _listing(ctx, f"text_search {query!r}", label, filters, found)
+    return replace(
+        _listing(ctx, f"text_search {query!r}", label, filters, found), signature=signature
+    )
+
+
+def _known_filters(found: ToolHits) -> None:
+    """An unknown filter value is an error naming it and the closest known ones."""
+    if found.unknown:
+        msg = (
+            "; ".join(found.unknown) + ": no record has it. Nothing was searched; call again "
+            "with a value records use, or leave that filter out."
+        )
+        raise ArgumentError(msg)
 
 
 def _listing(
     ctx: ToolContext, head: str, label: str, filters: ToolFilters, found: ToolHits
 ) -> ToolOutcome:
+    _known_filters(found)
     ctx.remember(found.hits)
     described = describe_filters(filters)
     if described:
@@ -781,6 +813,7 @@ async def view_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
         Step("Regarde des images de près", f"{n} image{'s' if n > 1 else ''}", thumbs),
         thumbnails=tuple(thumbnails),
         hit_ids=tuple(h.entity_id for h in found.hits),
+        signature=signature,
     )
 
 
@@ -866,7 +899,7 @@ async def more_like(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome
     label = f"Ce qui ressemble à « {title[:50]} »"
     start = "the image you looked at" if image_id else "its cover image"
     head = f"more_like {entity_id} (from {start}; A7 weight {weight:g}; itself left out)"
-    return _listing(ctx, head, label, filters, found)
+    return replace(_listing(ctx, head, label, filters, found), signature=signature)
 
 
 async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
@@ -964,8 +997,8 @@ _WHY: JSON = {
 _BEST: JSON = {
     "type": "array",
     "items": {"type": "string"},
-    "description": "Up to 3 ids you have seen that are the closest so far, best first ([] when "
-    "none fits). Kept across steps; leave it out to keep it as it is.",
+    "description": f"Up to {BEST} ids you have seen that are the closest so far, best first "
+    "([] when none fits). Kept across steps; leave it out to keep it as it is.",
 }
 
 _TRANSFORM_SCHEMA: dict[str, JSON] = {
@@ -1186,7 +1219,9 @@ def tools_for(*, photo: bool, ask: bool = True) -> tuple[Tool, ...]:
 
 
 async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
-    """One call, as the model wrote it. Bad arguments come back as an error it can read."""
+    """One call, as the model wrote it. Bad arguments, and a tool that fails (the search
+    backend down, a photo it cannot read), come back as an error the model can read: every
+    call the model makes gets its reply."""
     tool = BY_NAME.get(name)
     if tool is None:
         known = ", ".join(BY_NAME)
@@ -1209,6 +1244,14 @@ async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
     except ArgumentError as err:
         return ToolOutcome(
             f"error: {err}", Step(_LABELS[tool.name], str(err), error=True), error=True
+        )
+    except Exception as err:
+        logger.exception("tool %s failed", name)
+        return ToolOutcome(
+            f"error: {name} failed ({type(err).__name__}); nothing came back. Call it again, "
+            "or try another approach.",
+            Step(_LABELS[tool.name], "n’a pas abouti", error=True),
+            error=True,
         )
 
 
