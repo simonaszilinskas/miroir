@@ -253,7 +253,7 @@ class SpendLedger:
         hold_id = uuid.uuid4().hex
         with self._locked():
             committed = committed_usd(self, key_usage_usd)
-            if service is not Service.SCALEWAY and committed + worst_usd > budget.usable_usd:
+            if committed + worst_usd > budget.usable_usd:
                 msg = (
                     f"{run}: a call may cost up to ${worst_usd:.4f}, and ${committed:.2f} is "
                     "spent or held by calls in flight; together that passes the "
