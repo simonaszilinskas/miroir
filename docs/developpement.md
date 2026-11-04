@@ -31,9 +31,9 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `MISTRAL_API_KEY` | Mistral Large 4 on Mistral's own API, for the agentic search when `OPENROUTER_API_KEY` is not set (OpenRouter wins when both are) |
 | `HF_TOKEN` | Gated model weights, read on a Scaleway machine |
 | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_REGION`, `SCW_DEFAULT_ZONE` | Scaleway: GPU machines and Object Storage (the scw CLI's own names) |
-| `MIROIR_SCW_BUDGET_EUR` | Cap on all Scaleway GPU machines together, in euros (default 5); their own ledger, `~/miroir-data/scaleway/spend.jsonl` |
+| `MIROIR_SCW_BUDGET_EUR` | Cap on all Scaleway GPU machines together, in euros (at most `SCW_BUDGET_EUR`, 5); their own ledger, `~/miroir-data/scaleway/spend.jsonl` |
 | `MIROIR_SCW_BUCKET_PREFIX` | Start of the bucket names (default `miroir`). Bucket names are shared by every Scaleway customer, so a taken name needs another prefix |
-| `MIROIR_OPENROUTER_BUDGET_USD` | Spending cap for paid model runs in dollars (OpenRouter; Modal too before 2026-11-03). Scaleway machines have their own cap |
+| `MIROIR_BUDGET_USD` | Spending cap for paid model runs in dollars (OpenRouter; Modal too before 2026-11-03). Scaleway machines have their own cap. The caps are constants in `config.py` (`BUDGET_USD`, `BUDGET_RESERVE_USD`, `PROBE_BUDGET_USD`, `SCW_BUDGET_EUR`): a variable may lower one; set above it, every command stops. The old name `MIROIR_OPENROUTER_BUDGET_USD` still works |
 | `MIROIR_APP_PASSWORD`, `MIROIR_SESSION_SECRET` | The prototype website's shared password and cookie key (`miroir web secret`; `miroir demo install` sends the password to the demo machine) |
 | `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the agentic search, per conversation and per day in dollars (defaults 0.10 and 2) |
 
@@ -110,11 +110,11 @@ Every command that runs a GPU job starts its own machine: `embed scw`, `embed f2
 `rerank` commands.
 
 **Money.** Each machine's life goes to its own ledger, `~/miroir-data/scaleway/spend.jsonl`,
-in euros, rounded up to the minute. It is kept apart from the dollar budget (`MIROIR_OPENROUTER_BUDGET_USD`):
+in euros, rounded up to the minute. It is kept apart from the dollar budget (`MIROIR_BUDGET_USD`):
 another account pays. Before it starts a machine, the command adds the dearest offer's price
 for the whole of `--max-hours` to the ledger's total, and refuses when that passes
 `MIROIR_SCW_BUDGET_EUR` (default €5). The plan allows €100 in all (search-levels.md); raising
-the cap is a project decision.
+the cap is a project decision: `SCW_BUDGET_EUR` in `config.py`.
 
 The prices are typed by hand into `OFFERS` in `src/miroir/jobs/scaleway.py` (euros an hour
 without VAT, rounded up). The Instance API gives none, but Scaleway's public catalogue does,

@@ -8,8 +8,8 @@
 - A probe embeds 100 images and stores the cost per image (`Settings.probe_path`).
   Probes together, on both services, may not spend more than `probe_budget_usd`.
 - A full run needs a probe on file for the same model and image size, and refuses to start
-  if total spend plus its projected cost would pass `openrouter_budget_usd` minus
-  `openrouter_reserve_usd`.
+  if total spend plus its projected cost would pass `budget_usd` minus
+  `budget_reserve_usd` (caps in `miroir.config`).
 """
 
 from __future__ import annotations
@@ -165,8 +165,8 @@ class Budget:
     @classmethod
     def from_settings(cls, settings: Settings) -> Budget:
         return cls(
-            cap_usd=settings.openrouter_budget_usd,
-            reserve_usd=settings.openrouter_reserve_usd,
+            cap_usd=settings.budget_usd,
+            reserve_usd=settings.budget_reserve_usd,
             probe_cap_usd=settings.probe_budget_usd,
         )
 
@@ -232,7 +232,7 @@ def check_run(
             f"{option} on {count} images would cost about ${projected:.2f}. Spent so far: "
             f"${spent:.2f}. Together that passes the ${budget.usable_usd:.2f} usable budget "
             f"(${budget.cap_usd:.2f} cap minus ${budget.reserve_usd:.2f} reserve). "
-            "Ask the project lead before raising the openrouter_budget_usd setting."
+            "Raising the cap (BUDGET_USD in config.py) needs the project lead's yes."
         )
         raise BudgetError(msg)
     return projected

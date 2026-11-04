@@ -30,6 +30,26 @@ def test_secrets_use_their_usual_names(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "hf-test" not in repr(settings)
 
 
+def test_money_caps_may_be_lowered_but_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MIROIR_BUDGET_USD", "20")
+    assert Settings().budget_usd == 20
+    monkeypatch.setenv("MIROIR_BUDGET_USD", "500")
+    with pytest.raises(ValueError, match="project decision"):
+        Settings()
+    monkeypatch.delenv("MIROIR_BUDGET_USD")
+    monkeypatch.setenv("MIROIR_OPENROUTER_BUDGET_USD", "60")  # the old name still counts
+    with pytest.raises(ValueError, match="budget_usd"):
+        Settings()
+    monkeypatch.delenv("MIROIR_OPENROUTER_BUDGET_USD")
+    monkeypatch.setenv("MIROIR_BUDGET_RESERVE_USD", "0")
+    with pytest.raises(ValueError, match="reserve"):
+        Settings()
+    monkeypatch.delenv("MIROIR_BUDGET_RESERVE_USD")
+    monkeypatch.setenv("MIROIR_SCW_BUDGET_EUR", "100")
+    with pytest.raises(ValueError, match="scw_budget_eur"):
+        Settings()
+
+
 def test_eval_result_path_follows_the_rule() -> None:
     path = eval_result_path("R1", "A", "dinov2-vitl14")
     assert path.parts[-4:] == ("eval", "results", "R1", "A-dinov2-vitl14.json")
