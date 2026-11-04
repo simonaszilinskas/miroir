@@ -134,6 +134,13 @@ class ModelOption:
     """DINO only: crop to a square, or keep the whole image."""
 
 
+def weights_key(opt: ModelOption) -> tuple[str, str, str, int]:
+    """What decides the weights a machine loads: options alike here share one copy (CLS and GeM
+    of one model). Qwen3-VL's processor is built for its pixel budget, so its size counts."""
+    size = opt.resolution if opt.family is Family.QWEN3_VL else 0
+    return (opt.family.value, opt.model, opt.dtype.value, size)
+
+
 def _dino(
     id_: str, experiment: str, model: str, pooling: Pooling, *, gated: bool = False, crop: int = 224
 ) -> ModelOption:

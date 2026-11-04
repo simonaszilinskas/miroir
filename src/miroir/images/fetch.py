@@ -199,9 +199,10 @@ class ImageFetcher:
             self._cache.put(image.image_id, result.jpeg)
         return result
 
-    def fetch_all(self, images: Iterable[Image]) -> Iterator[Fetched]:
-        """Fetch in parallel; yields results in the order of `images`, a few at a time."""
-        yield from bounded_map(self.fetch, images, workers=self._concurrency)
+    def fetch_all(self, images: Iterable[Image], *, window: int | None = None) -> Iterator[Fetched]:
+        """Fetch in parallel; yields results in the order of `images`, at most `window` ahead
+        (twice the workers by default)."""
+        yield from bounded_map(self.fetch, images, workers=self._concurrency, window=window)
 
     def _download(self, image: Image) -> Fetched:
         direct = self._get(image.url)

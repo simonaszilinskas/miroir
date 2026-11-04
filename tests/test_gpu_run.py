@@ -28,6 +28,7 @@ from miroir.jobs.remote_spec import (
     Resize,
     SuppliedImage,
     option,
+    weights_key,
 )
 from miroir.jobs.spend import BudgetError, Service, SpendKind
 from miroir.records.build import build
@@ -491,3 +492,9 @@ def test_saved_vectors_of_ids_no_longer_asked_for_are_left_out(built: Settings) 
     Checkpoint(built.checkpoint_path(run_name(OPTIONS[GEMMA], "g"))).append([ids[0]], saved)
     (done,) = r.embed_gallery(GEMMA, "g")
     assert set(done.ids) == set(ids[1:])
+
+
+def test_options_of_one_model_share_its_weights_on_the_machine() -> None:
+    cls, gem = option("A1-dinov2-l-224-cls"), option("A1-dinov2-l-224-gem")
+    assert weights_key(cls) == weights_key(gem)
+    assert weights_key(cls) != weights_key(option(GEMMA))
