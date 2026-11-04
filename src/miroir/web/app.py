@@ -33,6 +33,8 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from miroir.caption import MAX_CAPTION
 from miroir.config import WIKIMEDIA_USER_AGENT
@@ -68,6 +70,11 @@ NOT_BUILT = (
 )
 #: Largest photo accepted, after base64 decoding. The page shrinks photos before sending.
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
+#: Longest photo field: `MAX_PHOTO_BYTES` in base64, with room for a `data:` URL prefix.
+MAX_PHOTO_CHARS = MAX_PHOTO_BYTES * 4 // 3 + 4 + 64
+#: Largest request body, refused before it is read (`BodyLimit`): one photo and the rest.
+MAX_BODY_BYTES = MAX_PHOTO_CHARS + 64 * 1024
+TOO_LARGE = "Photo trop lourde."
 #: Longest wait on the search backend before the page is told to retry (`_wait_for`).
 SEARCH_WAIT_S = 100.0
 #: Side of the small images under the large one on a record page.
@@ -121,11 +128,16 @@ class PositionBody(BaseModel):
 
 
 class DetectBody(BaseModel):
-    image: str = Field(description="The whole photo as base64 (JPEG), at most DETECT_SIDE px.")
+    image: str = Field(
+        max_length=MAX_PHOTO_CHARS,
+        description="The whole photo as base64 (JPEG), at most DETECT_SIDE px.",
+    )
 
 
 class SearchBody(BaseModel):
-    image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
+    image: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The photo as base64 (JPEG or PNG)."
+    )
     text: str = Field(default="", max_length=MAX_TEXT)
     filters: FiltersBody = Field(default_factory=FiltersBody)
     position: PositionBody | None = None
@@ -275,6 +287,7 @@ def create_app(
         notice=notice,
     )
     app.middleware("http")(_headers)
+    app.add_middleware(BodyLimit)
 
     async def index() -> Response:
         page = ui_dir / "index.html"
@@ -292,6 +305,60 @@ def create_app(
 
 def _nothing() -> None:
     return None
+
+
+class BodyLimit:
+    """Refuses a request body over `limit` bytes with 413, before any route parses it.
+
+    FastAPI reads and parses a whole JSON body before the session check runs, so without
+    this anyone could send gigabytes. A declared Content-Length over the limit is refused at
+    once (the server holds the body to that length); a body sent without one (chunked) is
+    read here, at most `limit` bytes, then handed on."""
+
+    def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = Headers(scope=scope).get("content-length")
+        if declared is not None:
+            if not declared.isdigit() or int(declared) > self.limit:
+                await _too_large(scope, receive, send)
+                return
+            await self.app(scope, receive, send)
+            return
+        chunks: list[bytes] = []
+        size = 0
+        more = True
+        while more:
+            message = await receive()
+            if message["type"] != "http.request":
+                return  # the client went away
+            chunk: bytes = message.get("body", b"")
+            size += len(chunk)
+            if size > self.limit:
+                await _too_large(scope, receive, send)
+                return
+            chunks.append(chunk)
+            more = bool(message.get("more_body", False))
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
+async def _too_large(scope: Scope, receive: Receive, send: Send) -> None:
+    response = JSONResponse({"detail": TOO_LARGE}, status_code=413, headers={"Connection": "close"})
+    await response(scope, receive, send)
 
 
 async def _headers(
@@ -455,7 +522,9 @@ async def _wait_for[T](work: Awaitable[T], what: str) -> T:
 
 
 class ChatOpenBody(BaseModel):
-    image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
+    image: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The photo as base64 (JPEG or PNG)."
+    )
     text: str = Field(default="", max_length=MAX_WORDS)
     position: PositionBody | None = None
     oneshot: bool = Field(
@@ -469,7 +538,9 @@ class ChatSendBody(BaseModel):
     conversation_id: str = Field(max_length=64)
     kind: Visit
     text: str = Field(default="", max_length=MAX_WORDS)
-    region: str | None = Field(default=None, description="The framed part, base64 JPEG.")
+    region: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The framed part, base64 JPEG."
+    )
     position: PositionBody | None = None
 
 
@@ -620,8 +691,6 @@ def _decode_photo(data: str | None) -> bytes | None:
         return None
     if data.startswith("data:"):
         data = data.split(",", 1)[-1]
-    if len(data) > MAX_PHOTO_BYTES * 4 // 3 + 4:
-        raise HTTPException(status_code=413, detail="Photo trop lourde.")
     try:
         return base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as err:

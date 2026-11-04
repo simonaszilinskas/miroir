@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -10,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from miroir.config import Settings
+from miroir.web import app as app_module
 from miroir.web import auth
 from miroir.web.app import create_app
 from miroir.web.bundle import MANIFEST_FILE
@@ -293,3 +295,33 @@ def test_a_position_reaches_the_search_and_is_checked(client: TestClient) -> Non
     assert answer.json()["nearby"] is None  # the test engine holds no places
     body["position"] = {"latitude": 123.0, "longitude": 1.44}
     assert client.post("/api/search", json=body).status_code == 422
+
+
+def test_a_huge_body_is_refused_before_it_is_read(client: TestClient) -> None:
+    """No session needed to send a body: the cap holds before login and before parsing."""
+    too_big = app_module.MAX_BODY_BYTES + 1
+    response = client.post(
+        "/api/search", content=b"x" * too_big, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+
+
+def test_a_huge_body_sent_in_chunks_is_cut_off(client: TestClient) -> None:
+    chunk = b"x" * (1 << 20)
+    count = app_module.MAX_BODY_BYTES // len(chunk) + 2
+
+    def chunks() -> Iterator[bytes]:
+        for _ in range(count):
+            yield chunk
+
+    response = client.post(
+        "/api/login", content=chunks(), headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+
+
+@pytest.mark.parametrize("path", ["/api/search", "/api/detect", "/api/chat/open"])
+def test_a_photo_field_has_a_length_cap(client: TestClient, path: str) -> None:
+    login(client)
+    body = {"image": "A" * (app_module.MAX_PHOTO_CHARS + 4)}
+    assert client.post(path, json=body).status_code == 422
