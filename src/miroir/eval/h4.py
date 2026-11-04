@@ -1,238 +1,234 @@
-"""Step H4: load the search world, run the scenarios, score them against G5 (results.md H4).
+"""Steps H4 and H5 offline: the deployed agentic search, run on the T sets and scored against
+the site's own photo search (technical spec §7.4, results.md H4).
 
-`load_world` ranks the tune queries of T1, T2, T3 and T5 that a closed model may see with G5
-(`miroir.eval.router3`, the weights picked with F2 photos) and keeps every query's A7 and A3
-scores for the tools. `run` asks the model (`miroir.jobs.h4_agent`), `score` ranks what came
-back, and `report` adds what it cost and how S3 used its tools.
+The agent is the site's (`miroir.web.chat.ChatService`, its method, tools, brief and model),
+unchanged. Only its two seams differ: the tools search a bundle's stored vectors
+(`miroir.eval.offline`), and the model's answers are saved and replayed
+(`miroir.jobs.agent_calls`). A simulated visitor (`miroir.eval.h4_visitor`) states the goal,
+then answers the agent's questions from what a visitor before the answer would know.
 
-A scenario's ranking is the model's list first, then a fallback order (S1: its own plan; S2:
-S1's order; S3: its last result list, then G5). Hit@10 is the model's own top 10 whenever it
-names 10; when a call fails, the query falls back to G5 and is counted as a failure.
+`load` reads the bundle the site's eval steps read (`config.WEB_INDEX`) and the tune queries
+of T1, T2, T3 and T5 whose photo may go to the model; `run` holds each query's conversation;
+`score` ranks what came back: the cards the agent showed first, then its best-so-far, then
+the site's photo ranking (the "site" row, the baseline). A conversation that ends without
+results keeps that fallback and is counted as a failure.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
-import re
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
 
-from miroir.commons.model import is_commons_image
-from miroir.config import SEED, Settings, eval_result_path
+from miroir.config import SEED, WEB_INDEX, Settings, eval_result_path
 from miroir.eval.bm25 import fold
-from miroir.eval.h4_tools import (
-    Catalog,
-    GalleryImages,
-    QueryData,
-    World,
-    entity_infos,
-)
-from miroir.eval.h4_visitor import VisitorFacts, visitor_facts
+from miroir.eval.h4_visitor import GOAL, Visitor, VisitorFacts, visitor_facts
+from miroir.eval.offline import OfflineBackend, OfflineWorld, StoredQuery, entity_order
 from miroir.eval.results import SetScore, set_score, write_result
-from miroir.eval.router3 import Bucket, asking_run, build_grids
-from miroir.eval.run import publishable_only, search_queries
 from miroir.eval.scoring import (
     Difference,
     EntityScores,
+    Floats,
     Interval,
     ScoreResult,
-    entity_scores,
+    SearchQuery,
     paired_bootstrap,
-    per_query_values,
     rank_entities,
 )
-from miroir.eval.sets import load_queries
-from miroir.eval.vectors import Route, RunInfo, read_vectors
-from miroir.eval.vlm import H3_WEIGHT_GRID, query_text, text_gallery
-from miroir.geo.places import read_hints
+from miroir.eval.sets import Query, cluster_of, load_queries
+from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors
 from miroir.images.fetch import LONG_SIDE
-from miroir.jobs.describe import parse_description
-from miroir.jobs.h4_agent import (
-    Caller,
-    Outcome,
-    Scenario,
-    run_h1,
-    run_s1,
-    run_s2,
-    run_s3,
-    run_s4,
-)
+from miroir.jobs.agent_calls import AgentKit, CachedModel, CallRecord
 from miroir.jobs.openrouter import JSON
-from miroir.parallel import bounded_map
-from miroir.records.model import Record
-from miroir.records.store import read_places, read_positions, read_records
+from miroir.jobs.spend import BudgetError
+from miroir.records.bases import base_of
+from miroir.records.model import Collection
+from miroir.web.chat import (
+    ChatModel,
+    ChatService,
+    Limits,
+    MemorySpend,
+    ThumbSource,
+    Visit,
+    VisitorInput,
+)
+from miroir.web.chat_method import MAX_QUESTIONS
+from miroir.web.measure import COMMONS_SETS
+from miroir.web.nearby import Position
+from miroir.web.publishable import Publishable
 
 logger = logging.getLogger(__name__)
 
 SETS = ("T1", "T2", "T3", "T5")
-GALLERY = "screening-v2-publishable-fetched+F2"
-RUNS = (
-    "A7-embeddinggemma-2-512-screening-v2-publishable+F2",
-    "A3-megaloc-322-screening-v2-publishable+F2",
-)
-QUERY_RUNS = (
-    "A7-embeddinggemma-2-512-T2-T2b-T8c-tune-queries",
-    "A3-megaloc-322-T2-T2b-T8c-tune-queries",
-)
-#: G5's A7 weight per bucket, picked with F2 photos (results.md F2).
-G5_WEIGHTS = {Bucket.ARCHIVE_BUILDING: 1.0, Bucket.COLOUR_BUILDING: 0.0, Bucket.OBJECT: 0.2}
 ROUND = "R3"
 STEP = "H"
+#: The option label of the runs made since H4 and H5 share one agent (results files
+#: `H-H5-offline-<model>.json`). H4's own files predate it.
+OPTION = "H5-offline"
+SLUG = "mistral-large-4"
+#: Visitor messages in one conversation: the goal, then an answer to each question.
+MAX_VISITS = MAX_QUESTIONS + 1
+BASELINE = "site"
+AGENT = "H5"
+#: The trace lines the simulated visitor adds to the conversation's log.
+SIMULATED = "simulated_visitor"
+
+
+# --- the world -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class EvalQuery:
+    set_id: str
+    query: Query
+    a7: Floats = field(repr=False)
+    a3: Floats = field(repr=False)
+    facts: VisitorFacts
+
+    @property
+    def query_id(self) -> str:
+        return self.query.query_id
+
+    @property
+    def hidden(self) -> tuple[str, ...]:
+        return (self.query.query_image_id, *self.query.exclude_image_ids)
+
+    def search_query(self) -> SearchQuery:
+        q = self.query
+        return SearchQuery(
+            query_id=q.query_id,
+            image_id=q.query_image_id,
+            entity_ids=q.expected_entity_ids,
+            excluded_image_ids=q.exclude_image_ids,
+            cluster=cluster_of(q),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class Loaded:
-    world: World
-    sets: Mapping[str, tuple[QueryData, ...]]
-    """Every query of each set, in G5's order."""
-    g5: Mapping[str, ScoreResult]
-    """G5's scores on each set, as `eval route3` computes them."""
-    gallery: str
-    facts: Mapping[str, VisitorFacts]
-    """What S4's simulated visitor knows, by query id (`h4_visitor.visitor_facts`)."""
+    world: OfflineWorld
+    bundle: str
+    sets: Mapping[str, tuple[EvalQuery, ...]]
+    publishable: Publishable
+    """What may go to the model: the bundle's images and the query photos that
+    `PublishableImages` lets out (the rule the site's bundle file is written with)."""
+    runs: tuple[str, str]
+    query_runs: tuple[str, str] | None
 
 
-def load_world(
-    settings: Settings,
-    *,
-    gallery: str = GALLERY,
-    runs: Sequence[str] = RUNS,
-    query_runs: Sequence[str] = QUERY_RUNS,
-    set_ids: Sequence[str] = SETS,
-) -> Loaded:
-    """Rank every tune query with G5 and keep both models' scores. No model runs: NumPy only."""
-    grids = build_grids(
-        settings,
-        runs=runs,
-        query_runs=query_runs,
-        set_ids=set_ids,
-        gallery=gallery,
-        publishable_queries=True,
+def load(settings: Settings, *, bundle: str = WEB_INDEX, set_ids: Sequence[str] = SETS) -> Loaded:
+    """The bundle as the site loads it, and every tune query it can ask. No model runs."""
+    from miroir.geo.places import read_hints  # noqa: PLC0415 (reads the exports)
+    from miroir.jobs.privacy import PublishableImages  # noqa: PLC0415
+    from miroir.records.store import read_positions  # noqa: PLC0415
+    from miroir.web.bundle import INDEXES  # noqa: PLC0415
+
+    spec = INDEXES[bundle]
+    world = OfflineWorld.load(settings.web_index_dir(bundle))
+    gallery = (
+        read_vectors(settings.vectors_path(spec.a7_run)),
+        read_vectors(settings.vectors_path(spec.a3_run)),
     )
-    a7, a3 = grids.models
-    if a7.gallery.image_ids != a3.gallery.image_ids:
-        msg = "the two runs' galleries differ"
-        raise ValueError(msg)
-    image_ids = a7.gallery.image_ids
-    records = read_records(settings.records_parquet, settings.images_parquet)
-    entity_ids = sorted(set(a7.gallery.entity_ids))
-    places = {p.entity_id: (p.latitude, p.longitude) for p in read_places(settings.places_parquet)}
-    catalog = Catalog(entity_infos(records, entity_ids, places))
-    text = text_gallery(records, [i for i in image_ids if not is_commons_image(i)])
-    asked = [read_vectors(settings.vectors_path(r)) for r in query_runs]
-    by_set: dict[str, tuple[QueryData, ...]] = {}
-    query_a7: dict[str, np.ndarray] = {}
-    query_a3: dict[str, np.ndarray] = {}
-    g5: dict[str, ScoreResult] = {}
-    for grid in grids.sets:
-        loaded = publishable_only(
-            settings, load_queries(settings, grid.set_id, "tune"), in_gallery=image_ids
+    query_runs = None
+    commons = None
+    if spec.a7_query_run and spec.a3_query_run:
+        query_runs = (spec.a7_query_run, spec.a3_query_run)
+        commons = (
+            read_vectors(settings.vectors_path(spec.a7_query_run)),
+            read_vectors(settings.vectors_path(spec.a3_query_run)),
         )
-        by_id = {q.query_id: q for q in search_queries(loaded)}
-        queries = [by_id[q.query_id] for q in grid.results[0].per_query]
-        ids = [q.image_id for q in queries]
-        ask7 = asking_run(a7.vectors, asked[0] if asked else None, ids)
-        ask3 = asking_run(a3.vectors, asked[1] if asked else None, ids)
-        s7 = entity_scores(ask7, a7.gallery, queries)
-        s3 = entity_scores(ask3, a3.gallery, queries)
-        if s7.entity_ids != catalog.entity_ids:
-            msg = "entity scores and catalog disagree on entities"
-            raise ValueError(msg)
-        rows7, rows3 = ask7.index(), ask3.index()
-        for image_id in ids:
-            query_a7[image_id] = ask7.vectors[rows7[image_id]]
-            query_a3[image_id] = ask3.vectors[rows3[image_id]]
-        by_set[grid.set_id] = tuple(
-            QueryData(grid.set_id, q, s7.values[j], s3.values[j], G5_WEIGHTS[b], b.value)
-            for j, (q, b) in enumerate(zip(queries, grid.buckets, strict=True))
-        )
-        g5[grid.set_id] = grid.at(G5_WEIGHTS)
-    columns = np.searchsorted(np.asarray(entity_ids), np.asarray(a7.gallery.entity_ids))
-    images = GalleryImages(
-        image_ids=image_ids,
-        columns=columns.astype(np.int64),
-        a7=a7.gallery.vectors,
-        a3=a3.gallery.vectors,
-        query_a7=query_a7,
-        query_a3=query_a3,
-    )
-    world = World(catalog, text, images, [q for qs in by_set.values() for q in qs])
-    _check_g5(world, by_set, g5)
-    facts = _visitor_facts(settings, records, catalog, [q for qs in by_set.values() for q in qs])
-    return Loaded(world, by_set, g5, gallery, facts)
-
-
-def _visitor_facts(
-    settings: Settings, records: Sequence[Record], catalog: Catalog, queries: Sequence[QueryData]
-) -> dict[str, VisitorFacts]:
-    """For each query, what a visitor standing before its answer would know."""
-    by_entity: dict[str, list[Record]] = {}
-    for record in records:
-        by_entity.setdefault(record.entity_id, []).append(record)
+    store = PublishableImages.load(settings)
     hints = read_hints(settings)
     positions = {
         p.image_id: (p.latitude, p.longitude)
         for p in read_positions(settings.query_positions_parquet)
     }
-    out: dict[str, VisitorFacts] = {}
-    for q in queries:
-        entity = q.query.entity_ids[0]
-        found = sorted(by_entity.get(entity, []), key=lambda r: r.ref)
-        col = catalog.column(entity)
-        if not found or col is None:
-            msg = f"{q.query.query_id}: its answer {entity} has no record in the gallery"
-            raise ValueError(msg)
-        museums = [h.museum_name for r in found if (h := hints.get(r.ref)) and h.museum_name]
-        out[q.query.query_id] = visitor_facts(
-            found,
-            catalog.infos[col].base,
-            position=positions.get(q.query.image_id),
-            museum=museums[0] if museums else None,
+    sets: dict[str, tuple[EvalQuery, ...]] = {}
+    for set_id in set_ids:
+        runs = commons if set_id in COMMONS_SETS else gallery
+        if runs is None:
+            logger.info("%s: no query vectors for Commons photos; not run", set_id)
+            continue
+        asked = load_queries(settings, set_id, "tune")
+        allowed = set(store.only_publishable([q.query_image_id for q in asked]))
+        sets[set_id] = eval_queries(
+            set_id,
+            [q for q in asked if q.query_image_id in allowed],
+            runs,
+            world,
+            museums={r: h.museum_name for r, h in hints.items() if h.museum_name},
+            positions=positions,
         )
-    return out
+    photos = [q.query.query_image_id for qs in sets.values() for q in qs]
+    ids = [i.image_id for i in world.catalog.images]
+    publishable = Publishable(store.only_publishable([*ids, *photos]))
+    return Loaded(world, bundle, sets, publishable, (spec.a7_run, spec.a3_run), query_runs)
 
 
-def _check_g5(
-    world: World, sets: Mapping[str, Sequence[QueryData]], g5: Mapping[str, ScoreResult]
-) -> None:
-    """The tools' G5 must rank every query as `eval route3` does."""
-    for set_id, queries in sets.items():
-        ours = rank_rows(world, queries, [world.g5(q) for q in queries])
-        theirs = {q.query_id: q.rank for q in g5[set_id].per_query}
-        wrong = sum(theirs[q.query_id] != q.rank for q in ours.per_query)
-        if wrong:
-            msg = f"{set_id}: G5 through the tools ranks {wrong} queries differently"
-            raise AssertionError(msg)
+def eval_queries(
+    set_id: str,
+    queries: Sequence[Query],
+    runs: tuple[VectorSet, VectorSet],
+    world: OfflineWorld,
+    *,
+    museums: Mapping[str, str],
+    positions: Mapping[str, tuple[float, float]],
+) -> tuple[EvalQuery, ...]:
+    """The queries with their stored vectors and what the visitor knows, by query id. A query
+    with no vector, or whose answer the bundle does not hold, is left out (counted)."""
+    catalog = world.catalog
+    row7, row3 = runs[0].index(), runs[1].index()
+    out: list[EvalQuery] = []
+    skipped: Counter[str] = Counter()
+    for q in queries:
+        image = q.query_image_id
+        if image not in row7 or image not in row3:
+            skipped["no vector"] += 1
+            continue
+        entity = q.expected_entity_ids[0] if q.expected_entity_ids else ""
+        row = catalog.entity_row.get(entity)
+        records = catalog.entity_records(row) if row is not None else []
+        if not records:
+            skipped["answer not in the bundle"] += 1
+            continue
+        museum = next((museums[r.ref] for r in records if r.ref in museums), None)
+        facts = visitor_facts(
+            records,
+            base_of(Collection(records[0].collection), entity),
+            position=positions.get(image),
+            museum=museum,
+        )
+        out.append(
+            EvalQuery(
+                set_id,
+                q,
+                np.asarray(runs[0].vectors[row7[image]], dtype=np.float32),
+                np.asarray(runs[1].vectors[row3[image]], dtype=np.float32),
+                facts,
+            )
+        )
+    for reason, n in skipped.items():
+        logger.info("%s: %d queries left out: %s", set_id, n, reason)
+    return tuple(sorted(out, key=lambda e: e.query_id))
 
 
-def rank_rows(
-    world: World, queries: Sequence[QueryData], rows: Sequence[np.ndarray]
-) -> ScoreResult:
-    scores = EntityScores(
-        query_ids=tuple(q.query.query_id for q in queries),
-        entity_ids=world.catalog.entity_ids,
-        values=np.stack(rows).astype(np.float32),
-        gallery_images=len(world.images.image_ids),
-    )
-    return rank_entities(scores, [q.query for q in queries])
-
-
-def pick(loaded: Loaded, per_set: int | None, seed: int = SEED) -> list[QueryData]:
+def pick(loaded: Loaded, per_set: int | None, seed: int = SEED) -> list[EvalQuery]:
     """Every query, or `per_set` drawn from each set (seeded), sets in turn."""
-    out: list[QueryData] = []
+    out: list[EvalQuery] = []
     for set_id in sorted(loaded.sets):
         queries = list(loaded.sets[set_id])
         if per_set is not None and per_set < len(queries):
             # Shuffle then cut, so a smaller draw is part of a larger one.
             random.Random(f"{seed}-{set_id}").shuffle(queries)
-            queries = sorted(queries[:per_set], key=lambda q: q.query.query_id)
+            queries = sorted(queries[:per_set], key=lambda q: q.query_id)
         out.extend(queries)
     return out
 
@@ -247,20 +243,220 @@ def pick_photos(
     counts: Mapping[str, int] = PHOTOS,
     with_position: Mapping[str, int] = PHOTOS_WITH_POSITION,
     seed: int = SEED,
-) -> list[QueryData]:
+) -> list[EvalQuery]:
     """A few photos per set, in the seeded order `pick` uses; some must carry a position."""
-    out: list[QueryData] = []
+    out: list[EvalQuery] = []
     for set_id in sorted(counts):
         queries = list(loaded.sets[set_id])
         random.Random(f"{seed}-{set_id}").shuffle(queries)
         need = with_position.get(set_id, 0)
-        placed = [q for q in queries if loaded.facts[q.query.query_id].position is not None]
+        placed = [q for q in queries if q.facts.position is not None]
         chosen = placed[:need]
         chosen += [q for q in queries if q not in chosen][: counts[set_id] - len(chosen)]
         if len(chosen) < counts[set_id] or len(placed) < need:
             msg = f"{set_id}: not enough photos for {counts[set_id]} ({need} with a position)"
             raise ValueError(msg)
-        out.extend(sorted(chosen, key=lambda q: q.query.query_id))
+        out.extend(sorted(chosen, key=lambda q: q.query_id))
+    return out
+
+
+# --- one conversation ------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    """What the agent did for one query."""
+
+    query_id: str
+    set_id: str
+    final: tuple[str, ...]
+    """The cards it showed, best first (empty when it showed none)."""
+    found: str
+    """What show_results said: "exact", "close", "none", or "" without results."""
+    best: tuple[str, ...]
+    """Its best-so-far when the conversation ended."""
+    ranking: Floats = field(repr=False)
+    """A score per catalog entity: `final`, then `best`, then the site's photo ranking."""
+    site: Floats = field(repr=False)
+    """The site's photo ranking alone: the baseline."""
+    calls: tuple[CallRecord, ...]
+    replayed: int
+    failure: str = ""
+    """Empty, or what went wrong: "no-results", "limit", "error: ..."."""
+    log: tuple[Mapping[str, JSON], ...] = ()
+    """The conversation's log lines, as the site writes them, and the visitor's answers."""
+    visitor_given: Mapping[str, str] = field(default_factory=dict[str, str])
+
+    @property
+    def cost_usd(self) -> float:
+        return sum(c.cost_usd for c in self.calls)
+
+    def lines(self, kind: str) -> list[Mapping[str, JSON]]:
+        return [line for line in self.log if line.get("type") == kind]
+
+    def trace(self) -> dict[str, JSON]:
+        """One JSON line for the run's trace file."""
+        return {
+            "query_id": self.query_id,
+            "set_id": self.set_id,
+            "final": list(self.final),
+            "found": self.found,
+            "best": list(self.best),
+            "failure": self.failure,
+            "calls": len(self.calls),
+            "replayed": self.replayed,
+            "prompt_tokens": sum(c.prompt_tokens for c in self.calls),
+            "completion_tokens": sum(c.completion_tokens for c in self.calls),
+            "cost_usd": self.cost_usd,
+            "visitor_given": dict(self.visitor_given),
+            "log": [dict(line) for line in self.log],
+        }
+
+
+class TraceLog:
+    """A `miroir.web.chatlog.ChatLog` that keeps one conversation's lines in memory."""
+
+    def __init__(self) -> None:
+        self.lines: list[Mapping[str, JSON]] = []
+
+    def write(self, day: str, conversation: str, line: Mapping[str, JSON]) -> None:
+        del day, conversation
+        self.lines.append(dict(line))
+
+    async def flush(self) -> None:
+        return None
+
+
+async def converse(
+    loaded: Loaded,
+    q: EvalQuery,
+    *,
+    photo: bytes,
+    model: CachedModel,
+    fetch: Callable[[str], Awaitable[bytes]],
+    limits: Limits,
+    visitor_model: CachedModel | None = None,
+) -> Outcome:
+    """One query's conversation with the site's agent: the goal, then the visitor's answers,
+    until the agent shows results, stops, or `MAX_VISITS` messages were sent."""
+    world = loaded.world
+    log = TraceLog()
+    stored = StoredQuery(q.query_id, photo, q.a7, q.a3, q.hidden)
+    catalog = world.catalog
+    service = ChatService(
+        backend=OfflineBackend(world, stored),
+        model=model,
+        thumbs=ThumbSource(loaded.publishable, fetch),
+        spend=MemorySpend(),
+        limits=limits,
+        index_size=(len(catalog.images), catalog.entity_count),
+        catalog=catalog,
+        today=lambda: "eval",
+        log=log,
+    )
+    heard_by = visitor_model or model
+    visitor = Visitor(heard_by, q.facts)
+    c = service.open("eval", photo=photo, words="", position=None)
+    given = VisitorInput(Visit.GOAL, GOAL)
+    waiting = "message"
+    for _ in range(MAX_VISITS):
+        after = service.send(c, given)
+        assert c.task is not None
+        await c.task
+        stopped = model.stopped or heard_by.stopped
+        if stopped is not None:
+            raise BudgetError(str(stopped))
+        events = c.events[after:]
+        waiting = next((str(e.get("waiting")) for e in reversed(events) if e["type"] == "end"), "")
+        if waiting == "answer":
+            question = next(e for e in reversed(events) if e["type"] == "question")
+            heard = await visitor.answer(question)
+            if heard_by.stopped is not None:
+                raise BudgetError(str(heard_by.stopped))
+            position = None
+            if heard.share_position and q.facts.position is not None:
+                position = Position(*q.facts.position)
+            said: dict[str, JSON] = {
+                "type": SIMULATED,
+                "question": question.get("text"),
+                "about": question.get("about"),
+                "answer": heard.text,
+                "position": position is not None,
+            }
+            log.write("", "", said)
+            given = VisitorInput(Visit.ANSWER, heard.text, position=position)
+        elif waiting == "region":
+            log.write("", "", {"type": SIMULATED, "region": False})
+            given = VisitorInput(Visit.REGION)
+        else:
+            break
+    calls = [*model.calls, *(heard_by.calls if heard_by is not model else ())]
+    replayed = model.replayed + (heard_by.replayed if heard_by is not model else 0)
+    return _outcome(
+        loaded,
+        q,
+        stored,
+        events=c.events,
+        best=c.method.best,
+        calls=(tuple(calls), replayed),
+        log=log,
+        waiting=waiting,
+    )
+
+
+def _outcome(
+    loaded: Loaded,
+    q: EvalQuery,
+    stored: StoredQuery,
+    *,
+    events: Sequence[Mapping[str, JSON]],
+    best: Sequence[str],
+    calls: tuple[tuple[CallRecord, ...], int],
+    log: TraceLog,
+    waiting: str,
+) -> Outcome:
+    shown = [e for e in events if e["type"] == "results"]
+    final: tuple[str, ...] = ()
+    found = ""
+    if shown:
+        cards = shown[-1].get("cards")
+        listed = cards if isinstance(cards, list) else []
+        final = tuple(str(k.get("entity_id")) for k in listed if isinstance(k, dict))
+        found = str(shown[-1].get("found") or "")
+    errors = [str(e.get("text")) for e in events if e["type"] == "error"]
+    failure = ""
+    if errors:
+        failure = f"error: {errors[0][:120]}"
+    elif waiting == "limit":
+        failure = "limit"
+    elif not shown:
+        failure = "no-results"
+    fallback = loaded.world.site_scores(stored)
+    ranking = answer_scores((*final, *best), fallback, loaded.world.catalog.entity_row)
+    return Outcome(
+        q.query_id,
+        q.set_id,
+        final,
+        found,
+        tuple(best),
+        ranking,
+        fallback,
+        calls[0],
+        calls[1],
+        failure=failure,
+        log=tuple(log.lines),
+        visitor_given=q.facts.given(),
+    )
+
+
+def answer_scores(answer: Sequence[str], fallback: Floats, entity_row: Mapping[str, int]) -> Floats:
+    """A full ranking: `answer` first in its order (an id listed twice keeps its first
+    place), then every other entity by `fallback`; -inf (hidden) stays out."""
+    out = np.where(np.isfinite(fallback), fallback, -np.inf).astype(np.float32)
+    for i, entity_id in enumerate(dict.fromkeys(answer)):
+        row = entity_row.get(entity_id)
+        if row is not None:
+            out[row] = 1e6 - i
     return out
 
 
@@ -268,43 +464,66 @@ def pick_photos(
 
 
 def run(
-    caller: Caller,
     loaded: Loaded,
-    queries: Sequence[QueryData],
-    scenarios: Sequence[Scenario],
+    queries: Sequence[EvalQuery],
+    kit: AgentKit,
     *,
+    limits: Limits,
     workers: int = 4,
-) -> dict[Scenario, list[Outcome]]:
-    """Each query through each scenario; S2 reuses S1's saved plan. Stops on BudgetError."""
-    wanted = set(scenarios)
-    world = loaded.world
-    facts = loaded.facts
+    visitor_model: ChatModel | None = None,
+) -> list[Outcome]:
+    """Every query's conversation, `workers` at a time. Stops on BudgetError (every answer
+    paid so far is saved: a rerun replays it)."""
+    try:
+        return asyncio.run(
+            _run_all(loaded, queries, kit, limits=limits, workers=workers, visitor=visitor_model)
+        )
+    except ExceptionGroup as failed:  # the first conversation that failed stopped the others
+        raise failed.exceptions[0] from None
 
-    def one(q: QueryData) -> dict[Scenario, Outcome]:
-        out: dict[Scenario, Outcome] = {}
-        if Scenario.H1 in wanted:
-            out[Scenario.H1] = run_h1(caller, world, q)
-        if wanted & {Scenario.S1, Scenario.S2}:
-            s1 = run_s1(caller, world, q)
-            if Scenario.S1 in wanted:
-                out[Scenario.S1] = s1
-            if Scenario.S2 in wanted:
-                out[Scenario.S2] = run_s2(caller, world, q, s1)
-        if Scenario.S3 in wanted:
-            out[Scenario.S3] = run_s3(caller, world, q)
-        if Scenario.S4 in wanted:
-            out[Scenario.S4] = run_s4(caller, world, q, facts[q.query.query_id])
-        return out
 
-    results: dict[Scenario, list[Outcome]] = {s: [] for s in scenarios}
-    for done, by_scenario in enumerate(bounded_map(one, queries, workers=workers), start=1):
-        for scenario, outcome in by_scenario.items():
-            results[scenario].append(outcome)
-        if done % 10 == 0 or done == len(queries):
-            logger.info(
-                "H4: %d/%d queries, $%.4f spent this run", done, len(queries), caller.spent_usd
+async def _run_all(
+    loaded: Loaded,
+    queries: Sequence[EvalQuery],
+    kit: AgentKit,
+    *,
+    limits: Limits,
+    workers: int,
+    visitor: ChatModel | None,
+) -> list[Outcome]:
+    gate = asyncio.Semaphore(max(workers, 1))
+    done: list[Outcome] = []
+
+    async def one(q: EvalQuery) -> Outcome:
+        async with gate:
+            loaded.publishable.check(q.query.query_image_id, "the model")
+            photo = await asyncio.to_thread(kit.photo, q.query.query_image_id)
+            model = CachedModel(kit.model, kit.cache, kit.spend, query_id=q.query_id)
+            heard_by = None
+            if visitor is not None:
+                heard_by = CachedModel(visitor, kit.cache, kit.spend, query_id=q.query_id)
+            got = await converse(
+                loaded,
+                q,
+                photo=photo,
+                model=model,
+                fetch=kit.fetch,
+                limits=limits,
+                visitor_model=heard_by,
             )
-    return results
+            done.append(got)
+            if len(done) % 10 == 0 or len(done) == len(queries):
+                logger.info(
+                    "H5 offline: %d/%d queries, $%.4f paid this run",
+                    len(done),
+                    len(queries),
+                    kit.spend.spent_usd,
+                )
+            return got
+
+    async with asyncio.TaskGroup() as group:
+        tasks = [group.create_task(one(q)) for q in queries]
+    return [t.result() for t in tasks]
 
 
 # --- scoring ---------------------------------------------------------------------------------
@@ -312,196 +531,48 @@ def run(
 
 @dataclass(frozen=True, slots=True)
 class Row:
-    """One run on one set, with its paired difference against G5 on the same queries."""
+    """One run on one set, with its paired difference against the site on the same queries."""
 
     name: str
     set_id: str
     score: SetScore
-    vs_g5: Mapping[str, Difference]
-    """"hit@1" and "hit@10": this run minus G5."""
-    vs_s3: Mapping[str, Difference] | None = None
-    """S4 only: S4 minus S3 on the same queries, what the visitor's answers add."""
+    vs_site: Mapping[str, Difference]
+    """"hit@1" and "hit@10": this run minus the site's photo search."""
 
 
-def score(
-    loaded: Loaded, outcomes: Mapping[Scenario, Sequence[Outcome]]
-) -> tuple[list[Row], dict[str, float]]:
-    """Every scenario, H1 alone and H3 (A7 + H1), and G5 itself, per set.
-
-    Returns the rows and H3's A7 weight (when H1 ran), picked by mean hit@10 over sets.
-    """
-    world = loaded.world
-    rows: list[Row] = []
-    picked = {o.query_id for os in outcomes.values() for o in os}
-    for set_id in sorted(loaded.sets):
-        g5 = _subset(loaded.g5[set_id], picked)
-        if not g5.per_query:
-            continue
-        rows.append(_row(loaded, "G5", set_id, g5, g5))
-        ranked: dict[Scenario, ScoreResult] = {}
-        for scenario in (Scenario.S1, Scenario.S2, Scenario.S3, Scenario.S4):
-            got = [o for o in outcomes.get(scenario, ()) if o.set_id == set_id]
-            if got:
-                result = rank_rows(
-                    world, [world.queries[o.query_id] for o in got], [o.ranking for o in got]
-                )
-                ranked[scenario] = result
-                row = _row(loaded, scenario.value, set_id, result, g5)
-                if scenario is Scenario.S4 and Scenario.S3 in ranked:
-                    row = replace(row, vs_s3=_hits(result, ranked[Scenario.S3]))
-                rows.append(row)
-    extra: dict[str, float] = {}
-    h1 = outcomes.get(Scenario.H1, ())
-    if h1:
-        h1_rows, weight = _h1_rows(loaded, h1, picked)
-        rows.extend(h1_rows)
-        extra["h3_a7_weight"] = weight
-    return rows, extra
-
-
-def _h1_rows(
-    loaded: Loaded, outcomes: Sequence[Outcome], picked: set[str]
-) -> tuple[list[Row], float]:
-    world = loaded.world
-    texts = {
-        o.query_id: query_text(parse_description(str(o.detail.get("answer", "")))) for o in outcomes
-    }
-    by_set: dict[str, list[QueryData]] = {}
-    for o in outcomes:
-        by_set.setdefault(o.set_id, []).append(world.queries[o.query_id])
-    words = {
-        q.query.query_id: world.text_scores(q, texts[q.query.query_id])
-        for qs in by_set.values()
-        for q in qs
-    }
-
-    def mixed(weight: float) -> dict[str, ScoreResult]:
-        return {
-            s: rank_rows(
-                world,
-                qs,
-                [
-                    np.where(
-                        np.isfinite(world.image_scores(q, 1.0)),
-                        weight * world.image_scores(q, 1.0)
-                        + (1 - weight) * words[q.query.query_id],
-                        -np.inf,
-                    )
-                    for q in qs
-                ],
-            )
-            for s, qs in by_set.items()
-        }
-
-    tried = {
-        w: float(
-            np.mean([per_query_values(r.per_query)["hit@10"].mean() for r in mixed(w).values()])
-        )
-        for w in H3_WEIGHT_GRID
-    }
-    best = max(sorted(H3_WEIGHT_GRID, key=lambda w: abs(w - 0.5)), key=lambda w: tried[w])
-    rows: list[Row] = []
-    alone = {
-        s: rank_rows(world, qs, [words[q.query.query_id] for q in qs]) for s, qs in by_set.items()
-    }
-    with_a7 = mixed(best)
-    for set_id in sorted(by_set):
-        g5 = _subset(loaded.g5[set_id], picked)
-        rows.append(_row(loaded, "H1", set_id, alone[set_id], g5))
-        rows.append(_row(loaded, f"H3 (A7 {best:.1f} + H1)", set_id, with_a7[set_id], g5))
-    return rows, best
-
-
-#: H3's A7 weight when too few photos are scored to pick one (H1 picked 0.7 for both models).
-H3_FIXED_WEIGHT = 0.7
-
-
-def photo_ranks(
-    loaded: Loaded, outcomes: Mapping[Scenario, Sequence[Outcome]]
-) -> dict[str, dict[str, int]]:
-    """Query id, then run: the rank of the first right entity (1 is first)."""
-    world = loaded.world
-    picked = sorted({o.query_id for got in outcomes.values() for o in got})
-    queries = [world.queries[i] for i in picked]
-    rows: dict[str, list[np.ndarray]] = {"G5": [world.g5(q) for q in queries]}
-    for scenario in (Scenario.S1, Scenario.S2, Scenario.S3, Scenario.S4):
-        by_id = {o.query_id: o for o in outcomes.get(scenario, ())}
-        if by_id:
-            rows[scenario.value] = [by_id[i].ranking for i in picked]
-    h1 = {o.query_id: o for o in outcomes.get(Scenario.H1, ())}
-    if h1:
-        words = [
-            world.text_scores(
-                q, query_text(parse_description(str(h1[q.query.query_id].detail.get("answer", ""))))
-            )
-            for q in queries
-        ]
-        rows["H1"] = words
-        w = H3_FIXED_WEIGHT
-        rows[f"H3 (A7 {w:.1f})"] = [
-            np.where(np.isfinite(a), w * a + (1 - w) * t, -np.inf)
-            for a, t in zip((world.image_scores(q, 1.0) for q in queries), words, strict=True)
-        ]
-    out: dict[str, dict[str, int]] = {i: {} for i in picked}
-    for name, scores in rows.items():
-        for q in rank_rows(world, queries, scores).per_query:
-            out[q.query_id][name] = q.rank
-    return out
-
-
-def photo_costs(
-    outcomes: Mapping[Scenario, Sequence[Outcome]],
-) -> dict[str, dict[str, dict[str, float]]]:
-    """Query id, then scenario: tokens in and out, and dollars, as paid."""
-    out: dict[str, dict[str, dict[str, float]]] = {}
-    for scenario, got in outcomes.items():
-        for o in got:
-            out.setdefault(o.query_id, {})[scenario.value] = {
-                "calls": len(o.calls),
-                "prompt_tokens": sum(c.prompt_tokens for c in o.calls),
-                "completion_tokens": sum(c.completion_tokens for c in o.calls),
-                "cost_usd": o.cost_usd,
-            }
-    return out
-
-
-def short_trace(o: Outcome, describe: Callable[[str], str]) -> list[str]:
-    """An S3 or S4 run in a few lines: questions, answers, tool calls, the final answer."""
-    lines = [
-        f"{o.scenario.value} {o.set_id} {o.query_id}" + (f" [{o.failure}]" if o.failure else "")
-    ]
-    given = o.detail.get("visitor_given")
-    if given:
-        lines.append(f"  visitor knows: {json.dumps(given, ensure_ascii=False)}")
-    for t, a in zip(_list(o.detail.get("questions")), _list(o.detail.get("answers")), strict=False):
-        lines.append(f"  Q: {t}")
-        lines.append(f"  A: {a}")
-    for st in o.steps:
-        mark = "" if st.run else " (refused: no calls left)"
-        top3 = ", ".join(st.listed[:3])
-        lines.append(
-            f"  {st.turn}. {st.tool} {st.arguments[:160]}{mark}" + (f" -> {top3}" if top3 else "")
-        )
-    lines.append(f"  final: {', '.join(o.final[:10]) or '(none)'}")
-    if o.final:
-        lines.append(f"  first answer: {describe(o.final[0])}")
-    return lines
-
-
-def _subset(result: ScoreResult, query_ids: set[str]) -> ScoreResult:
-    kept = tuple(q for q in result.per_query if q.query_id in query_ids)
-    return ScoreResult(
-        per_query=kept,
-        skipped_no_answer=0,
-        gallery_images=result.gallery_images,
-        gallery_entities=result.gallery_entities,
-        ap_max_rank=result.ap_max_rank,
+def rank_rows(loaded: Loaded, queries: Sequence[EvalQuery], rows: Sequence[Floats]) -> ScoreResult:
+    """Rank each query's per-entity scores (catalog order) as every result file ranks them."""
+    catalog = loaded.world.catalog
+    order = entity_order(catalog)
+    values = np.stack(rows).astype(np.float32)[:, order]
+    scores = EntityScores(
+        query_ids=tuple(q.query_id for q in queries),
+        entity_ids=tuple(catalog.entity_ids[int(j)] for j in order),
+        values=values,
+        gallery_images=len(catalog.images),
     )
+    return rank_entities(scores, [q.search_query() for q in queries])
 
 
-def _row(loaded: Loaded, name: str, set_id: str, result: ScoreResult, g5: ScoreResult) -> Row:
-    scored = set_score(result, test_set=set_id, half="tune", gallery=loaded.gallery)
-    return Row(name, set_id, scored, _hits(result, g5))
+def score(loaded: Loaded, outcomes: Sequence[Outcome]) -> list[Row]:
+    """The agent and the site's photo search, per set, on the queries that ran."""
+    by_id = {q.query_id: q for qs in loaded.sets.values() for q in qs}
+    rows: list[Row] = []
+    for set_id in sorted(loaded.sets):
+        got = sorted((o for o in outcomes if o.set_id == set_id), key=lambda o: o.query_id)
+        if not got:
+            continue
+        queries = [by_id[o.query_id] for o in got]
+        site = rank_rows(loaded, queries, [o.site for o in got])
+        agent = rank_rows(loaded, queries, [o.ranking for o in got])
+        rows.append(_row(loaded, BASELINE, set_id, site, site))
+        rows.append(_row(loaded, AGENT, set_id, agent, site))
+    return rows
+
+
+def _row(loaded: Loaded, name: str, set_id: str, result: ScoreResult, base: ScoreResult) -> Row:
+    scored = set_score(result, test_set=set_id, half="tune", gallery=loaded.bundle)
+    return Row(name, set_id, scored, _hits(result, base))
 
 
 def _hits(result: ScoreResult, base: ScoreResult) -> dict[str, Difference]:
@@ -512,214 +583,120 @@ def _hits(result: ScoreResult, base: ScoreResult) -> dict[str, Difference]:
     return {d.metric: d for d in diffs if d.metric in ("hit@1", "hit@10")}
 
 
-# --- cost and tool use -----------------------------------------------------------------------
+# --- cost, tool use, report ------------------------------------------------------------------
 
 
-def cost_report(
-    outcomes: Mapping[Scenario, Sequence[Outcome]], full_counts: Mapping[str, int]
-) -> dict[str, JSON]:
-    """Tokens and dollars per scenario (as paid, cached replies included), with the
-    projection to every tune query; S3's tool use."""
-    total_queries = sum(full_counts.values())
-    out: dict[str, JSON] = {}
-    for scenario, got in outcomes.items():
-        calls = [c for o in got for c in o.calls]
-        paid = sum(c.cost_usd for c in calls)
-        n = max(len(got), 1)
-        entry: dict[str, JSON] = {
-            "queries": len(got),
-            "calls": len(calls),
-            "prompt_tokens": sum(c.prompt_tokens for c in calls),
-            "completion_tokens": sum(c.completion_tokens for c in calls),
-            "cached_tokens": sum(c.cached_tokens for c in calls),
-            "cost_usd": paid,
-            "usd_per_query": paid / n,
-            "projected_usd": paid / n * total_queries,
-            "failures": dict(Counter(o.failure.split(":")[0] for o in got if o.failure)),
-        }
-        if scenario is Scenario.S2:
-            review = [c for o in got for c in o.calls if c.scenario == Scenario.S2.value]
-            entry["review_usd_per_query"] = sum(c.cost_usd for c in review) / n
-        if scenario in (Scenario.S3, Scenario.S4):
-            entry.update(tool_use(got))
-        if scenario is Scenario.S4:
-            entry.update(questions_asked(got))
-        out[scenario.value] = entry
+def cost_report(outcomes: Sequence[Outcome], full_counts: Mapping[str, int]) -> dict[str, JSON]:
+    """Tokens and dollars (as paid, replayed answers included) with the projection to every
+    tune query; how the agent used its tools and asked the visitor."""
+    calls = [c for o in outcomes for c in o.calls]
+    paid = sum(c.cost_usd for c in calls)
+    n = max(len(outcomes), 1)
+    tools = [t for o in outcomes for t in o.lines("tool")]
+    per_query = [sum("refused" not in t for t in o.lines("tool")) for o in outcomes]
+    asked = [v for o in outcomes for v in o.lines(SIMULATED) if "question" in v]
+    return {
+        "queries": len(outcomes),
+        "calls": len(calls),
+        "replayed": sum(o.replayed for o in outcomes),
+        "prompt_tokens": sum(c.prompt_tokens for c in calls),
+        "completion_tokens": sum(c.completion_tokens for c in calls),
+        "cached_tokens": sum(c.cached_tokens for c in calls),
+        "cost_usd": paid,
+        "usd_per_query": paid / n,
+        "projected_usd": paid / n * sum(full_counts.values()),
+        "failures": dict(Counter(o.failure.split(":")[0] for o in outcomes if o.failure)),
+        "found": dict(Counter(o.found or "-" for o in outcomes)),
+        "tool_calls_mean": float(np.mean(per_query)) if per_query else 0.0,
+        "tool_calls_max": max(per_query, default=0),
+        "tools": dict(Counter(str(t.get("name")) for t in tools if "refused" not in t)),
+        "refused": sum("refused" in t for t in tools),
+        "tool_errors": sum(t.get("error") is True for t in tools),
+        "questions": len(asked),
+        "question_about": dict(Counter(str(v.get("about")) for v in asked)),
+        "dont_know": sum("ne sais pas" in fold(str(v.get("answer"))) for v in asked),
+        "position_shared": sum(v.get("position") is True for v in asked),
+        "regions_declined": sum(1 for o in outcomes for v in o.lines(SIMULATED) if "region" in v),
+    }
+
+
+def photo_ranks(loaded: Loaded, outcomes: Sequence[Outcome]) -> dict[str, dict[str, int]]:
+    """Query id, then run: the rank of the first right entity (1 is first)."""
+    by_id = {q.query_id: q for qs in loaded.sets.values() for q in qs}
+    got = sorted(outcomes, key=lambda o: o.query_id)
+    queries = [by_id[o.query_id] for o in got]
+    out: dict[str, dict[str, int]] = {o.query_id: {} for o in got}
+    for name, rows in ((BASELINE, [o.site for o in got]), (AGENT, [o.ranking for o in got])):
+        for q in rank_rows(loaded, queries, rows).per_query:
+            out[q.query_id][name] = q.rank
     return out
 
 
-def tool_use(outcomes: Sequence[Outcome]) -> dict[str, JSON]:
-    steps = [s for o in outcomes for s in o.steps if s.run]
-    per_query = [sum(1 for s in o.steps if s.run) for o in outcomes]
-    searches = [s for s in steps if s.filter_mode]
-    return {
-        "tool_calls_mean": float(np.mean(per_query)) if per_query else 0.0,
-        "tool_calls_max": max(per_query, default=0),
-        "tool_calls_per_query": dict(Counter(str(n) for n in per_query)),
-        "tools": dict(Counter(s.tool for s in steps)),
-        "searches_by_filter": dict(Counter(s.filter_mode for s in searches)),
-        "queries_with_hard_filter": sum(
-            any(s.filter_mode == "hard" for s in o.steps) for o in outcomes
-        ),
-        "queries_with_boost_filter": sum(
-            any(s.filter_mode == "boost" for s in o.steps) for o in outcomes
-        ),
-        "tool_errors": sum(s.error for s in steps),
-        "refused_past_budget": sum(1 for o in outcomes for s in o.steps if not s.run),
-        "final_answer_called": sum(1 for o in outcomes if o.failure != "no-final-answer"),
-        "final_as_text": sum(bool(o.detail.get("final_as_text")) for o in outcomes),
-        "answer_size_mean": float(np.mean([len(o.final) for o in outcomes])) if outcomes else 0.0,
-    }
+def short_trace(o: Outcome) -> list[str]:
+    """One conversation in a few lines: what the visitor knew, each tool call, each question
+    and answer, what was shown."""
+    lines = [f"{o.set_id} {o.query_id}" + (f" [{o.failure}]" if o.failure else "")]
+    if o.visitor_given:
+        lines.append(f"  visitor knows: {json.dumps(dict(o.visitor_given), ensure_ascii=False)}")
+    for line in o.log:
+        kind = line.get("type")
+        if kind == "tool":
+            args = json.dumps(line.get("args"), ensure_ascii=False)[:160]
+            hits = line.get("hits")
+            top3 = ", ".join(str(h) for h in (hits if isinstance(hits, list) else [])[:3])
+            mark = " (refused)" if "refused" in line else " (error)" if line.get("error") else ""
+            lines.append(f"  {line.get('name')} {args}{mark}" + (f" -> {top3}" if top3 else ""))
+        elif kind == SIMULATED and "question" in line:
+            shared = " (+ position)" if line.get("position") else ""
+            lines.append(f"  Q: {line.get('question')}")
+            lines.append(f"  A: {line.get('answer')}{shared}")
+        elif kind == SIMULATED:
+            lines.append("  framing asked: declined")
+    lines.append(f"  shown ({o.found or 'nothing'}): {', '.join(o.final[:10]) or '-'}")
+    return lines
 
 
-#: What a question asks about, by words in it (folded); first match wins.
-QUESTION_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("museum", ("musee", "exposition", "collection")),
-    (
-        "place",
-        (
-            "ou ",
-            "ville",
-            "commune",
-            "lieu",
-            "region",
-            "departement",
-            "pays",
-            "position",
-            "adresse",
-            "quartier",
-            "village",
-        ),
-    ),
-    ("part of photo", ("partie", "zone", "cadre")),
-    ("kind", ("batiment", "objet", "type", "agit", "tableau", "statue", "edifice", "monument")),
-    ("date", ("date", "epoque", "siecle", "ancien", "annee")),
-    ("name", ("nom", "titre", "auteur", "artiste", "appelle")),
-    ("inside or outside", ("interieur", "exterieur", "dedans", "dehors")),
-)
-
-
-def question_kind(question: str) -> str:
-    """What a question asks about. "Où" counts as place; folded "ou" (or) would not."""
-    words = set(re.findall(r"[a-z]+", fold(question)))
-    if "où" in question.lower():
-        words.add("ou ")
-    for kind, keys in QUESTION_KINDS:
-        if any(k in words for k in keys):
-            return kind
-    return "other"
-
-
-def questions_asked(outcomes: Sequence[Outcome]) -> dict[str, JSON]:
-    """How many questions S4 asked, about what, and how often the visitor could not answer."""
-    asked = [str(t) for o in outcomes for t in _list(o.detail.get("questions"))]
-    heard = [str(a) for o in outcomes for a in _list(o.detail.get("answers"))]
-    return {
-        "questions": len(asked),
-        "questions_per_query": dict(
-            Counter(str(len(_list(o.detail.get("questions")))) for o in outcomes)
-        ),
-        "question_kinds": dict(Counter(question_kind(t) for t in asked)),
-        "dont_know": sum("ne sais pas" in fold(a) for a in heard),
-    }
-
-
-def _list(value: JSON | None) -> list[JSON]:
-    return value if isinstance(value, list) else []
-
-
-def write_traces(path: Path, outcomes: Mapping[Scenario, Sequence[Outcome]]) -> None:
+def write_traces(path: Path, outcomes: Sequence[Outcome]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as out:
-        for got in outcomes.values():
-            for o in got:
-                out.write(json.dumps(o.trace(), ensure_ascii=False) + "\n")
+        for o in outcomes:
+            out.write(json.dumps(o.trace(), ensure_ascii=False) + "\n")
 
 
 def write_results(
-    loaded: Loaded,
-    rows: Sequence[Row],
-    outcomes: Mapping[Scenario, Sequence[Outcome]],
-    *,
-    model: str,
-    slug: str,
-    h3_weight: float | None,
-    round_id: str = ROUND,
-) -> list[Path]:
-    """One result file per run (G5 already has its own: results.md F2)."""
-    paid = {s: sum(o.cost_usd for o in got) for s, got in outcomes.items()}
-    names: dict[str, tuple[str, float, str]] = {
-        "S1": (f"H4-S1-{slug}", paid.get(Scenario.S1, 0.0), "one JSON plan, carried out by code"),
-        "S2": (
-            f"H4-S2-{slug}",
-            paid.get(Scenario.S2, 0.0),
-            "S1, then the model reorders the top 20 seen as 256 px thumbnails",
+    loaded: Loaded, rows: Sequence[Row], outcomes: Sequence[Outcome], *, model: str
+) -> Path:
+    """The agent's result file (the site's own photo search has its bundle report)."""
+    option = f"{OPTION}-{SLUG}"
+    info = RunInfo(
+        option=OPTION,
+        model=model,
+        resolution=LONG_SIDE,
+        pooling="agent",
+        gallery=loaded.bundle,
+        created=_today(),
+        cost_usd=sum(o.cost_usd for o in outcomes),
+        wall_time_s=0.0,
+        route=Route.OPENROUTER,
+        notes=(
+            "the site's agentic search (method, tools, brief, model) on stored vectors of "
+            f"bundle {loaded.bundle}, with a simulated visitor; ranked: its cards, its "
+            "best-so-far, then the site's photo ranking"
         ),
-        "S3": (
-            f"H4-S3-{slug}",
-            paid.get(Scenario.S3, 0.0),
-            "the model calls image_search, text_search and view_results, up to 8 calls, "
-            "then final_answer",
-        ),
-        "H1": (
-            f"H1-{slug}",
-            paid.get(Scenario.H1, 0.0),
-            "the model describes the photo (H1 prompt); BM25 over record text",
-        ),
-    }
-    if h3_weight is not None:
-        names[f"H3 (A7 {h3_weight:.1f} + H1)"] = (
-            f"H3-A7+H1-{slug}",
-            paid.get(Scenario.H1, 0.0),
-            f"A7 {h3_weight:.1f} mixed with H1's BM25 scores (weighted sum of min-max scores), "
-            "weight picked by mean hit@10 over the sets",
-        )
-    written: list[Path] = []
-    for name, (option, cost, notes) in names.items():
-        scores = [r.score for r in rows if r.name == name]
-        if not scores:
-            continue
-        info = RunInfo(
-            option=option.split("-")[0] if option.startswith("H1") else option.rsplit("-", 2)[0],
-            model=model,
-            resolution=LONG_SIDE,
-            pooling="agent",
-            gallery=loaded.gallery,
-            created=_today(),
-            cost_usd=cost,
-            wall_time_s=0.0,
-            route=Route.OPENROUTER,
-            notes=f"{notes}; tools over A7 and A3 vectors and BM25, gallery {loaded.gallery}",
-        )
-        path = eval_result_path(round_id, STEP, option)
-        write_result(
-            path,
-            round_id=round_id,
-            step=STEP,
-            option=option,
-            vector_run="+".join(RUNS),
-            query_vector_run="+".join(QUERY_RUNS),
-            vectors=info,
-            scores=scores,
-            today=_today(),
-        )
-        written.append(path)
-    return written
-
-
-def table_s4(rows: Sequence[Row]) -> list[str]:
-    """S4 minus S3 on the same queries: what the visitor's answers add."""
-    out: list[str] = []
-    for r in rows:
-        if r.vs_s3 is None:
-            continue
-        d1, d10 = r.vs_s3["hit@1"].diff, r.vs_s3["hit@10"].diff
-        out.append(
-            f"S4 - S3  {r.set_id:<5}{r.score.queries:>5}  hit@1 {100 * d1.value:+5.1f} "
-            f"[{100 * d1.low:+.1f},{100 * d1.high:+.1f}]  hit@10 {100 * d10.value:+5.1f} "
-            f"[{100 * d10.low:+.1f},{100 * d10.high:+.1f}]"
-        )
-    return out
+    )
+    path = eval_result_path(ROUND, STEP, option)
+    write_result(
+        path,
+        round_id=ROUND,
+        step=STEP,
+        option=option,
+        vector_run="+".join(loaded.runs),
+        query_vector_run="+".join(loaded.query_runs or ()),
+        vectors=info,
+        scores=[r.score for r in rows if r.name == AGENT],
+        today=_today(),
+    )
+    return path
 
 
 def table(rows: Sequence[Row]) -> list[str]:
@@ -729,18 +706,104 @@ def table(rows: Sequence[Row]) -> list[str]:
         return f"{100 * v.value:5.1f} [{100 * v.low:.0f}-{100 * v.high:.0f}]"
 
     out = [
-        f"{'run':<22}{'set':<5}{'n':>5}  {'hit@1':<16}{'hit@10':<16}"
-        f"{'hit@1 - G5':<22}{'hit@10 - G5'}"
+        f"{'run':<8}{'set':<5}{'n':>5}  {'hit@1':<16}{'hit@10':<16}"
+        f"{'hit@1 - site':<22}{'hit@10 - site'}"
     ]
     for r in rows:
-        d1, d10 = r.vs_g5["hit@1"].diff, r.vs_g5["hit@10"].diff
+        d1, d10 = r.vs_site["hit@1"].diff, r.vs_site["hit@10"].diff
         out.append(
-            f"{r.name:<22}{r.set_id:<5}{r.score.queries:>5}  {pct(r.score.hit_at_1):<16}"
+            f"{r.name:<8}{r.set_id:<5}{r.score.queries:>5}  {pct(r.score.hit_at_1):<16}"
             f"{pct(r.score.hit_at_10):<16}"
             f"{100 * d1.value:+5.1f} [{100 * d1.low:+.1f},{100 * d1.high:+.1f}]  "
             f"{100 * d10.value:+5.1f} [{100 * d10.low:+.1f},{100 * d10.high:+.1f}]"
         )
     return out
+
+
+# --- the command -----------------------------------------------------------------------------
+
+
+def main(
+    settings: Settings,
+    *,
+    per_set: int,
+    every_query: bool,
+    photos: bool,
+    label: str | None,
+    max_usd: float,
+    workers: int,
+    key_usage_usd: float | None,
+) -> list[str]:
+    """`miroir vlm h4`: refuse past the budget, load, hold the conversations (paid, or
+    replayed), score them, write the report (and with `every_query` the result file).
+    Returns the lines for the console."""
+    from miroir.jobs.factory import open_agent_kit  # noqa: PLC0415 (HTTP clients)
+    from miroir.jobs.spend import Budget, SpendLedger, spent_usd  # noqa: PLC0415
+
+    budget = Budget.from_settings(settings)
+    spent = spent_usd(SpendLedger(settings.spend_ledger), key_usage_usd)
+    if spent + max_usd > budget.usable_usd:
+        msg = (
+            f"spent ${spent:.2f}; ${max_usd:.2f} more would pass the ${budget.usable_usd:.2f} "
+            "usable budget. Ask the project lead."
+        )
+        raise BudgetError(msg)
+    loaded = load(settings)
+    if every_query:
+        queries = pick(loaded, None)
+    elif photos:
+        queries = pick_photos(loaded)
+    else:
+        queries = pick(loaded, per_set)
+    name = label or (
+        "h5-full" if every_query else "h5-photos-10" if photos else f"h5-smoke-{per_set}"
+    )
+    limits = Limits(settings.chat_conversation_usd, settings.chat_day_usd)
+    with open_agent_kit(
+        settings, run=f"{OPTION}-{name}", limit_usd=max_usd, key_usage_usd=key_usage_usd
+    ) as kit:
+        model = kit.model.model
+        outcomes = run(loaded, queries, kit, limits=limits, workers=workers)
+        paid = kit.spend.spent_usd
+    rows = score(loaded, outcomes)
+    counts = {s: len(qs) for s, qs in loaded.sets.items()}
+    costs = cost_report(outcomes, counts)
+    folder = settings.h4_report_dir(name)
+    write_traces(folder / "traces.jsonl", outcomes)
+    report: dict[str, JSON] = {
+        "model": model,
+        "bundle": loaded.bundle,
+        "queries": len(queries),
+        "full_counts": dict(counts),
+        "new_spend_usd": paid,
+        "costs": costs,
+        "scores": [
+            {
+                "run": r.name,
+                "set": r.set_id,
+                "queries": r.score.queries,
+                "hit@1": r.score.hit_at_1.value,
+                "hit@10": r.score.hit_at_10.value,
+                "hit@1 - site": r.vs_site["hit@1"].diff.value,
+                "hit@10 - site": r.vs_site["hit@10"].diff.value,
+            }
+            for r in rows
+        ],
+    }
+    (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    lines = [f"H5 offline, {model}: {len(queries)} queries on {loaded.bundle}", *table(rows)]
+    if photos and not every_query:
+        ranks = photo_ranks(loaded, outcomes)
+        (folder / "photos.json").write_text(json.dumps(ranks, indent=2) + "\n")
+        lines.append("rank of the right answer (1 = first): site -> H5")
+        lines += [f"  {q:<30}{r[BASELINE]:>6} -> {r[AGENT]}" for q, r in ranks.items()]
+    short = [line for o in outcomes for line in short_trace(o)]
+    (folder / "traces-short.txt").write_text("\n".join(short) + "\n", encoding="utf-8")
+    lines.append(f"costs: {json.dumps(costs, ensure_ascii=False)}")
+    lines.append(f"paid this run: ${paid:.4f}; traces and report in {folder}")
+    if every_query:
+        lines.append(f"wrote {write_results(loaded, rows, outcomes, model=model)}")
+    return lines
 
 
 def _today() -> date:

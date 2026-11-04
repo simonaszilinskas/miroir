@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -14,11 +14,9 @@ from miroir.config import DEMO_INDEX, ENV_MCP_TOKENS_KEY, ENV_PASSWORD_KEY, WEB_
 
 if TYPE_CHECKING:
     from miroir.eval.build_sets import BuildReport
-    from miroir.eval.h4 import Loaded
     from miroir.eval.results import SetScore
     from miroir.eval.scoring import Interval
     from miroir.jobs.demo import Demo, DemoMachine
-    from miroir.jobs.h4_agent import Outcome, Scenario
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 records_app = typer.Typer(no_args_is_help=True, help="POP records: parse the exports.")
@@ -1104,13 +1102,6 @@ def vlm_score(
 @vlm_app.command("h4")
 def vlm_h4(
     *,
-    model: Annotated[str, typer.Option(help="Vision model leading the search.")] = (
-        "mistral-large-4"
-    ),
-    scenario: Annotated[
-        list[str] | None,
-        typer.Option("--scenario", help="H1, S1, S2, S3, S4; repeat it. Default: all."),
-    ] = None,
     per_set: Annotated[
         int, typer.Option(help="Queries drawn from each of T1, T2, T3, T5 (seeded).")
     ] = 5,
@@ -1127,133 +1118,28 @@ def vlm_h4(
     ] = True,
     label: Annotated[str | None, typer.Option(help="Report folder name.")] = None,
     max_usd: Annotated[float, typer.Option(help="Stop once this run has paid this much.")] = 2.0,
-    workers: Annotated[int, typer.Option(help="Queries asked in parallel.")] = 4,
+    workers: Annotated[int, typer.Option(help="Conversations held in parallel.")] = 4,
 ) -> None:
-    """Step H4: a vision model leads the search (S1 plan, S2 plan + review, S3 free loop).
+    """Steps H4 and H5 offline: the site's agentic search on the T sets, with a simulated
+    visitor, scored against the site's photo search.
 
-    Paid. Replies are saved and replayed, so a rerun costs nothing. Without --all, a smoke
-    test: --per-set queries from each set, no result file.
+    Paid. Answers are saved and replayed, so a rerun costs nothing. Without --all, a smoke
+    test: no result file.
     """
     from miroir.eval import h4  # noqa: PLC0415
-    from miroir.jobs.factory import open_agent_caller  # noqa: PLC0415
-    from miroir.jobs.h4_agent import Scenario  # noqa: PLC0415
-    from miroir.jobs.spend import Budget, BudgetError, SpendLedger, spent_usd  # noqa: PLC0415
 
-    settings = get_settings()
-    scenarios = [Scenario(s) for s in (scenario or [s.value for s in Scenario])]
-    budget = Budget.from_settings(settings)
-    spent = spent_usd(SpendLedger(settings.spend_ledger), _openrouter_key_usage())
-    if spent + max_usd > budget.usable_usd:
-        msg = (
-            f"spent ${spent:.2f}; ${max_usd:.2f} more would pass the ${budget.usable_usd:.2f} "
-            "usable budget. Ask the project lead."
-        )
-        raise BudgetError(msg)
-    loaded = h4.load_world(settings)
-    if every_query:
-        queries = h4.pick(loaded, None)
-    elif photos:
-        queries = h4.pick_photos(loaded)
-    else:
-        queries = h4.pick(loaded, per_set)
-    name = label or ("full" if every_query else "photos-10" if photos else f"smoke-{per_set}")
-    typer.echo(f"H4 {model}: {len(queries)} queries, {', '.join(s.value for s in scenarios)}")
-    with open_agent_caller(settings, model, limit_usd=max_usd) as caller:
-        caller.check_images([q.query.image_id for q in queries])
-        outcomes = h4.run(caller, loaded, queries, scenarios, workers=workers)
-        new_spend = caller.spent_usd
-    rows, extra = h4.score(loaded, outcomes)
-    counts = {s: len(qs) for s, qs in loaded.sets.items()}
-    costs = h4.cost_report(outcomes, counts)
-    folder = settings.h4_report_dir(name)
-    h4.write_traces(folder / "traces.jsonl", outcomes)
-    report = {
-        "model": model,
-        "queries": len(queries),
-        "full_counts": counts,
-        "new_spend_usd": new_spend,
-        "costs": costs,
-        "scores": [
-            {
-                "run": r.name,
-                "set": r.set_id,
-                "queries": r.score.queries,
-                "hit@1": r.score.hit_at_1.value,
-                "hit@10": r.score.hit_at_10.value,
-                "hit@1 - G5": r.vs_g5["hit@1"].diff.value,
-                "hit@10 - G5": r.vs_g5["hit@10"].diff.value,
-                **(
-                    {
-                        "hit@1 - S3": r.vs_s3["hit@1"].diff.value,
-                        "hit@10 - S3": r.vs_s3["hit@10"].diff.value,
-                    }
-                    if r.vs_s3 is not None
-                    else {}
-                ),
-            }
-            for r in rows
-        ],
-        **extra,
-    }
-    (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    if photos and not every_query:
-        _echo_photos(loaded, outcomes, folder)
-    else:
-        for line in [*h4.table(rows), *h4.table_s4(rows)]:
-            typer.echo(line)
-    for s, c in costs.items():
-        typer.echo(f"{s}: {json.dumps(c, ensure_ascii=False)}")
-    typer.echo(f"paid this run: ${new_spend:.4f}; traces and report in {folder}")
-    if every_query:
-        from miroir.jobs.h4_agent import OPTIONS as AGENT_OPTIONS  # noqa: PLC0415
-
-        option = AGENT_OPTIONS[model]
-        for path in h4.write_results(
-            loaded,
-            rows,
-            outcomes,
-            model=option.model,
-            slug=option.slug,
-            h3_weight=extra.get("h3_a7_weight"),
-        ):
-            typer.echo(f"wrote {path}")
-
-
-def _echo_photos(loaded: Loaded, got: Mapping[Scenario, Sequence[Outcome]], folder: Path) -> None:
-    """Per photo: each run's rank of the right answer, cost, and short S3 and S4 traces."""
-    from miroir.eval import h4  # noqa: PLC0415
-    from miroir.jobs.h4_agent import Scenario  # noqa: PLC0415
-
-    ranks = h4.photo_ranks(loaded, got)
-    costs = h4.photo_costs(got)
-    names = list(next(iter(ranks.values())))
-    typer.echo("rank of the right answer (1 = first)")
-    typer.echo(
-        f"{'set':<4}{'query':<30}{'bucket':<18}{'gps':<5}" + "".join(f"{n:>13}" for n in names)
+    lines = h4.main(
+        get_settings(),
+        per_set=per_set,
+        every_query=every_query,
+        photos=photos,
+        label=label,
+        max_usd=max_usd,
+        workers=workers,
+        key_usage_usd=_openrouter_key_usage(),
     )
-    for qid, by_run in ranks.items():
-        q = loaded.world.queries[qid]
-        gps = "yes" if loaded.facts[qid].position else ""
-        typer.echo(
-            f"{q.set_id:<4}{qid:<30}{q.bucket:<18}{gps:<5}"
-            + "".join(f"{by_run[n]:>13}" for n in names)
-        )
-    typer.echo("cost per photo: $ (tokens in / out)")
-    for qid, by_s in costs.items():
-        cells = "  ".join(
-            f"{s} ${c['cost_usd']:.4f} ({c['prompt_tokens']:.0f}/{c['completion_tokens']:.0f})"
-            for s, c in sorted(by_s.items())
-        )
-        typer.echo(f"{qid:<30}{cells}")
-    lines: list[str] = []
-    for scenario in (Scenario.S3, Scenario.S4):
-        for o in got.get(scenario, ()):
-            lines += h4.short_trace(o, loaded.world.describe)
-    (folder / "traces-short.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (folder / "photos.json").write_text(
-        json.dumps({"ranks": ranks, "costs": costs}, indent=2, ensure_ascii=False) + "\n"
-    )
-    typer.echo(f"short traces: {folder / 'traces-short.txt'}")
+    for line in lines:
+        typer.echo(line)
 
 
 @words_app.command("ask")
