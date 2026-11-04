@@ -206,3 +206,11 @@ def test_calibration_reads_the_top_confidence_and_bucket_of_each_search() -> Non
     hits = site_search(bundle, _asked(a7, a3, 30.0, (2, 4)), top=1)
     assert searched.buckets == ("object", "object")
     assert searched.confidence.tolist() == pytest.approx([h.confidences[0] for h in hits])
+
+
+def test_g5_weights_are_one_set_for_the_site_and_its_measurements() -> None:
+    from miroir.eval.location import G5_F2_WEIGHTS  # noqa: PLC0415
+    from miroir.web.calibrate import draft_routing  # noqa: PLC0415
+
+    site = {b.name: b.a7_weight for b in draft_routing().buckets}
+    assert {b.value: w for b, w in G5_F2_WEIGHTS.items()} == site

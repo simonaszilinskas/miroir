@@ -59,6 +59,7 @@ from miroir.geo.model import distance_km, moved
 from miroir.records.mappers import PlaceHint
 from miroir.records.model import Record
 from miroir.records.store import read_places, read_positions, read_records
+from miroir.web.routing import ARCHIVE_A7_WEIGHT, COLOUR_BUILDING_A7_WEIGHT, OBJECT_A7_WEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,9 @@ Bools = NDArray[np.bool_]
 
 #: The G5 + F2 weights of R2 (results.md, F2): A7 weight per bucket, A3 the rest.
 G5_F2_WEIGHTS: Mapping[Bucket, float] = {
-    Bucket.ARCHIVE_BUILDING: 1.0,
-    Bucket.COLOUR_BUILDING: 0.0,
-    Bucket.OBJECT: 0.2,
+    Bucket.ARCHIVE_BUILDING: ARCHIVE_A7_WEIGHT,
+    Bucket.COLOUR_BUILDING: COLOUR_BUILDING_A7_WEIGHT,
+    Bucket.OBJECT: OBJECT_A7_WEIGHT,
 }
 #: Radius of the hard filter, in km (experiments.md, H2).
 RADIUS_KM = 2.0

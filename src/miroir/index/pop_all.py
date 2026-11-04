@@ -280,11 +280,10 @@ def build_on_machine(settings: Settings, work: Path) -> JobStatus:
     (whose parent holds `inputs/`), the bundle and coverage facts written back."""
     import time  # noqa: PLC0415
 
-    from miroir.eval.bm25 import Bm25  # noqa: PLC0415
+    from miroir.eval.bm25 import Bm25, record_text  # noqa: PLC0415
     from miroir.jobs.objects import download_tree, s3_client, upload_tree  # noqa: PLC0415
     from miroir.web.bundle import build_index  # noqa: PLC0415
     from miroir.web.catalog import CATALOG_FILE, read_catalog  # noqa: PLC0415
-    from miroir.web.engine import record_text  # noqa: PLC0415
 
     client = s3_client(settings)
     images = bucket_name(settings, Bucket.IMAGES)

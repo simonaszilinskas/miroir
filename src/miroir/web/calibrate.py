@@ -18,18 +18,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from miroir.web.measure import AskedSet, SiteBundle, SiteHit, site_search
-from miroir.web.routing import Bucket, PhotoType, Routing
+from miroir.web.routing import (
+    ARCHIVE_A7_WEIGHT,
+    COLOUR_BUILDING_A7_WEIGHT,
+    OBJECT_A7_WEIGHT,
+    Bucket,
+    PhotoType,
+    Routing,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Most T8 searches allowed to get a confident answer at the cut-off (the brief: about 10%).
 WRONG_TARGET = 0.10
-#: G5 weights from R2 (docs/results.md, "F2"): with Commons photos in the gallery the grid
-#: picked EmbeddingGemma 2 at 1.0 for black-and-white building photos, 0.0 (MegaLoc alone)
-#: for colour building photos and 0.2 for objects (hard switch), on T1, T2, T3 and T5 tune.
-ARCHIVE_A7_WEIGHT = 1.0
-COLOUR_BUILDING_A7_WEIGHT = 0.0
-OBJECT_A7_WEIGHT = 0.2
 #: A bucket with fewer T8 searches than this takes its cut-off from T8c (Commons photos with
 #: no record) instead: T8 is drawn from archive prints and museum photos, so it holds almost
 #: no colour photo of a building.
@@ -157,8 +158,13 @@ def cutoff_for(confidences: NDArray[np.float64], wrong_target: float) -> float:
     if confidences.size == 0:
         msg = "no not-found queries to set a cut-off from"
         raise ValueError(msg)
+    if not 0 <= wrong_target <= 1:
+        msg = f"wrong_target {wrong_target} is not a share"
+        raise ValueError(msg)
     allowed = math.floor(wrong_target * confidences.size)
     ordered = np.sort(confidences)[::-1]
+    if allowed >= confidences.size:  # every one may be confident
+        return float(ordered[-1])
     return float(np.nextafter(ordered[allowed], np.inf))
 
 

@@ -34,6 +34,13 @@ SWITCH_AT = 0.5
 #: within a print of it (89.1, 88.4); 0.3 sits in the middle of that flat stretch.
 CAPTION_A7 = 0.3
 CAPTION_BM25 = 0.7
+#: G5 weights from R2 (docs/results.md, "F2"): with Commons photos in the gallery the grid
+#: picked EmbeddingGemma 2 at 1.0 for black-and-white building photos, 0.0 (MegaLoc alone)
+#: for colour building photos and 0.2 for objects (hard switch), on T1, T2, T3 and T5 tune.
+#: `build-index` writes them into `routing.json`; measurements of G5 read them here.
+ARCHIVE_A7_WEIGHT = 1.0
+COLOUR_BUILDING_A7_WEIGHT = 0.0
+OBJECT_A7_WEIGHT = 0.2
 
 Floats = NDArray[np.float32]
 

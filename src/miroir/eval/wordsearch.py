@@ -29,7 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from miroir.config import WEB_INDEX, Settings, eval_result_path
-from miroir.eval.bm25 import Bm25
+from miroir.eval.bm25 import Bm25, record_text
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
 from miroir.eval.scoring import QueryScore, ScoreResult, first_rank
 from miroir.eval.sets import Query, load_queries
@@ -38,7 +38,7 @@ from miroir.eval.words import EN_SET_ID, SET_ID, WRITER
 from miroir.web import ranking
 from miroir.web.bundle import INDEXES
 from miroir.web.catalog import CATALOG_FILE, Catalog, read_catalog
-from miroir.web.engine import A3_FILE, A7_FILE, record_text, word_signals
+from miroir.web.engine import A3_FILE, A7_FILE, word_signals
 from miroir.web.measure import entity_cosines
 from miroir.web.routing import (
     GUESS_FILE,

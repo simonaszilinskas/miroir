@@ -12,14 +12,15 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Sequence
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
-from miroir.records.model import Record
-
 K1 = 1.2
 B = 0.75
+#: Characters of a record's description searched, and kept for its page on the site.
+DESCRIPTION_CHARS = 700
 
 _STOP_WORDS_TEXT = """
 a au aux avec ce ces cet cette d dans de des du elle en et eux il ils je la le les leur
@@ -51,12 +52,37 @@ def tokens(text: str) -> list[str]:
     return out
 
 
-def record_text(record: Record) -> str:
-    """Every field of a record worth searching, joined."""
+class Searchable(Protocol):
+    """A record's searchable fields: a `Record`, or the site's `CatalogRecord`."""
+
+    @property
+    def title(self) -> str: ...
+    @property
+    def description(self) -> str: ...
+    @property
+    def denomination(self) -> tuple[str, ...]: ...
+    @property
+    def domain(self) -> tuple[str, ...]: ...
+    @property
+    def authors(self) -> tuple[str, ...]: ...
+    @property
+    def period(self) -> tuple[str, ...]: ...
+    @property
+    def commune(self) -> str | None: ...
+    @property
+    def departement(self) -> str | None: ...
+    @property
+    def region(self) -> str | None: ...
+
+
+def record_text(record: Searchable) -> str:
+    """Every field of a record worth searching, joined: what the site's BM25 indexes and what
+    every evaluation of words (H1, H4, T7) must index too. The description is cut where the
+    site's catalog cuts it."""
     return " ".join(
         [
             record.title,
-            record.description,
+            record.description[:DESCRIPTION_CHARS],
             *record.denomination,
             *record.domain,
             *record.authors,

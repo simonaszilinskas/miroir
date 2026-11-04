@@ -20,7 +20,7 @@ from PIL import Image as PILImage
 from PIL import ImageOps
 
 from miroir.caption import CaptionPlace, Gazetteer, clean_caption
-from miroir.eval.bm25 import Bm25
+from miroir.eval.bm25 import Bm25, record_text
 from miroir.images.colour import chroma_spread
 from miroir.images.fetch import JPEG_QUALITY, LONG_SIDE
 from miroir.images.mount import Picture, crop_picture, find_picture
@@ -629,23 +629,6 @@ def prepare_photo(data: bytes) -> bytes:
     out = io.BytesIO()
     rgb.save(out, format="JPEG", quality=JPEG_QUALITY)
     return out.getvalue()
-
-
-def record_text(record: CatalogRecord) -> str:
-    """Every field worth searching by words, as `miroir.eval.bm25.record_text` joins them."""
-    return " ".join(
-        [
-            record.title,
-            record.description,
-            *record.denomination,
-            *record.domain,
-            *record.authors,
-            *record.period,
-            record.commune or "",
-            record.departement or "",
-            record.region or "",
-        ]
-    )
 
 
 def unit(vector: Floats) -> Floats:

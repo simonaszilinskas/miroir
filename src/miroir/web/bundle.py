@@ -30,6 +30,7 @@ from numpy.typing import NDArray
 
 from miroir.config import Settings
 from miroir.eval import router
+from miroir.eval.bm25 import DESCRIPTION_CHARS
 from miroir.eval.sets import load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.jobs.privacy import PublishableImages
@@ -67,8 +68,6 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_FILE = "manifest.json"
 REPORT_FILE = "report.json"
-#: Characters of a record's description kept for its page.
-DESCRIPTION_CHARS = 700
 
 Floats = NDArray[np.float32]
 

@@ -201,6 +201,7 @@ def test_cutoff_keeps_at_most_the_target_share_confident() -> None:
     assert 0.8 < cutoff < 0.8 + 1e-9  # one of ten may stay confident: just above the second
     assert (wrong >= cutoff).mean() == pytest.approx(0.1)
     assert (wrong >= cutoff_for(wrong, 0.05)).mean() == 0.0
+    assert (wrong >= cutoff_for(wrong, 1.0)).all()  # every one may be confident
 
 
 def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness() -> None:

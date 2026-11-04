@@ -9,18 +9,18 @@ import pytest
 from miroir.eval.site_rerank import Searched
 from miroir.eval.sure import choose, sure_rows
 from miroir.web.engine import Engine, SearchRequest
-from miroir.web.levels import Level
+from miroir.web.levels import Level, gap_of
 from miroir.web.measure import SiteHit
 from miroir.web.routing import PhotoType
-from miroir.web.sure import SureRule, margin_of, read_sure, write_sure
+from miroir.web.sure import SureRule, read_sure, write_sure
 from tests import web_helpers as h
 
 
 def test_margin_is_the_gap_to_the_best_other_answer() -> None:
-    assert margin_of([0.9, 0.7, 0.85]) == pytest.approx(0.05)
-    assert margin_of([0.9]) == pytest.approx(0.9)
+    assert gap_of([0.9, 0.7, 0.85]) == pytest.approx(0.05)
+    assert gap_of([0.9]) == pytest.approx(0.9)
     # Two records sharing one image tie: never sure, however high the cosine.
-    assert margin_of([1.0, 1.0, 0.6]) == 0.0
+    assert gap_of([1.0, 1.0, 0.6]) == 0.0
 
 
 def test_the_rule_reads_back(tmp_path: Path) -> None:
