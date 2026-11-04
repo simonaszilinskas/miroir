@@ -18,7 +18,7 @@ from miroir.commons.select import Candidate, only_commune
 from miroir.eval.router import ROUTE_GRID
 from miroir.eval.router3 import Bucket, SetGrid, bucket_of
 from miroir.eval.scoring import QueryScore, ScoreResult
-from miroir.images.colour import GREY_BELOW, already_grey, chroma_spread, greyscale
+from miroir.images.colour import GREY_BELOW, chroma_spread
 from miroir.images.phash import phash
 from miroir.web.routing import Bucket as SiteBucket
 from miroir.web.routing import PhotoType as SitePhotoType
@@ -37,15 +37,11 @@ def colour_photo(seed: int = 0) -> bytes:
     return jpeg(np.kron(blocks, np.ones((32, 32, 1))))
 
 
-def test_grey_and_tinted_prints_score_near_zero_colour_photos_above() -> None:
+def test_grey_prints_score_near_zero_colour_photos_above() -> None:
     ramp = np.tile(np.linspace(0, 255, 256), (256, 1))
     grey = jpeg(np.stack([ramp] * 3, axis=-1))
-    sepia = jpeg(np.stack([ramp, ramp * 0.85, ramp * 0.65], axis=-1))
     assert chroma_spread(grey) < 0.5
-    assert already_grey(grey)
-    assert not already_grey(sepia)
     assert chroma_spread(colour_photo()) > GREY_BELOW
-    assert already_grey(greyscale(colour_photo()))
 
 
 def test_only_commune_catches_titles_that_name_the_town_alone() -> None:

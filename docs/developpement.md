@@ -106,7 +106,7 @@ uv run miroir scw cleanup        # delete them (asks first; --yes does not)
 ```
 
 Every command that runs a GPU job starts its own machine: `embed scw`, `embed f2`,
-`embed extra`, `embed grey`, `embed images`, `eval r4 embed` and `words embed`.
+`embed extra`, `embed images`, `eval r4 embed` and `words embed`.
 `--max-hours` sets a machine's longest life: 1 hour for `scw up`, `scw smoke`, `web dev --scw`
 and `words embed`; 2 for the `embed` commands.
 

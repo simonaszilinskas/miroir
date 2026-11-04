@@ -565,29 +565,6 @@ def eval_merge_vectors(
     typer.echo(f"{out}: {count} vectors")
 
 
-@eval_app.command("overlay-vectors")
-def eval_overlay_vectors(
-    *,
-    base: Annotated[str, typer.Option(help="Run whose rows are kept unless top has them.")],
-    top: Annotated[str, typer.Option(help="Run whose rows win (e.g. grey copies, F1).")],
-    out: Annotated[str, typer.Option(help="Name of the new run.")],
-    gallery: Annotated[str, typer.Option(help="Gallery list the new run covers.")],
-) -> None:
-    """One run of a gallery's images, each from `top` when it has it, else from `base`."""
-    from miroir.eval.sets import read_gallery  # noqa: PLC0415
-    from miroir.eval.vectors import overlay_runs, read_vectors  # noqa: PLC0415
-
-    settings = get_settings()
-    done = overlay_runs(
-        settings.vectors_path(out),
-        read_vectors(settings.vectors_path(base)),
-        read_vectors(settings.vectors_path(top)),
-        ids=read_gallery(settings, gallery),
-        gallery=gallery,
-    )
-    typer.echo(f"{out}: {len(done.ids)} vectors; {done.info.notes[:120]}")
-
-
 @testsets_app.command("fetched")
 def testsets_fetched(
     *,
@@ -731,33 +708,6 @@ def embed_extra(
     ):
         runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         done = runner.embed_supplied(option, "X", ids, images, max_usd=max_usd)
-    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
-
-
-@embed_app.command("grey")
-def embed_grey(
-    option: Annotated[str, typer.Option(help="Model option id, e.g. A3-megaloc-322.")],
-    gallery: Annotated[str, typer.Option(help="Gallery whose colour images to grey.")],
-    queries: Annotated[
-        list[str] | None, typer.Option(help="Also grey these sets' tune query images.")
-    ] = None,
-    max_usd: Annotated[
-        float | None, typer.Option(help="Refuse the run if the probe projects more than this.")
-    ] = None,
-    max_hours: MaxHours = 2.0,
-) -> None:
-    """F1: embed grey copies of every image with colour in a gallery and the query sets."""
-    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-    from miroir.jobs.supplied import grey_candidates, open_grey_copies  # noqa: PLC0415
-
-    settings = get_settings()
-    purpose = f"embed {option} grey-{gallery}"
-    with open_grey_copies(settings) as grey:
-        ids = grey.not_grey(grey_candidates(settings, gallery, queries or ()))
-        with open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls:
-            runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
-            done = runner.embed_supplied(option, f"grey-{gallery}", ids, grey, max_usd=max_usd)
     typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
 
 

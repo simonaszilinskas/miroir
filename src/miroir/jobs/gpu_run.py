@@ -87,7 +87,7 @@ OVERRUN_MARGIN_USD = 0.25
 
 
 class SuppliesImages(Protocol):
-    """Gives image bytes by id, in order: Commons photos, grey copies (`embed_supplied`)."""
+    """Gives image bytes by id, in order: Commons photos, extra records (`embed_supplied`)."""
 
     def fetch_all(self, image_ids: Iterable[str]) -> Iterator[Fetched]: ...
 
@@ -388,7 +388,7 @@ class GpuRunner:
         """Embed images whose bytes the Mac sends, into run `<option>-<label>`.
 
         For images the machine cannot read itself: Commons photos added to the gallery (F2),
-        or grey copies made on the Mac (F1). POP ids must be publishable. Needs a probe of
+        or the images of the records in extra/. POP ids must be publishable. Needs a probe of
         the option, like a gallery run; resumes from its checkpoint.
         """
         opt = option(option_id)
