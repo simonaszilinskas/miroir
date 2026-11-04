@@ -48,6 +48,8 @@ class SearchQuery:
     excluded_image_ids: tuple[str, ...] = ()
     cluster: str = ""
     """What the query's score is resampled with (`QueryScore.cluster`)."""
+    hidden_entity: str = ""
+    """As `NotFoundQuery.hidden_entity`; a query with a right answer hides none."""
 
     def __post_init__(self) -> None:
         if not self.entity_ids:
@@ -64,6 +66,8 @@ class Asked(Protocol):
     def image_id(self) -> str: ...
     @property
     def excluded_image_ids(self) -> tuple[str, ...]: ...
+    @property
+    def hidden_entity(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,9 @@ class NotFoundQuery:
     query_id: str
     image_id: str
     excluded_image_ids: tuple[str, ...] = ()
+    hidden_entity: str = ""
+    """Every gallery image of this entity is hidden too, also images added to it after the
+    set was built (Commons photos, step F2), which `excluded_image_ids` cannot name."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,13 +241,17 @@ def entity_scores(
 
 
 def hide(sims: Floats, gallery: Gallery, queries: Sequence[Asked]) -> Floats:
-    """Set to -inf, in place, each query's own image and its excluded images. Returns `sims`."""
+    """Set to -inf, in place, each query's own image, its excluded images and every image of
+    its hidden entity. Returns `sims`."""
     gallery_row = {image_id: i for i, image_id in enumerate(gallery.image_ids)}
+    entities = np.asarray(gallery.entity_ids)
     for j, query in enumerate(queries):
         hidden = [
             gallery_row[i] for i in (query.image_id, *query.excluded_image_ids) if i in gallery_row
         ]
         sims[j, hidden] = -np.inf
+        if query.hidden_entity:
+            sims[j, entities == query.hidden_entity] = -np.inf
     return sims
 
 

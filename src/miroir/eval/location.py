@@ -44,7 +44,6 @@ from miroir.eval.scoring import (
     Difference,
     EntityScores,
     Gallery,
-    NotFoundQuery,
     QueryScore,
     ScoreResult,
     average_precision,
@@ -54,7 +53,7 @@ from miroir.eval.scoring import (
     tie_ranks,
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.stack import combined_info
+from miroir.eval.stack import combined_info, not_found_queries
 from miroir.eval.vectors import RunInfo, VectorSet, read_vectors
 from miroir.geo.model import distance_km, moved
 from miroir.records.mappers import PlaceHint
@@ -587,11 +586,7 @@ def _search(
     )
     out: dict[str, Searched] = {}
     for set_id, qs in loaded.items():
-        asked = (
-            [NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids) for q in qs]
-            if set_id == not_found_set
-            else search_queries(qs)
-        )
+        asked = not_found_queries(qs, set_id) if set_id == not_found_set else search_queries(qs)
         parts = [
             chunked_entity_scores(a, v, entity_of, gallery_ids, asked)
             for a, v in zip(asking, vectors, strict=True)

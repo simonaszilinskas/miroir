@@ -253,7 +253,10 @@ def not_found_queries(queries: Sequence[Query], set_id: str = NOT_FOUND_SET) -> 
     if with_answer:
         msg = f"{with_answer} {set_id} queries have a right answer"
         raise ValueError(msg)
-    return [NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids) for q in queries]
+    return [
+        NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids, hidden_entity=q.entity_id)
+        for q in queries
+    ]
 
 
 def _info(

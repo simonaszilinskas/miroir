@@ -17,9 +17,11 @@ from miroir.eval.results import (
 )
 from miroir.eval.scoring import (
     Gallery,
+    NotFoundQuery,
     QueryScore,
     SearchQuery,
     bootstrap,
+    entity_scores,
     first_rank,
     paired_bootstrap,
     score,
@@ -75,6 +77,15 @@ def test_ap_over_several_right_entities() -> None:
 def test_excluded_images_leave_the_gallery() -> None:
     hit = one(SearchQuery("q1", "q", ("X",), excluded_image_ids=("g4",)))
     assert hit.rank == 3
+
+
+def test_a_not_found_query_hides_every_image_of_its_entity() -> None:
+    # g4 stands for a Commons photo added to X after the set was built (step F2): the
+    # query's exclusions do not name it, its entity does.
+    asked = NotFoundQuery("t8", "q", excluded_image_ids=("g1",), hidden_entity="X")
+    found = entity_scores(GALLERY_RUN, GALLERY, [asked])
+    assert found.values[0][found.entity_ids.index("X")] == -np.inf
+    assert np.isfinite(found.values[0]).sum() == 2  # Y and Z are still searched
 
 
 def test_query_image_never_finds_itself() -> None:
