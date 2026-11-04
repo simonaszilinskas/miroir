@@ -159,6 +159,22 @@ def test_each_machine_is_written_to_the_ledger_and_the_cap_refuses_more(scw: Set
         pass
 
 
+def test_a_machine_alive_in_another_run_counts_against_the_cap(scw: Settings) -> None:
+    api = FakeApi({"fr-par-2"})
+    ledger = MachineLedger(scw.scaleway_dir / "spend.jsonl")
+    cap = scw.scw_budget_eur
+    with ledger.hold(cap - 1.0, cap):  # another run's machine, alive now
+        with (
+            pytest.raises(RuntimeError, match="alive now"),
+            gpu_machine(scw, cast("InstanceApi", api), public_key="ssh-ed25519 A", max_hours=7),
+        ):
+            pass
+        assert not api.servers  # refused before any machine was made
+    assert ledger.held_eur() == 0.0
+    with gpu_machine(scw, cast("InstanceApi", api), public_key="ssh-ed25519 A", max_hours=1):
+        pass
+
+
 def test_leftovers_are_miroir_servers_and_loose_volumes_and_ips() -> None:
     class Listing:
         def servers(self, zone: str) -> list[JSON]:

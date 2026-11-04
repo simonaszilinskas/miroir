@@ -297,7 +297,7 @@ class Demo:
         return state
 
     def check_budget(self, hours: float, offer: Offer = DEMO_OFFER) -> None:
-        spent = self.ledger.total_eur()
+        spent = self.ledger.total_eur() + self.ledger.held_eur()  # machines alive in other runs
         worst = hours * offer.eur_per_hour
         cap = self.settings.scw_budget_eur
         if spent + worst > cap:
