@@ -6,7 +6,9 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 
 1. One package, `src/miroir/`. No scripts outside it; no `if __name__ == "__main__"`. The one
    exception is `scripts/pop_full_export.py`, a standalone, standard-library tool that downloads
-   the full POP export from public sources.
+   the full POP export from public sources. It cannot import `miroir.config`, so rule 5 does not
+   bind it: it reads `MIROIR_DATA_DIR` and `MIROIR_EXPORTS_DIR` itself, from the environment or
+   `.env`, with the same defaults. `make check` lints, types and tests it like the package.
 2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
    Group by area: `miroir records build`, `miroir embed scw`, `miroir eval run`.
 3. No ML model is ever loaded or run on the development machine, not even for a test: ruff bans importing torch,

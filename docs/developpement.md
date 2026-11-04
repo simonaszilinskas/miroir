@@ -200,7 +200,11 @@ uv run miroir scw crop-measure                # tune sets, crops off and on, on 
   demo machine needs one (`miroir demo crops`).
 
 The full POP export comes from public sources with a standalone script:
-`python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps).
+`python3 scripts/pop_full_export.py all` (resumable; `--help` for the steps). It writes to
+`$MIROIR_DATA_DIR/exports-full`, where `miroir records build-full` reads, and takes
+`MIROIR_DATA_DIR` and `MIROIR_EXPORTS_DIR` (the July exports, for their field labels) from the
+environment or `.env`, as `miroir.config` does. It stops when a Mémoire CSV maps no column to
+`DIFF`: without it rights are unknown.
 
 ## Where to read next
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Full export of every POP record that has at least one image, from public sources only.
 
-Writes one folder per base under OUT (default ~/miroir-data/exports-full):
-<base>/<base>.jsonl (one record per line, POP field codes) and <base>/metadata.json.
+Writes one folder per base under OUT (default $MIROIR_DATA_DIR/exports-full, the folder
+`miroir records build-full` reads; MIROIR_DATA_DIR comes from the environment, else the repo's
+.env, else ~/miroir-data): <base>/<base>.jsonl (one record per line, POP field codes) and
+<base>/metadata.json.
 
 Sources, all public and needing no account:
 - Open-data CSV dumps of the Ministère de la Culture, listed on data.gouv.fr and stored at
@@ -31,8 +33,10 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import hashlib
 import http.client
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -43,7 +47,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +99,12 @@ BASE_LABEL = {
     "museo": "Répertoire des Musées de France (Muséofile)",
 }
 REF_COLUMNS = ("Reference", "Reference_de_la_notice", "reference_notice", "Identifiant")
+# POP codes every CSV of a base must map: without them rights are unknown downstream, and
+# `miroir records build-full` cannot tell open photos from closed ones (Mérimée and Palissy
+# rights hang on Mémoire's).
+REQUIRED_CODES = {"memoire": ("DIFF",)}
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RETRY_CODES = (429, 500, 502, 503, 504)
 PLACEHOLDER_RE = re.compile(r"(^|/)(sur_demande\.jpg|noimage|placeholder)", re.I)
 
 
@@ -104,32 +114,80 @@ def log(msg: str) -> None:
 
 
 class Http:
-    """Polite HTTP client: one request at a time, at most `rate` per second, retries on errors."""
+    """Polite HTTP client: one request at a time, at most `rate` per second, retries on errors.
 
-    def __init__(self, rate: float) -> None:
+    `opener` and `sleep` default to `urllib.request.urlopen` and `time.sleep`; tests pass fakes.
+    """
+
+    def __init__(
+        self,
+        rate: float,
+        opener: Callable[..., Any] = urllib.request.urlopen,
+        sleep: Callable[[float], None] = time.sleep,
+        tries: int = 5,
+    ) -> None:
         self.gap = 1.0 / rate
         self.last = 0.0
+        self.opener = opener
+        self.sleep = sleep
+        self.tries = tries
 
-    def get(self, url: str, headers: dict[str, str] | None = None, tries: int = 5) -> bytes:
-        for attempt in range(tries):
-            wait = self.last + self.gap - time.monotonic()
-            if wait > 0:
-                time.sleep(wait)
-            self.last = time.monotonic()
-            req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+    def get(self, url: str, headers: dict[str, str] | None = None) -> bytes:
+        return self.retry(lambda: self._read(url, headers))
+
+    def _read(self, url: str, headers: dict[str, str] | None) -> bytes:
+        with self.open(url, headers) as resp:
+            return resp.read()
+
+    def open(self, url: str, headers: dict[str, str] | None = None, timeout: int = 120) -> Any:
+        """One request, after the rate-limit wait. The caller closes the response."""
+        wait = self.last + self.gap - time.monotonic()
+        if wait > 0:
+            self.sleep(wait)
+        self.last = time.monotonic()
+        req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+        return self.opener(req, timeout=timeout)
+
+    def retry(self, call: Callable[[], Any]) -> Any:
+        """Run `call`; again after a pause on a network error or a 429/5xx answer."""
+        for attempt in range(self.tries):
             try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    return resp.read()
+                return call()
             except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    raise
-                if e.code not in (429, 500, 502, 503, 504) or attempt == tries - 1:
+                if e.code not in RETRY_CODES or attempt == self.tries - 1:
                     raise
             except (urllib.error.URLError, http.client.HTTPException, OSError):
-                if attempt == tries - 1:
+                if attempt == self.tries - 1:
                     raise
-            time.sleep(min(60, 5 * 2**attempt))
+            self.sleep(min(60, 5 * 2**attempt))
         raise RuntimeError("unreachable")
+
+
+def env_setting(name: str, env_file: Path) -> str | None:
+    """A setting from the environment, else from the repo's .env, as `miroir.config` reads it.
+
+    The script stays standard-library and standalone, so it reads them itself.
+    """
+    value = os.environ.get(name)  # noqa: TID251 (standalone script, CODING_STANDARDS 5)
+    if value:
+        return value
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            key, sep, rest = line.partition("=")
+            if sep and key.strip() == name and rest.strip():
+                return rest.strip().strip("'\"")
+    return None
+
+
+def default_out(env_file: Path = REPO_ROOT / ".env") -> Path:
+    """$MIROIR_DATA_DIR/exports-full: the folder `miroir records build-full` reads."""
+    data = env_setting("MIROIR_DATA_DIR", env_file) or "~/miroir-data"
+    return Path(data).expanduser() / "exports-full"
+
+
+def default_field_docs(env_file: Path = REPO_ROOT / ".env") -> Path:
+    """$MIROIR_EXPORTS_DIR: the July exports, read for the labels of their field-docs.json."""
+    return Path(env_setting("MIROIR_EXPORTS_DIR", env_file) or "~/miroir-exports").expanduser()
 
 
 # ---------------------------------------------------------------- download
@@ -152,11 +210,14 @@ def step_download(out: Path, bases: list[str], http: Http) -> None:
                 log(f"download: {name} changed upstream, starting over")
                 dest.unlink()
             have = dest.stat().st_size if dest.exists() else 0
-            if have == remote["size"]:
+            if have == remote["size"] and meta.get("complete"):
                 log(f"download: {name} up to date ({have:,} bytes)")
-            else:
-                download_resumable(CSV_HOST + name, dest, have, remote["size"])
-            meta_path.write_text(json.dumps({**remote, "url": CSV_HOST + name}, indent=2))
+                continue
+            # Written first, so an interrupted download resumes instead of starting over.
+            meta = {**remote, "url": CSV_HOST + name, "complete": False}
+            meta_path.write_text(json.dumps(meta, indent=2))
+            download_resumable(http, CSV_HOST + name, dest, remote["size"])
+            meta_path.write_text(json.dumps({**meta, "complete": True}, indent=2))
 
 
 def list_bucket_files(http: Http) -> dict[str, dict[str, Any]]:
@@ -173,15 +234,42 @@ def list_bucket_files(http: Http) -> dict[str, dict[str, Any]]:
     return files
 
 
-def download_resumable(url: str, dest: Path, have: int, size: int) -> None:
-    log(f"download: {dest.name} from byte {have:,} of {size:,}")
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": f"bytes={have}-"})
-    with urllib.request.urlopen(req, timeout=300) as resp, dest.open("ab") as fh:
-        while chunk := resp.read(1 << 20):
-            fh.write(chunk)
-    got = dest.stat().st_size
-    if got != size:
-        raise RuntimeError(f"{dest.name}: got {got} bytes, expected {size}; rerun to resume")
+def download_resumable(http: Http, url: str, dest: Path, size: int) -> None:
+    """Fetch `url` into `dest`, going on from the bytes already there.
+
+    A 206 answer must start at the byte asked for; a 200 answer (a server that ignores Range)
+    is the whole file, so it replaces the partial one. A cut connection is retried by `http`.
+    """
+
+    def attempt() -> None:
+        have = dest.stat().st_size if dest.exists() else 0
+        if have == size:
+            return
+        if have > size:
+            dest.unlink()
+            have = 0
+        log(f"download: {dest.name} from byte {have:,} of {size:,}")
+        with http.open(url, {"Range": f"bytes={have}-"}, timeout=300) as resp:
+            if resp.status == 206:
+                start = resp.headers.get("Content-Range", "")
+                if not start.startswith(f"bytes {have}-"):
+                    raise RuntimeError(f"{dest.name}: asked for byte {have}, got {start!r}")
+                mode = "ab"
+            elif resp.status == 200:
+                if have:
+                    log(f"download: {dest.name}: the server ignored Range, starting over")
+                mode = "wb"
+            else:
+                raise RuntimeError(f"{dest.name}: HTTP {resp.status}")
+            with dest.open(mode) as fh:
+                while chunk := resp.read(1 << 20):
+                    fh.write(chunk)
+        got = dest.stat().st_size
+        if got != size:
+            # Raised as OSError so `http.retry` resumes from the bytes kept.
+            raise OSError(f"{dest.name}: got {got:,} bytes, expected {size:,}")
+
+    http.retry(attempt)
 
 
 # ---------------------------------------------------------------- image bucket listing
@@ -202,8 +290,7 @@ def step_list_images(out: Path, bases: list[str], http: Http) -> None:
             continue
         ref_only = prefix in REF_ONLY_PREFIXES
         token, count = state.get("token"), state.get("count", 0)
-        if token is None and tsv.exists():
-            tsv.unlink()
+        resume_listing(tsv, state)
         log(f"list-images: {prefix}{' (REFs only)' if ref_only else ''} from entry {count:,}")
         while True:
             q = {"list-type": "2", "prefix": f"{prefix}/", "max-keys": "1000"}
@@ -225,13 +312,25 @@ def step_list_images(out: Path, bases: list[str], http: Http) -> None:
             count += len(lines)
             token = root.findtext("s:NextContinuationToken", None, ns)
             done = root.findtext("s:IsTruncated", "false", ns) != "true" or not token
-            state = {"token": token, "count": count, "done": done}
+            state = {"token": token, "count": count, "done": done, "bytes": tsv.stat().st_size}
             state_path.write_text(json.dumps(state))
             if count and count % 50000 < len(lines):
                 log(f"list-images: {prefix} {count:,}")
             if done:
                 log(f"list-images: {prefix} done, {count:,} entries")
                 break
+
+
+def resume_listing(tsv: Path, state: dict[str, Any]) -> None:
+    """Match the listing file to its saved state: empty with no state, else cut a page
+    appended after the state was last saved (it is fetched again)."""
+    if not tsv.exists():
+        return
+    if state.get("token") is None:
+        tsv.unlink()
+    elif "bytes" in state and tsv.stat().st_size > state["bytes"]:
+        with tsv.open("r+b") as fh:
+            fh.truncate(state["bytes"])
 
 
 class BucketIndex:
@@ -281,6 +380,29 @@ class BucketIndex:
         return self.db.execute("SELECT COUNT(DISTINCT ref) FROM keys").fetchone()[0]
 
 
+def trim_torn_tail(path: Path) -> None:
+    """Cut a last line an interrupted run left half-written (no final newline)."""
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    with path.open("r+b") as fh:
+        fh.seek(-1, 2)
+        if fh.read(1) == b"\n":
+            return
+        size = fh.seek(0, 2)
+        keep = 0
+        step = 1 << 16
+        while size > 0:
+            start = max(0, size - step)
+            fh.seek(start)
+            cut = fh.read(size - start).rfind(b"\n")
+            if cut != -1:
+                keep = start + cut + 1
+                break
+            size = start
+        fh.truncate(keep)
+    log(f"{path.name}: dropped a torn last line")
+
+
 # ---------------------------------------------------------------- notice pages
 
 
@@ -328,6 +450,7 @@ def step_scrape(out: Path, bases: list[str], http: Http, limit: int | None) -> N
         dest, missing = raw / f"{base}.jsonl", raw / f"{base}.missing.txt"
         done = set()
         for path in (dest, missing):
+            trim_torn_tail(path)
             if path.exists():
                 with path.open(encoding="utf-8") as fh:
                     for line in fh:
@@ -451,6 +574,7 @@ def step_fieldmap(out: Path, bases: list[str], http: Http, samples: int, docs_di
             ref_col = next((c for c in REF_COLUMNS if c in rows[0]), None) if rows else None
             if ref_col:
                 mapping[ref_col] = {"code": "REF", "list": False, "how": "reference column"}
+            check_required(base, name, mapping)
             dest.write_text(
                 json.dumps(
                     {"file": name, "samples": used, "map": mapping}, indent=2, ensure_ascii=False
@@ -465,6 +589,7 @@ def label_fallback(
     folder = {"rose-valland": "rose-valand"}.get(base, base)
     docs = docs_dir / folder / "field-docs.json"
     if not docs.exists():
+        log(f"fieldmap: no {docs}; columns the notice pages did not match keep their CSV name")
         return
     by_label = {
         squash(f["label"]): f
@@ -480,6 +605,18 @@ def label_fallback(
                 "how": "field-docs label",
             }
             taken.add(f["field"])
+
+
+def check_required(base: str, name: str, mapping: dict[str, dict[str, Any]]) -> None:
+    """Stop when a CSV maps no column to a code its base needs (`REQUIRED_CODES`)."""
+    codes = {m["code"] for m in mapping.values()}
+    missing = [code for code in REQUIRED_CODES.get(base, ()) if code not in codes]
+    if missing:
+        raise SystemExit(
+            f"fieldmap: {name}: no column maps to {', '.join(missing)} (rights). Pass "
+            "--field-docs with the July exports' field-docs.json, or add the column to "
+            f"_raw/fieldmap/{name}.json by hand, then rerun"
+        )
 
 
 def pick_samples(path: Path, n: int) -> list[dict[str, str]]:
@@ -594,12 +731,36 @@ def step_build(out: Path, bases: list[str], *, force: bool) -> None:
 
 
 def sources_changed(out: Path, base: str, meta_path: Path) -> bool:
-    old = json.loads(meta_path.read_text()).get("sourceEtags", {})
-    for name in CSV_BASES.get(base, []):
-        p = out / "_raw" / "csv" / f"{name}.meta.json"
-        if p.exists() and json.loads(p.read_text())["etag"] != old.get(name):
-            return True
-    return False
+    return json.loads(meta_path.read_text()).get("sourceFingerprint") != fingerprint(out, base)
+
+
+def fingerprint(out: Path, base: str) -> dict[str, str]:
+    """What a base's build reads: CSV etags, field maps, the bucket listing, scraped pages.
+
+    Lists and pages only grow, so their size stands for their content.
+    """
+    raw = out / "_raw"
+    names = list(CSV_BASES.get(base, []))
+    if base in ("merimee", "palissy", "autor"):
+        names += CSV_BASES["memoire"]  # their Mémoire photos
+    found: dict[str, str] = {}
+    for name in names:
+        meta = raw / "csv" / f"{name}.meta.json"
+        found[f"csv:{name}"] = json.loads(meta.read_text()).get("etag", "") if meta.exists() else ""
+        fmap = raw / "fieldmap" / f"{name}.json"
+        found[f"fieldmap:{name}"] = (
+            hashlib.sha256(fmap.read_bytes()).hexdigest() if fmap.exists() else ""
+        )
+    if base in BUCKET_PREFIX and base != "memoire":
+        found["bucket"] = _size(raw / "images" / f"{BUCKET_PREFIX[base]}.tsv")
+    if base in SCRAPED_BASES:
+        found["pages"] = _size(raw / "pages" / f"{base}.jsonl")
+        found["missing"] = _size(raw / "pages" / f"{base}.missing.txt")
+    return found
+
+
+def _size(path: Path) -> str:
+    return str(path.stat().st_size) if path.exists() else ""
 
 
 def images_for(
@@ -647,8 +808,13 @@ def build_csv_base(out: Path, base: str, mem: MemoireIndex | None) -> None:
                 log(f"build: {name} missing; run download first")
                 continue
             fmap = load_fieldmap(out, name)
+            check_required(base, name, fmap)
             meta_p = out / "_raw" / "csv" / f"{name}.meta.json"
             src_meta = json.loads(meta_p.read_text()) if meta_p.exists() else {}
+            if src_meta.get("complete") is False or path.stat().st_size != src_meta.get(
+                "size", path.stat().st_size
+            ):
+                raise SystemExit(f"build: {name} is not fully downloaded; run download first")
             sources[name] = {**src_meta, "licence": LICENCES.get(name), "fieldsMapped": len(fmap)}
             log(f"build: {base} reading {name}")
             for row in iter_csv(path):
@@ -688,6 +854,7 @@ def build_scraped_base(out: Path, base: str) -> None:
     if not src.exists():
         log(f"build: {base} has no scraped pages; run scrape first")
         return
+    trim_torn_tail(src)
     bucket = BucketIndex(out, BUCKET_PREFIX[base])
     folder = out / base
     folder.mkdir(parents=True, exist_ok=True)
@@ -763,6 +930,7 @@ def write_meta(
         **dict(counts),
         "sizeBytes": final.stat().st_size,
         "sourceEtags": {k: v.get("etag") for k, v in sources.items() if isinstance(v, dict)},
+        "sourceFingerprint": fingerprint(out, base),
         "generatedAt": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "script": "miroir/scripts/pop_full_export.py",
     }
@@ -781,7 +949,7 @@ def step_status(out: Path) -> None:
             log(f"  {base:13} {n:>9,} records  {imgs:>9,} images")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -790,7 +958,7 @@ def main() -> None:
         nargs="+",
         choices=["download", "list-images", "fieldmap", "scrape", "build", "status", "all"],
     )
-    ap.add_argument("--out", type=Path, default=Path.home() / "miroir-data" / "exports-full")
+    ap.add_argument("--out", type=Path, default=default_out(), help="default %(default)s")
     ap.add_argument("--bases", nargs="+", default=ALL_BASES, choices=ALL_BASES)
     ap.add_argument("--rate", type=float, default=2.0, help="requests per second (bucket, CSV)")
     ap.add_argument("--page-rate", type=float, default=1.0, help="notice pages per second")
@@ -800,13 +968,13 @@ def main() -> None:
     ap.add_argument(
         "--field-docs",
         type=Path,
-        default=Path.home() / "Downloads" / "exports",
-        help="existing exports, read for field labels only",
+        default=default_field_docs(),
+        help="the July exports ($MIROIR_EXPORTS_DIR), read for field labels only",
     )
     ap.add_argument("--scrape-limit", type=int, default=None)
     ap.add_argument("--max-gb", type=float, default=8.0)
     ap.add_argument("--force", action="store_true", help="rebuild even when sources are unchanged")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     steps = (
         ["download", "list-images", "fieldmap", "scrape", "build"] if "all" in a.steps else a.steps
     )

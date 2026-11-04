@@ -105,7 +105,7 @@ Every mapper turns a POP record into this shape:
 
 ### 3.4 Full export
 
-`scripts/pop_full_export.py` builds the full export from public sources, with no account. It writes `~/miroir-data/exports-full/<base>/<base>.jsonl` and a `metadata.json` per base (sources, licence, date, filter, counts). Records only: it downloads no image.
+`scripts/pop_full_export.py` builds the full export from public sources, with no account. It writes `$MIROIR_DATA_DIR/exports-full/<base>/<base>.jsonl` (`MIROIR_DATA_DIR` from the environment or `.env`, as `config.py` reads it) and a `metadata.json` per base (sources, licence, date, filter, counts, and a fingerprint of what the build read). Records only: it downloads no image.
 
 **Sources.**
 
@@ -114,7 +114,7 @@ Every mapper turns a POP record into this shape:
 - Rose-Valland and Enluminures have no open-data file (the MNR files in the ministry bucket refuse access). The script reads the record that each POP notice page carries (`pop.culture.gouv.fr/notice/<base>/<REF>`), at one page a second, for each REF that has images in the bucket.
 - `api.pop.culture.gouv.fr` is never called: its robots.txt forbids all robots.
 
-**Shape.** Keys are POP field codes where the script could match a CSV column to one: it compares values with 40 notice pages per file, then falls back to the labels in the July `field-docs.json`. Unmatched columns keep their CSV name; `_raw/fieldmap/<file>.json` lists every match. Each record gains `IMG`, `imageUrl`, `imageUrls`, `iiif_manifest` (with the base name the API accepts, `rose-valland` not `mnr`), `sourceCollection` and `sourceFile`. Records from notice pages keep every POP field. CSV records lack the internal POP fields (`POP_IMPORT`, `PRODUCTEUR` and so on), and their lists come from splitting on `;`.
+**Shape.** Keys are POP field codes where the script could match a CSV column to one: it compares values with 40 notice pages per file, then falls back to the labels in the July `field-docs.json` (`--field-docs`, default `MIROIR_EXPORTS_DIR`). Both `fieldmap` and `build` stop when a Mémoire file maps no column to `DIFF`: rights would be unknown (§11.1). Unmatched columns keep their CSV name; `_raw/fieldmap/<file>.json` lists every match. Each record gains `IMG`, `imageUrl`, `imageUrls`, `iiif_manifest` (with the base name the API accepts, `rose-valland` not `mnr`), `sourceCollection` and `sourceFile`. Records from notice pages keep every POP field. CSV records lack the internal POP fields (`POP_IMPORT`, `PRODUCTEUR` and so on), and their lists come from splitting on `;`.
 
 **Counts (October 2026).**
 
@@ -127,7 +127,7 @@ Every mapper turns a POP record into this shape:
 | `enluminures` | 76,373 REFs in the bucket | all | One notice page each: about 22 hours |
 | `rose-valland`, `museo` | from the bucket | see `metadata.json` | |
 
-**Rerun.** Each step resumes where it stopped; `all` runs them in order:
+**Rerun.** Each step resumes where it stopped: a CSV download goes on from the bytes it has (a server that ignores `Range` sends the whole file, which replaces the partial one), and a line half-written when a run stopped is dropped. `build` skips a base whose sources are unchanged: CSV etags, field maps, the bucket listing and the scraped pages. `all` runs the steps in order:
 
 ```sh
 python3 scripts/pop_full_export.py all      # download, list-images, fieldmap, scrape, build
