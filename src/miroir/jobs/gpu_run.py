@@ -398,8 +398,15 @@ class GpuRunner:
         photos, fetched here and sent as bytes. POP query images that are not publishable are
         left out. Needs a probe of the option, like a gallery run.
         """
-        opt = option(option_id)
         ids, label = tune_query_images(self.settings, set_ids)
+        return self.embed_query_images(option_id, ids, label, max_usd=max_usd)
+
+    def embed_query_images(
+        self, option_id: str, ids: Sequence[str], label: str, *, max_usd: float | None = None
+    ) -> VectorSet:
+        """`embed_queries` on given query image ids, into the run named for `label` (round
+        R4 embeds the sealed Commons photos this way, `miroir.eval.r4`)."""
+        opt = option(option_id)
         ids = self._store().only_publishable(ids)
         run = run_name(opt, label)
         out = self.settings.vectors_path(run)

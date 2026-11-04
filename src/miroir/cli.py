@@ -299,7 +299,6 @@ def eval_run(
     option: Annotated[str, typer.Option(help="Result file label, e.g. A1-dinov2-vitl14-224.")],
     vectors: Annotated[str, typer.Option(help="Vector run of the gallery.")],
     test_set: Annotated[str, typer.Option("--set", help="Test set id, e.g. T1.")],
-    half: Annotated[str, typer.Option(help="tune. The sealed half opens in R4 only.")] = "tune",
     query_vectors: Annotated[
         str | None, typer.Option(help="Vector run of the queries, if not the gallery's.")
     ] = None,
@@ -314,13 +313,12 @@ def eval_run(
         ),
     ] = False,
 ) -> None:
-    """Score a vector run on one test set half; write eval/results/<round>/<step>-<option>.json."""
+    """Score a vector run on one test set's tune half: eval/results/<round>/<step>-<option>.json.
+
+    The sealed halves open in round R4 only: `miroir eval r4`.
+    """
     from miroir.eval.run import score_test_set  # noqa: PLC0415
 
-    if half not in ("tune", "sealed"):
-        raise typer.BadParameter("half must be tune or sealed")
-    if half == "sealed" and round_id != "R4":
-        raise typer.BadParameter("the sealed half opens in round R4 only")
     scored = score_test_set(
         get_settings(),
         round_id=round_id,
@@ -328,13 +326,76 @@ def eval_run(
         option=option,
         vector_run=vectors,
         set_id=test_set,
-        half="tune" if half == "tune" else "sealed",
         query_vector_run=query_vectors,
         gallery=gallery,
-        allow_sealed=round_id == "R4",
         publishable_queries=publishable_queries,
     )
     _echo_scores([scored])
+
+
+r4_app = typer.Typer(
+    no_args_is_help=True, help="Round R4: the frozen stack on the sealed halves, once."
+)
+eval_app.add_typer(r4_app, name="r4")
+
+
+@r4_app.command("freeze")
+def r4_freeze(
+    index: Annotated[
+        list[str], typer.Option(help="Website bundle to score; repeat it, the chosen one first.")
+    ],
+    a7_option: Annotated[str, typer.Option(help="EmbeddingGemma 2 option of the bundle.")] = (
+        "A7-embeddinggemma-2-512"
+    ),
+    a3_option: Annotated[str, typer.Option(help="MegaLoc option of the bundle.")] = (
+        "A3-megaloc-322"
+    ),
+) -> None:
+    """Write eval/r4.json: a hash of every file that sets each bundle's ranking. Commit it."""
+    from miroir.eval import r4  # noqa: PLC0415
+
+    config = r4.freeze(get_settings(), index, a7_option=a7_option, a3_option=a3_option)
+    for stack in config.stacks:
+        typer.echo(f"{stack.index}: {len(stack.files)} files frozen; queries {stack.a7_query_run}")
+    typer.echo(f"wrote {r4.CONFIG}: commit it before `miroir eval r4 embed` and `run`")
+
+
+@r4_app.command("embed")
+def r4_embed(
+    option: Annotated[str, typer.Option(help="Model option id, e.g. A7-embeddinggemma-2-512.")],
+    max_usd: Annotated[float, typer.Option(help="Refuse a run projected above this.")],
+    max_hours: MaxHours = 2.0,
+) -> None:
+    """Embed the sealed T2, T2b and T8c photos on a Scaleway GPU (paid; the option's probe is
+    reused). The run is the one eval/r4.json names."""
+    from miroir.commons.images import open_commons_images  # noqa: PLC0415
+    from miroir.eval import r4  # noqa: PLC0415
+    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
+    from miroir.jobs.remote_spec import option as find_option  # noqa: PLC0415
+    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
+
+    find_option(option)  # fail before starting a machine
+    settings = get_settings()
+    config = r4.read_config()
+    ids, label = r4.sealed_query_images(settings, config)
+    with (
+        open_commons_images(settings) as commons,
+        open_scaleway(settings, max_hours=max_hours, purpose=f"R4 embed {option}") as calls,
+    ):
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage(), commons=commons)
+        done = runner.embed_query_images(option, ids, label, max_usd=max_usd)
+    typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
+
+
+@r4_app.command("run")
+def r4_run() -> None:
+    """Score every frozen bundle on every sealed half with the site's ranking; once."""
+    from miroir.eval import r4  # noqa: PLC0415
+
+    for scored in r4.run(get_settings(), r4.read_config()):
+        _echo_scores(list(scored.result.scores))
+        for set_id, row in scored.detail.items():
+            typer.echo(f"{set_id}: " + ", ".join(f"{k} {v:.3f}" for k, v in row.items()))
 
 
 @eval_app.command("crops")

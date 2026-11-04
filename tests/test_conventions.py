@@ -34,8 +34,8 @@ def test_dataclasses_are_frozen(module: Path) -> None:
 
 
 # Modules that may pass allow_sealed=True. Only R4 code reads the sealed half (CODING_STANDARDS
-# 19); eval/sets.py is here because write_set writes it.
-SEALED_ALLOWED = {"eval/sets.py"}
+# 19), in eval/r4.py; eval/sets.py is here because write_set writes it.
+SEALED_ALLOWED = {"eval/sets.py", "eval/r4.py"}
 
 
 @pytest.mark.parametrize("module", MODULES, ids=lambda p: str(p.relative_to(SRC)))

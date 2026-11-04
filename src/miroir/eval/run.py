@@ -10,7 +10,7 @@ from pathlib import Path
 
 from miroir.commons.images import commons_photos
 from miroir.commons.model import View, is_commons_image
-from miroir.config import Half, Settings, eval_result_path
+from miroir.config import Settings, eval_result_path
 from miroir.eval import amstertime
 from miroir.eval.rerank import MIX_INLIERS, SHORTLIST, Rerank, read_matches, rerank, search_times
 from miroir.eval.results import (
@@ -53,13 +53,12 @@ def score_test_set(
     option: str,
     vector_run: str,
     set_id: str,
-    half: Half,
     query_vector_run: str | None = None,
     gallery: str | None = None,
-    allow_sealed: bool = False,
     publishable_queries: bool = False,
 ) -> SetScore:
-    """Score one test set half and write it into eval/results/<round>/<step>-<option>.json.
+    """Score one test set's tune half and write it into eval/results/<round>/<step>-<option>.json.
+    The sealed halves open in round R4 only, through `miroir.eval.r4`.
 
     `gallery` names a list in the test sets' galleries folder (e.g. "screening-20k"); every
     image in it needs a vector. Without it, the gallery is the whole vector run.
@@ -76,15 +75,13 @@ def score_test_set(
         settings,
         vectors,
         set_id=set_id,
-        half=half,
         gallery=gallery,
-        allow_sealed=allow_sealed,
         publishable_queries=publishable_queries,
     )
     scored = set_score(
         score(asking, searched, queries),
         test_set=set_id,
-        half=half,
+        half="tune",
         gallery=gallery or vectors.info.gallery,
     )
     write_result(
@@ -106,15 +103,13 @@ def _search_inputs(
     vectors: VectorSet,
     *,
     set_id: str,
-    half: Half,
     gallery: str | None,
-    allow_sealed: bool,
     publishable_queries: bool,
 ) -> tuple[Gallery, list[SearchQuery]]:
     entity_of = entity_map(settings)
     ids = None if gallery is None else read_gallery(settings, gallery)
     searched = Gallery.from_vectors(vectors, entity_of, ids)
-    loaded = load_queries(settings, set_id, half, allow_sealed=allow_sealed)
+    loaded = load_queries(settings, set_id, "tune")
     if publishable_queries:
         loaded = publishable_only(settings, loaded, in_gallery=ids)
     return searched, search_queries(loaded)
@@ -141,9 +136,7 @@ def rerank_shortlists(
         settings,
         vectors,
         set_id=set_id,
-        half="tune",
         gallery=gallery,
-        allow_sealed=False,
         publishable_queries=True,
     )
     lists, plain = shortlists(vectors, searched, queries, top=top)
