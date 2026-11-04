@@ -10,6 +10,7 @@ import pytest
 from miroir.config import Settings
 from miroir.geo.model import Place, PlaceSource
 from miroir.records.store import write_places as write_places_parquet
+from miroir.web import engine as engine_module
 from miroir.web import facets, ranking
 from miroir.web.bundle import add_places
 from miroir.web.calibrate import cutoff_for
@@ -212,6 +213,26 @@ def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness()
     engine.levels = Levels(routes=(RouteLevels("building", 1.5, 0.0, 0.5, 0.0),))
     cards = engine.search(SearchRequest(image=h.photo(10))).cards
     assert [c.level for c in cards][:2] == [Level.CLOSE, Level.LIKENESS]
+
+
+def test_words_do_not_move_the_gap_a_photo_level_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Levels were set on photo-only rankings: the gap must be read over the photo's own top
+    # cards, not over the cards words (or a position) bring up. Photo 90 ranks OBJ1, PA1,
+    # OBJ2; "lièvre" lifts OBJ2 (the hare) to second.
+    monkeypatch.setattr(engine_module, "GAP_OVER", 2)
+    engine, encoders = h.engine(building=True)
+    mask = np.ones(len(engine.catalog.images), dtype=bool)
+    query = encoders.matrix[2]
+    photo = engine.photo_of(engine.vector_cosines(query, query, 30.0, mask, {}))
+    row = engine.catalog.entity_row
+    first, second, third = (photo.confidence(row[e]) for e in ("OBJ1", "PA1", "OBJ2"))
+    assert first > second > third
+    gap = (first - second + first - third) / 2  # between the photo's gap and the words' one
+    engine.levels = Levels(routes=(RouteLevels("building", 0.0, gap, None, None),))
+    plain = engine.search(SearchRequest(image=h.photo(90)))
+    refined = engine.search(SearchRequest(image=h.photo(90), text="lièvre"))
+    assert [c.entity_id for c in refined.cards] == ["OBJ1", "OBJ2", "PA1"]
+    assert plain.cards[0].level is refined.cards[0].level is Level.LIKENESS
 
 
 def test_without_levels_below_the_cutoff_every_card_is_a_likeness() -> None:

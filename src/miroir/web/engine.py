@@ -314,18 +314,21 @@ class Engine:
     def _levels(
         self, photo: _Photo | None, unplaced: Floats, fused: Floats, top: ranking.Ints
     ) -> list[Level]:
-        """Each card's level (`miroir.web.levels`). A photo search reads the photo's routed
-        cosines, whatever words refine it; words alone read the fused score, before any
-        position bonus."""
+        """Each card's level (`miroir.web.levels`). A photo search reads the first card's
+        routed cosines against the photo's own top cards (the photo-only ranking the levels
+        were set on, `miroir.eval.levels`), whatever words, a caption or a position change in
+        the order; words alone read the fused score, before any position bonus."""
         if not len(top):
             return []
-        head = ranking.top_entities(fused, GAP_OVER)
         if photo is not None:
             route = photo.bucket
-            over = [photo.confidence(int(r)) for r in head]
+            first = int(top[0])
+            head = ranking.top_entities(photo.ranking.fused, GAP_OVER)
+            others = [int(r) for r in head if int(r) != first][: GAP_OVER - 1]
+            over = [photo.confidence(r) for r in (first, *others)]
         else:
             route = WORDS_ROUTE
-            over = [float(unplaced[r]) for r in head]
+            over = [float(unplaced[r]) for r in ranking.top_entities(fused, GAP_OVER)]
         rule = None if self.levels is None else self.levels.for_route(route)
         if rule is not None:
             return rule.card_levels(len(top), over)
