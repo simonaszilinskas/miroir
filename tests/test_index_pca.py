@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from miroir.eval.vectors import Route, RunInfo, read_vectors, write_vectors
 from miroir.index.pca import fit_pca, load_pca, project, save_pca, write_projected
@@ -62,3 +63,12 @@ def test_saved_pca_projects_the_same_and_runs_note_it(tmp_path: Path) -> None:
     assert small.ids == tuple(ids)
     assert small.dim == 8
     assert "PCA 40 -> 8 dims fitted on run" in small.info.notes
+
+
+def test_a_row_at_the_mean_is_refused_not_turned_into_nan(tmp_path: Path) -> None:
+    x = cloud()
+    run = write_vectors(tmp_path / "run", [f"i{n}" for n in range(len(x))], x, INFO)
+    pca = fit_pca(run, 4, "run")
+    rows = np.vstack([x[:3], pca.mean[None, :]])
+    with pytest.raises(ValueError, match="1 row"):
+        project(pca, rows)
