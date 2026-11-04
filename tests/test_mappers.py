@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from miroir.records.images import ImageSkip
-from miroir.records.mappers import DESCRIPTION_MAX_CHARS, MapResult, RecordSkip, map_record
+from miroir.records.mappers import (
+    DESCRIPTION_MAX_CHARS,
+    MapResult,
+    RawRecord,
+    RecordSkip,
+    map_record,
+)
 from miroir.records.model import Collection, ImageType, Record
 from tests.helpers import raw_record
 
@@ -126,6 +132,36 @@ def test_publishable() -> None:
     assert not _record(J, "000SC026869").publishable  # DIFFU = "non"
     assert not _record(M, "MHR93_00054348").publishable  # DIFF asks for permission
     assert _record(RV, "OAR00119").publishable
+
+
+def _without(raw: RawRecord, code: str) -> dict[str, object]:
+    return {key: value for key, value in raw.items() if key != code}
+
+
+def test_missing_rights_field_is_not_publishable() -> None:
+    joconde = raw_record(J, "M0569000124")  # DIFFU ""
+    memoire = raw_record(M, "AP2322T000470")  # DIFF ""
+    assert _publishable(J, joconde)
+    assert not _publishable(J, _without(joconde, "DIFFU"))
+    assert not _publishable(M, _without(memoire, "DIFF"))
+    assert not _publishable(M, {**memoire, "DIFF": None})
+    assert not _publishable(M, {**memoire, "DIFF": 0})
+
+
+def test_list_rights_values_are_read_whole() -> None:
+    memoire = raw_record(M, "AP2322T000470")
+    joconde = raw_record(J, "M0569000124")
+    asks = ["communication libre", "reproduction soumise à autorisation du titulaire"]
+    assert not _publishable(M, {**memoire, "DIFF": asks})
+    assert _publishable(M, {**memoire, "DIFF": []})
+    assert not _publishable(J, {**joconde, "DIFFU": ["non"]})
+    assert _publishable(J, {**joconde, "DIFFU": [""]})
+
+
+def _publishable(collection: Collection, raw: RawRecord) -> bool:
+    record = map_record(collection, raw).record
+    assert record is not None
+    return record.publishable
 
 
 def test_rose_valland_uses_mongo_collection_in_pop_url() -> None:

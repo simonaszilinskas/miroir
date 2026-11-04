@@ -8,9 +8,16 @@ from miroir.records.mappers import RawRecord
 from miroir.records.model import Collection
 
 FIXTURE_EXPORTS = Path(__file__).parent / "fixtures" / "exports"
+FIXTURE_FULL = Path(__file__).parent / "fixtures" / "exports-full"
 
 
 def raw_record(collection: Collection, ref: str) -> RawRecord:
     """One real export line from tests/fixtures/exports, by REF."""
     path = Settings(exports_dir=FIXTURE_EXPORTS).export_jsonl(collection)
+    return next(raw for raw in iter_raw(path) if raw["REF"] == ref)
+
+
+def full_raw_record(base: str, ref: str) -> RawRecord:
+    """One real line of the full export from tests/fixtures/exports-full, by REF."""
+    path = FIXTURE_FULL / base / f"{base}.jsonl"
     return next(raw for raw in iter_raw(path) if raw["REF"] == ref)
