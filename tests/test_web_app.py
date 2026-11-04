@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 from collections.abc import Iterator
@@ -347,6 +348,44 @@ def test_a_server_fault_is_a_500_not_an_unreadable_photo(tmp_path: Path) -> None
     response = broken.post("/api/search", json={"image": image})
     assert response.status_code == 500
     assert "lue" not in response.json()["detail"]
+
+
+class _SlowBackend(LocalBackend):
+    """Each search takes `SLOW_S`, and is counted."""
+
+    calls = 0
+
+    async def search(self, request: SearchRequest) -> SearchResponse:
+        type(self).calls += 1
+        await asyncio.sleep(SLOW_S)
+        return await super().search(request)
+
+
+SLOW_S = 0.75
+
+
+def test_a_retry_waits_for_the_search_already_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_module, "SEARCH_WAIT_S", 0.5)
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=_SlowBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    body = {"image": base64.b64encode(h.photo(130)).decode()}
+    with TestClient(app) as slow:  # one event loop: the first call goes on between requests
+        login(slow)
+        assert slow.post("/api/search", json=body).status_code == 503
+        assert slow.post("/api/search", json=body).status_code == 200  # joined the first call
+        assert _SlowBackend.calls == 1
+        other = {"image": base64.b64encode(h.photo(90)).decode()}
+        assert slow.post("/api/search", json=other).status_code == 503
+        assert _SlowBackend.calls == 2
 
 
 def test_a_photo_too_large_to_decode_is_unreadable(

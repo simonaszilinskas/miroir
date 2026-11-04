@@ -18,9 +18,9 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
@@ -225,6 +225,8 @@ class Site:
     facet_options: FacetOptions
     fetch: Callable[[str], Awaitable[bytes]]
     example_cache: dict[str, bytes]
+    running: dict[str, asyncio.Future[object]]
+    """Backend calls still running, by `_call_key`: a retry joins its call."""
     chat: ChatService | None
     """The conversation page (step H5); None when no model is set up."""
     on_visit: Callable[[], None]
@@ -284,6 +286,7 @@ def create_app(
         facet_options=catalog.facet_options(),
         fetch=fetch or _fetch,
         example_cache={},
+        running={},
         chat=None if chat is None else chat(fetch or _fetch),
         on_visit=on_visit or _nothing,
         notice=notice,
@@ -474,7 +477,8 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
         caption=body.caption,
     )
     start = time.monotonic()
-    result = await _wait_for(site.backend.search(request), "search")
+    key = _call_key("search", session_id, request.image, replace(request, image=None))
+    result = await _wait_for(site, key, lambda: site.backend.search(request), "search")
     _log_search(request, result, time.monotonic() - start)
     return result
 
@@ -488,7 +492,8 @@ async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outl
     if image is None:
         raise HTTPException(status_code=422, detail="Ajoutez une photo.")
     start = time.monotonic()
-    found = await _wait_for(site.backend.detect(image), "detect")
+    key = _call_key("detect", session_id, image)
+    found = await _wait_for(site, key, lambda: site.backend.detect(image), "detect")
     logger.info(
         "detect image=%s outlines=%d %.0f ms",
         hashlib.sha256(image).hexdigest()[:12],
@@ -498,15 +503,32 @@ async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outl
     return found
 
 
-async def _wait_for[T](work: Awaitable[T], what: str) -> T:
-    """The backend's answer, or 503 when the models are still loading.
+def _forget(site: Site, key: str, done: object) -> None:
+    if site.running.get(key) is done:
+        del site.running[key]
 
-    Just after the demo machine powers on, the models may still be loading onto the GPU. Rather
-    than hold the request open that long, a call gives up after `SEARCH_WAIT_S` with 503 and
-    the page retries (Caddy, in front, waits for the site meanwhile). The call itself goes on
-    (shielded), so the models keep loading.
+
+def _call_key(what: str, session_id: str, photo: bytes | None, rest: object = None) -> str:
+    """Names one backend call: the same session asking the same thing again."""
+    digest = hashlib.sha256(f"{what}\0{session_id}\0{rest!r}\0".encode())
+    digest.update(photo or b"")
+    return digest.hexdigest()
+
+
+async def _wait_for[T](site: Site, key: str, start: Callable[[], Awaitable[T]], what: str) -> T:
+    """The backend's answer, or 503 when it takes longer than `SEARCH_WAIT_S`.
+
+    The GPU runs one call at a time, so a search may wait behind others (or, on a machine just
+    powered on, behind the models loading). Rather than hold the request open that long, a
+    call gives up after `SEARCH_WAIT_S` with 503 and the page retries. The call itself goes on
+    (shielded), and the retry, under the same `key`, waits for that call instead of queueing
+    a second one.
     """
-    call = asyncio.ensure_future(work)
+    call = cast("asyncio.Future[T] | None", site.running.get(key))
+    if call is None:
+        call = asyncio.ensure_future(start())
+        site.running[key] = cast("asyncio.Future[object]", call)
+        call.add_done_callback(lambda done: _forget(site, key, done))
     try:
         return await asyncio.wait_for(asyncio.shield(call), SEARCH_WAIT_S)
     except TimeoutError as err:
