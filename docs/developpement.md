@@ -9,11 +9,15 @@ How to set up the repository, run the checks and use the `miroir` command. Rules
 Requirements: Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv sync                  # base, dev tools and the api, openrouter, scaleway extras (no torch)
+uv sync                  # base, dev tools and the api, fetch, scaleway extras (no torch)
 cp .env.example .env     # then set the two directories below
 make check               # ruff format check, ruff lint, pyright strict, pytest
 make ui                  # the site's page (web-ui/, needs Node 20+): built into src/miroir/web/ui/
 ```
+
+Outside the dev setup, a base install runs `records` and `testsets build`; the `fetch` extra
+(httpx, Pillow) adds Commons, `geo`, image fetches, OpenRouter, Mistral and `eval`; `api` the
+website; `scaleway` its machines. `tests/test_extras.py` checks those bounds.
 
 `make check` is what CI runs (`.github/workflows/check.yml`) and must pass before every commit.
 `make fmt` formats and applies automatic lint fixes.

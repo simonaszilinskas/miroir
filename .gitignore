@@ -7,6 +7,14 @@ data/
 *.jpeg
 *.png
 *.gif
+# Arrays, databases and model weights
+*.npy
+*.npz
+*.sqlite
+*.safetensors
+*.pt
+*.bin
+*.onnx
 # ...except small committed text fixtures
 !tests/fixtures/**/*.jsonl
 # ...and hand-made label checks
