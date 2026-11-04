@@ -7,9 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
+from miroir.eval.scoring import first_rank
 from miroir.eval.sets import Query
 from miroir.eval.words import Draw, Length, Register, parse_written
-from miroir.eval.wordsearch import Signals, hit_at, rank_of, ranks, weighted
+from miroir.eval.wordsearch import Signals, hit_at, ranks, weighted
 from miroir.records.model import Collection
 from miroir.web import ranking
 from miroir.web.engine import word_signals
@@ -47,12 +48,10 @@ def test_written_answers_keep_french_and_optional_english() -> None:
     assert parse_written("pas de JSON") is None
 
 
-def test_rank_of_breaks_ties_as_the_site_does() -> None:
+def test_a_tie_counts_against_the_words() -> None:
     scores = np.asarray([0.5, 0.9, 0.5, -np.inf, 0.1], dtype=np.float32)
-    order = list(ranking.top_entities(scores, 5))
-    for row in (0, 1, 2, 4):
-        assert rank_of(scores, row) == order.index(row) + 1
-    assert rank_of(scores, 3) == 5
+    assert [first_rank(scores, [row]) for row in (0, 1, 2, 4)] == [3, 1, 3, 4]
+    assert first_rank(scores, [3]) == 6  # left out: past every entity
 
 
 def test_weighted_mix_is_the_sites_fuse() -> None:

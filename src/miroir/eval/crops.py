@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from miroir.eval.scoring import first_rank, tie_ranks
 from miroir.jobs.crop_slice import A7_SETS
 from miroir.web import ranking
 
@@ -116,16 +117,6 @@ def fused(e7: Floats, e3: Floats, a7_weight: float) -> Floats:
         if s.weight > 0
     ]
     return ranking.fuse(signals)
-
-
-def right_rank(scores: Floats, right: Sequence[int]) -> int:
-    """Rank of the first right entity, ties to the lower row (`ranking.top_entities`); past
-    every entity when it is out of the ranking; 0 when there is no right entity to find."""
-    if not right:
-        return 0
-    order = ranking.top_entities(scores, len(scores))
-    position = np.flatnonzero(np.isin(order, right))
-    return int(position[0]) + 1 if position.size else len(scores) + 1
 
 
 # --- the full index, summarised on the machine --------------------------------------------
@@ -218,10 +209,10 @@ def full_rank(
         alive &= finite
         total += weight * np.where(finite, (values - lo) / span, 0.0)
     total[~alive] = -np.inf
-    best = max(right, key=lambda r: total[r])
-    if not np.isfinite(total[best]):
+    alive_right = [r for r in right if np.isfinite(total[r])]
+    if not alive_right:
         return len(full.top) + 1
-    return int((total > total[best]).sum()) + 1
+    return tie_ranks(total, alive_right)[0]
 
 
 # --- the slice ---------------------------------------------------------------------------------
@@ -320,7 +311,7 @@ def rank_slice(
             e7, e3 = groups.entity_max(s7), groups.entity_max(s3)
             mix = fused(e7, e3, float(scores.a7_weight[q]))
             alive = [r for r in right if np.isfinite(e7[r])]
-            out.ranks[variant.name].append(right_rank(mix, alive))
+            out.ranks[variant.name].append(first_rank(mix, alive))
             top = ranking.top_entities(mix, 1)
             out.first[variant.name].append(groups.entity_ids[int(top[0])] if len(top) else "")
     return out

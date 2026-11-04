@@ -51,6 +51,7 @@ from miroir.eval.scoring import (
     entity_scores,
     paired_bootstrap,
     per_query_values,
+    tie_ranks,
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
 from miroir.eval.stack import combined_info
@@ -162,13 +163,9 @@ def rank(searched: Searched, change: Change) -> ScoreResult:
             skipped += 1
             continue
         row = scores[j]
-        ranks = sorted(
-            int((row > row[c]).sum() + (row[:c] == row[c]).sum()) + 1
-            if np.isfinite(row[c])
-            else worst
-            for c in codes
-        )
-        found = [r for r in ranks if r < worst]
+        alive = [c for c in codes if np.isfinite(row[c])]
+        found = tie_ranks(row, alive) if alive else []
+        ranks = [*found, *[worst] * (len(codes) - len(alive))]
         ap = average_precision(found) * len(found) / len(ranks) if found else 0.0
         per_query.append(QueryScore(searched.query_ids[j], ranks[0], ap))
     return ScoreResult(

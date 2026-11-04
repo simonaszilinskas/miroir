@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from miroir.eval.scoring import first_rank
 from miroir.eval.vectors import Route, RunInfo, write_vectors
 from miroir.web.bundle import write_shortlist_store
 from miroir.web.engine import A3_FILE, SearchRequest, read_projection
-from miroir.web.measure import right_rank
 from miroir.web.store import (
     ExactStore,
     quantize_rows,
@@ -109,6 +109,6 @@ def test_a_bundle_without_int8_rows_has_no_store(tmp_path: Path) -> None:
 
 def test_a_right_answer_off_the_shortlist_is_a_miss_not_a_skipped_query() -> None:
     fused = np.asarray([0.9, -np.inf, 0.2], dtype=np.float32)
-    assert right_rank(fused, [2]) == 2
-    assert right_rank(fused, [1]) == 4  # past every entity: counts against hit@k
-    assert right_rank(fused, []) == 0
+    assert first_rank(fused, [2]) == 2
+    assert first_rank(fused, [1]) == 4  # past every entity: counts against hit@k
+    assert first_rank(fused, []) == 0

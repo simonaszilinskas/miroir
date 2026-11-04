@@ -20,8 +20,10 @@ from miroir.eval.scoring import (
     QueryScore,
     SearchQuery,
     bootstrap,
+    first_rank,
     paired_bootstrap,
     score,
+    tie_ranks,
 )
 from miroir.eval.vectors import Route, RunInfo, VectorSet
 
@@ -93,11 +95,27 @@ def test_ap_cut_at_max_rank() -> None:
     assert (hit.rank, hit.ap) == (2, 0.0)
 
 
-def test_ties_break_by_entity_id() -> None:
+def test_a_tie_with_a_wrong_entity_counts_against_the_query() -> None:
     run = vector_set({"a": [1, 0], "b": [1, 0], "q": [1, 0.01]})
     gallery = Gallery.from_vectors(run, {"a": "A", "b": "B"}, ["a", "b"])
     ranks = [score(run, gallery, [SearchQuery("q", "q", (e,))]).per_query[0].rank for e in "AB"]
-    assert ranks == [1, 2]
+    assert ranks == [2, 2]  # whichever is right, the tied wrong one goes first
+
+
+def test_right_entities_tied_together_do_not_push_each_other_down() -> None:
+    run = vector_set({"a": [1, 0], "b": [1, 0], "c": [0, 1], "q": [1, 0.01]})
+    gallery = Gallery.from_vectors(run, {"a": "A", "b": "B", "c": "C"}, ["a", "b", "c"])
+    hit = score(run, gallery, [SearchQuery("q", "q", ("A", "B"))]).per_query[0]
+    assert (hit.rank, hit.ap) == (1, 1.0)
+
+
+def test_tie_ranks_put_every_tied_wrong_entity_first() -> None:
+    scores = np.asarray([0.5, 0.9, 0.9, 0.9, -np.inf], dtype=np.float32)
+    assert tie_ranks(scores, [2]) == [3]
+    assert tie_ranks(scores, [2, 0]) == [3, 4]
+    assert tie_ranks(scores, [2, 1]) == [2, 3]
+    assert first_rank(scores, [4]) == 6  # off the ranking: past every entity
+    assert first_rank(scores, []) == 0
 
 
 def test_rejects_query_without_vector() -> None:

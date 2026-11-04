@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 from pydantic import ConfigDict
 
 from miroir.config import Settings
+from miroir.eval.scoring import first_rank
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.web import ranking
@@ -228,19 +229,9 @@ def search_set(
             for e in asked.right[j]
             if (r := catalog.entity_row.get(e)) is not None and np.isfinite(e7[j, r])
         ]
-        ranks.append(right_rank(fused, right))
+        # A right answer the ranking leaves out (-inf: off a MegaLoc shortlist) is a miss.
+        ranks.append(first_rank(fused, right))
     return Searched(np.asarray(ranks), np.asarray(confidence), tuple(buckets))
-
-
-def right_rank(fused: Floats, right: Sequence[int]) -> int:
-    """Rank of the first right entity (rows `right`, each with an image left to find); 0 when
-    there is none. One the ranking leaves out (-inf: off a MegaLoc shortlist) is a miss, ranked
-    past every entity, not a query skipped."""
-    if not right:
-        return 0
-    order = ranking.top_entities(fused, len(fused))
-    position = np.flatnonzero(np.isin(order, right))
-    return int(position[0]) + 1 if position.size else len(fused) + 1
 
 
 def entity_cosines(
@@ -327,8 +318,11 @@ def site_search(
             for e in best:
                 found = ranking.best_image(catalog.entity_image_rows(int(e)), per_image, shown)
                 images.append("" if found is None else catalog.images[found].image_id)
-            wanted = [catalog.entity_row[e] for e in right[q] if e in catalog.entity_row]
-            position = np.flatnonzero(np.isin(order, wanted)) if wanted else np.empty(0)
+            wanted = [
+                r
+                for e in right[q]
+                if (r := catalog.entity_row.get(e)) is not None and np.isfinite(e7[r])
+            ]
             out.append(
                 SiteHit(
                     bucket=bucket.name,
@@ -336,7 +330,7 @@ def site_search(
                     entities=tuple(catalog.entity_ids[int(e)] for e in best),
                     confidences=tuple(float(w * e7[e] + (1 - w) * e3[e]) for e in best),
                     best_images=tuple(images),
-                    right_rank=int(position[0]) + 1 if position.size else 0,
+                    right_rank=first_rank(fused, wanted),
                 )
             )
     return out

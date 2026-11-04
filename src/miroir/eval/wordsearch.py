@@ -31,7 +31,7 @@ from numpy.typing import NDArray
 from miroir.config import WEB_INDEX, Settings, eval_result_path
 from miroir.eval.bm25 import Bm25
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
-from miroir.eval.scoring import QueryScore, ScoreResult
+from miroir.eval.scoring import QueryScore, ScoreResult, first_rank
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors
 from miroir.eval.words import EN_SET_ID, SET_ID, WRITER
@@ -156,19 +156,10 @@ def weighted(a7_weight: float) -> Mixer:
     return mix
 
 
-def rank_of(scores: Floats, row: int) -> int:
-    """Where entity `row` lands in `ranking.top_entities` order (1 = first)."""
-    value = scores[row]
-    if not np.isfinite(value):
-        return int(np.isfinite(scores).sum()) + 1
-    ahead = int((scores > value).sum()) + int((scores[:row] == value).sum())
-    return ahead + 1
-
-
 def ranks(signals: Signals, mixer: Mixer) -> NDArray[np.int64]:
     return np.asarray(
         [
-            rank_of(mixer(signals.a7[j], signals.bm25[j]), int(signals.right[j]))
+            first_rank(mixer(signals.a7[j], signals.bm25[j]), [int(signals.right[j])])
             for j in range(len(signals.query_ids))
         ],
         dtype=np.int64,
@@ -432,7 +423,7 @@ def score_refine(
             for refine in REFINE_GRID:
                 signals = photo + [ranking.Signal(s.per_entity, s.weight * refine) for s in said]
                 fused = ranking.fuse([s for s in signals if s.weight > 0])
-                per_weight[refine].append(rank_of(fused, right) <= 10)
+                per_weight[refine].append(first_rank(fused, [right]) <= 10)
         hits[set_id] = {w: float(np.mean(v)) for w, v in per_weight.items()}
         counts[set_id] = len(queries)
         logger.info("refine %s (%d queries): %s", set_id, len(queries), hits[set_id])

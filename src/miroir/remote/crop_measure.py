@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 from miroir.config import WEB_INDEX_MOUNT, WEIGHTS_MOUNT, Settings
+from miroir.eval.scoring import first_rank
 from miroir.images.colour import chroma_spread
 from miroir.jobs.bulk import JobState, JobStatus, full_key, status_key
 from miroir.jobs.crop_measure import (
@@ -40,7 +41,6 @@ from miroir.jobs.objects import Bucket, bucket_name, download_tree, s3_client
 from miroir.remote.search import load_search
 from miroir.web import ranking
 from miroir.web.engine import Engine, SearchRequest, prepare_photo, unit
-from miroir.web.measure import right_rank
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def _search(engine: Engine, query, vectors, variants) -> QueryRanks:
         timings: dict[str, float] = {}
         tick = time.monotonic()
         cosines = engine.vector_cosines(a7, a3, chroma, shown, timings)
-        rank = right_rank(ranking.fuse(engine.photo_of(cosines).signals), right)
+        rank = first_rank(ranking.fuse(engine.photo_of(cosines).signals), right)
         ms = 1000 * (time.monotonic() - tick)
         got[name] = (rank, ms, timings.get("crops", 0.0), cosines.bucket.name)
     engine.crops = full

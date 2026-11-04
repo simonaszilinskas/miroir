@@ -4,8 +4,9 @@ Search is flat: every query is compared with every gallery image (NumPy, no appr
 Images are grouped by entity: an entity scores the best of its images, and the ranking is a
 ranking of entities. A query is right at rank r when one of its right entities is r-th.
 
-Ties between entities with the same score are broken by entity id order, so results never
-depend on row order and never flatter an option by counting a tie as a win.
+A right entity tied with a wrong one ranks after it (`tie_ranks`), so results never depend
+on row order and a tie never counts as a win: records that share an image both score 1.0,
+and the site's display order (lower entity id first) would otherwise pick a side.
 """
 
 from __future__ import annotations
@@ -248,15 +249,18 @@ def rank_entities(
         raise ValueError(msg)
     code_of = {name: i for i, name in enumerate(scores.entity_ids)}
     results: list[QueryScore] = []
-    skipped = 0
+    skipped = tied = 0
     for j, query in enumerate(queries):
         scored = _score_one(query, scores.values[j], code_of, ap_max_rank)
         if scored is None:
             skipped += 1
         else:
-            results.append(scored)
+            results.append(scored[0])
+            tied += scored[1]
     if skipped:
         logger.warning("skipped %d of %d queries: no answer in gallery", skipped, len(queries))
+    if tied:
+        logger.info("%d of %d queries: right entity tied with a wrong one", tied, len(queries))
     return ScoreResult(
         per_query=tuple(results),
         skipped_no_answer=skipped,
@@ -303,7 +307,7 @@ def shortlists(
         right = [c for c in coded if np.isfinite(values[c])]
         if not right:
             continue
-        ranked = np.argsort(-values, kind="stable")  # ties: lower entity id first
+        ranked = np.argsort(-values, kind="stable")  # display order: lower entity id first
         best = [int(c) for c in ranked[:top] if np.isfinite(values[c])]
         asked: Floats = np.asarray(query_vectors.vectors[query_row[query.image_id]], np.float32)
         hidden = {query.image_id, *query.excluded_image_ids}
@@ -319,7 +323,7 @@ def shortlists(
                 entity_ids=tuple(scores.entity_ids[c] for c in best),
                 image_ids=tuple(images),
                 scores=tuple(float(values[c]) for c in best),
-                right_ranks=tuple((scores.entity_ids[c], _rank(values, c)) for c in right),
+                right_ranks=tuple((scores.entity_ids[c], first_rank(values, [c])) for c in right),
             )
         )
     return tuple(lists), plain
@@ -331,8 +335,27 @@ def average_precision(ranks: Sequence[int]) -> float:
     return sum((i + 1) / r for i, r in enumerate(ordered)) / len(ordered)
 
 
-def _rank(scores: Floats, c: int) -> int:
-    return int((scores > scores[c]).sum() + (scores[:c] == scores[c]).sum()) + 1
+def tie_ranks(scores: NDArray[np.floating], right: Sequence[int]) -> list[int]:
+    """Ranks from 1 of the right entities `right` (finite scores), best first. A wrong entity
+    tied with a right one ranks before it; right entities tied together keep their places."""
+    others = np.delete(scores, list(right))
+    values = sorted((float(scores[c]) for c in right), reverse=True)
+    return [i + 1 + int((others >= v).sum()) for i, v in enumerate(values)]
+
+
+def first_rank(scores: NDArray[np.floating], right: Sequence[int]) -> int:
+    """Rank of the best right entity, ties counted against it (`tie_ranks`); past every entity
+    when none is left in the ranking (-inf); 0 when there is no right entity to find."""
+    if not right:
+        return 0
+    alive = [c for c in right if np.isfinite(scores[c])]
+    return tie_ranks(scores, alive)[0] if alive else len(scores) + 1
+
+
+def tied_with_wrong(scores: NDArray[np.floating], right: Sequence[int]) -> bool:
+    """The best right entity shares its score with a wrong one."""
+    best = max(float(scores[c]) for c in right)
+    return bool((np.delete(scores, list(right)) == best).any())
 
 
 def _check_queries(queries: Sequence[Asked]) -> None:
@@ -346,17 +369,17 @@ def _check_queries(queries: Sequence[Asked]) -> None:
 
 def _score_one(
     query: SearchQuery, scores: Floats, code_of: Mapping[str, int], ap_max_rank: int | None
-) -> QueryScore | None:
+) -> tuple[QueryScore, bool] | None:
+    """The query's score, and whether its best right entity ties a wrong one."""
     right = [code_of[e] for e in dict.fromkeys(query.entity_ids) if e in code_of]
     right = [c for c in right if np.isfinite(scores[c])]
     if not right:
         return None
-    ranks = sorted(
-        int((scores > scores[c]).sum() + (scores[:c] == scores[c]).sum()) + 1 for c in right
-    )
+    ranks = tie_ranks(scores, right)
     cut = ap_max_rank if ap_max_rank is not None else len(scores)
     ap = sum((i + 1) / r for i, r in enumerate(ranks) if r <= cut) / len(ranks)
-    return QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap)
+    scored = QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap)
+    return scored, tied_with_wrong(scores, right)
 
 
 def hits(result_ranks: Sequence[int], k: int) -> NDArray[np.float64]:
