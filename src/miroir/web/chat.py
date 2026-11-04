@@ -239,6 +239,8 @@ class Conversation:
         self.query_images: dict[str, bytes] = {}
         """Transformed photos the model searched, kept for it to look at, by key."""
         self.task: asyncio.Future[None] | None = None
+        self.running = False
+        """A turn is under way: set when it starts, cleared just before its end event."""
         self.pending: _Pending | None = None
         self.started = False
         self.known: dict[str, CardView] = {}
@@ -341,10 +343,6 @@ class Conversation:
     def log(self, line: Mapping[str, JSON]) -> None:
         self.service.log.write(self.day, self.id, line)
 
-    @property
-    def running(self) -> bool:
-        return self.task is not None and not self.task.done()
-
 
 class ChatService:
     """Every open conversation, and the means they share."""
@@ -375,6 +373,7 @@ class ChatService:
         self._clock = clock
         self._today = today or (lambda: datetime.now(UTC).date().isoformat())
         self._conversations: dict[str, Conversation] = {}
+        self._background: set[asyncio.Future[None]] = set()
         self.log: ChatLog = log or NoLog()
 
     def today(self) -> str:
@@ -448,6 +447,7 @@ class ChatService:
             raise BusyError(msg)
         conversation.touched = self._clock()
         after = len(conversation.events)
+        conversation.running = True
         conversation.task = asyncio.ensure_future(self._turn(conversation, given))
         return after
 
@@ -503,20 +503,30 @@ class ChatService:
             logger.exception("chat %s: turn failed", c.id[:8])
             c.emit({"type": "error", "text": chat_prompts.TURN_FAILED})
             c.log({"type": "error"})
-        c.emit({"type": "end", "waiting": waiting})
-        c.log(
-            {
-                "type": "end",
-                "waiting": waiting,
-                "searches": c.method.turn.searches,
-                "lock": c.method.turn.lock,
-                "best": list(c.method.best),
-                "spent_usd": round(c.spent_usd, 6),
-                "calls": c.calls,
-                "ms": _ms(start),
-            }
-        )
-        await self.log.flush()
+        finally:
+            c.log(
+                {
+                    "type": "end",
+                    "waiting": waiting,
+                    "searches": c.method.turn.searches,
+                    "lock": c.method.turn.lock,
+                    "best": list(c.method.best),
+                    "spent_usd": round(c.spent_usd, 6),
+                    "calls": c.calls,
+                    "ms": _ms(start),
+                }
+            )
+            # Not running before the end is told: the visitor may write as soon as they read
+            # it, and the stream closes with it. The log is made durable in the background.
+            c.running = False
+            c.emit({"type": "end", "waiting": waiting})
+            self._later(self.log.flush())
+
+    def _later(self, work: Awaitable[None]) -> None:
+        """Run `work` in the background, kept until it is done."""
+        task = asyncio.ensure_future(work)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     async def _take(self, c: Conversation, given: VisitorInput) -> None:
         """Add what the visitor sent to the messages."""
