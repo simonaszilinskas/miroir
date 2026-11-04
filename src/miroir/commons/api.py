@@ -9,12 +9,12 @@ import html
 import logging
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import batched
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from miroir.commons.client import MAXLAG_S, WikimediaClient
 from miroir.config import COMMONS_API_URL, WIKIDATA_SPARQL_URL
@@ -31,6 +31,8 @@ THUMB_WIDTH = 960
 CATEGORY_FILES = 50
 #: Titles per imageinfo call (the API's limit).
 TITLES_PER_CALL = 50
+#: Answers one query may take to send all its props (`continue`) before we give up.
+MAX_CONTINUES = 50
 
 _ENTITY = "http://www.wikidata.org/entity/"
 _FILE_PATH = "http://commons.wikimedia.org/wiki/Special:FilePath/"
@@ -177,11 +179,20 @@ class _Page(BaseModel):
     extlinks: list[_Link] = []
 
 
+class _Normalized(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    from_: str = Field(alias="from")
+    to: str
+
+
 class _Query(BaseModel):
     pages: list[_Page] = []
+    normalized: list[_Normalized] = []
 
 
 class _Answer(BaseModel):
+    batchcomplete: bool = False
+    continue_: dict[str, str | int] | None = Field(default=None, alias="continue")
     query: _Query | None = None
 
 
@@ -214,27 +225,57 @@ def category_files(client: WikimediaClient, category: str) -> CategoryListing:
         "gcmsort": "timestamp",
         "gcmdir": "desc",
     }
-    pages = _pages(client.get_json(COMMONS_API_URL, params))
+    pages, _ = _query(client, params)
     files = tuple(f for p in pages if (f := _file(p)) is not None)
     subcategories = tuple(sorted(p.title for p in pages if p.ns == 14))
     return CategoryListing(files, subcategories)
 
 
 def files_by_title(client: WikimediaClient, titles: Iterable[str]) -> dict[str, CommonsFile]:
-    """Image info for files named by title, 50 per call. Missing files are left out."""
+    """Image info for files named by title, 50 per call, keyed by the title asked (the API
+    may spell it otherwise: "File:A_b.jpg" is "File:A b.jpg"). Missing files are left out."""
     found: dict[str, CommonsFile] = {}
     for chunk in batched(sorted(set(titles)), TITLES_PER_CALL):
         params = {**_imageinfo_params(), "titles": "|".join(chunk)}
-        for page in _pages(client.get_json(COMMONS_API_URL, params)):
-            file = _file(page)
+        pages, normalized = _query(client, params)
+        files = {f.title: f for p in pages if (f := _file(p)) is not None}
+        for title in chunk:
+            file = files.get(normalized.get(title, title))
             if file is not None:
-                found[file.title] = file
+                found[title] = file
     return found
 
 
-def _pages(payload: object) -> list[_Page]:
-    answer = _Answer.model_validate(payload)
-    return [] if answer.query is None else answer.query.pages
+def _query(
+    client: WikimediaClient, params: Mapping[str, str]
+) -> tuple[list[_Page], dict[str, str]]:
+    """The pages of one query, and how it normalised the titles asked.
+
+    Follows `continue` until the batch is complete: a page's links can spread over several
+    answers. A generator's next batch is not fetched (the newest files come first).
+    """
+    pages: dict[str, _Page] = {}
+    normalized: dict[str, str] = {}
+    more: dict[str, str] = {}
+    for _ in range(MAX_CONTINUES):
+        answer = _Answer.model_validate(client.get_json(COMMONS_API_URL, {**params, **more}))
+        if answer.query is not None:
+            normalized.update({n.from_: n.to for n in answer.query.normalized})
+            for page in answer.query.pages:
+                pages[page.title] = _merge(pages.get(page.title), page)
+        if answer.batchcomplete or answer.continue_ is None:
+            return list(pages.values()), normalized
+        more = {k: str(v) for k, v in answer.continue_.items()}
+    msg = f"Commons query still incomplete after {MAX_CONTINUES} answers: {dict(params)}"
+    raise RuntimeError(msg)
+
+
+def _merge(old: _Page | None, new: _Page) -> _Page:
+    """One page from two answers of a continued query: the first imageinfo, every link."""
+    if old is None:
+        return new
+    update = {"imageinfo": old.imageinfo or new.imageinfo, "extlinks": old.extlinks + new.extlinks}
+    return old.model_copy(update=update)
 
 
 def _file(page: _Page) -> CommonsFile | None:
