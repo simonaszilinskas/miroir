@@ -85,6 +85,7 @@ WORKER_LIBRARIES = (
     "fastapi==0.143.0",
     "starlette==1.7.0",
     "uvicorn==0.54.0",
+    "mcp==2.3.0",
 )
 SSH_TIMEOUT_S = 10 * 60
 BUILD_TIMEOUT_S = 40 * 60
