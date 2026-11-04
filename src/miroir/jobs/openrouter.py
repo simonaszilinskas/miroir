@@ -226,6 +226,23 @@ def jpeg_data_url(jpeg_b64: str) -> str:
 # --- the client -------------------------------------------------------------------
 
 
+def key_usage_usd(
+    api_key: SecretStr | None, *, transport: httpx.BaseTransport | None = None
+) -> float | None:
+    """What OpenRouter says the key has spent, for the project-wide cap; None without a key,
+    or when OpenRouter cannot say (the ledger alone then counts)."""
+    if api_key is None:
+        return None
+    client = OpenRouterClient(api_key, transport=transport)
+    try:
+        return client.key_spend().usage_usd
+    except (OpenRouterError, httpx.HTTPError) as err:
+        logger.warning("could not read OpenRouter's spend (%s); counting the ledger only", err)
+        return None
+    finally:
+        client.close()
+
+
 class OpenRouterClient:
     def __init__(
         self,

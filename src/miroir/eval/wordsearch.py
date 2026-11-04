@@ -65,6 +65,10 @@ REFINE_SETS = ("T1", "T2", "T5")
 GALLERY_LABEL = f"web-{WEB_INDEX}"
 #: Label of the text vector run (`miroir words embed`): T7, T7en and the refine communes.
 TEXT_LABEL = "T7-T7en-places-tune-words"
+#: The model whose text tower the website searches words with (A7).
+TEXT_OPTION = "A7-embeddinggemma-2-512"
+#: Its run of the T7 and refine words (`miroir words embed`).
+TEXT_RUN = f"{TEXT_OPTION}-{TEXT_LABEL}"
 QUERY_BATCH = 64
 
 
@@ -460,3 +464,39 @@ def text_inputs(settings: Settings) -> tuple[list[str], list[str]]:
 
 def _today() -> date:
     return datetime.now(UTC).date()
+
+
+def score_lines(settings: Settings, *, round_id: str, refine: bool) -> list[str]:
+    """Score T7 tune (one result file per option) and, with `refine`, words refining a photo;
+    describe both in a few lines."""
+    from miroir.eval.router3 import query_chroma  # noqa: PLC0415 (fetches photos)
+
+    t7 = score_t7(settings, TEXT_RUN, round_id=round_id)
+    out = [
+        "T7 hit@10 by A7 weight: "
+        + ", ".join(f"{w:.1f} {100 * h:.1f}" for w, h in t7.grid.items()),
+        f"best A7 weight {t7.best_weight:.1f}",
+    ]
+    mixers = (
+        ("BM25", weighted(0.0)),
+        ("A7", weighted(1.0)),
+        ("0.5", weighted(0.5)),
+        (f"{t7.best_weight:.1f}", weighted(t7.best_weight)),
+    )
+    for part in t7.subsets:
+        line = ", ".join(f"{n} {100 * hit_at(ranks(part.signals, m)):.1f}" for n, m in mixers)
+        out.append(f"{part.label} ({len(part.signals.query_ids)} q) hit@10: {line}")
+    if not refine:
+        return out
+    catalog = read_catalog(settings.web_index_dir(WEB_INDEX) / CATALOG_FILE)
+    # Colour matters for Commons photos of buildings (T2); POP photos route by type alone.
+    places = place_queries(settings, catalog)
+    chroma = query_chroma(settings, sorted({q.query_image_id for q in places if q.set_id == "T2"}))
+    words = TextWeights(a7=t7.best_weight, bm25=round(1 - t7.best_weight, 1))
+    found = score_refine(settings, TEXT_RUN, words, chroma)
+    out += [
+        f"refine {set_id} ({found.queries[set_id]} q) hit@10 by words weight: "
+        + ", ".join(f"{w:g} {100 * h:.1f}" for w, h in hits.items())
+        for set_id, hits in found.hits.items()
+    ]
+    return out

@@ -391,6 +391,16 @@ class PartsReport:
     tried: Counter[str]
     """Entities read per kind before the kind had its pairs."""
 
+    def lines(self) -> list[str]:
+        """Queries per kind and half, entities read, then pairs per rule."""
+        out = [f"{'kind':<14} {'tune':>5} {'sealed':>6} {'read':>6}"]
+        out += [
+            f"{k.value:<14} {self.tune[k.value]:>5} {self.sealed[k.value]:>6}"
+            f" {self.tried[k.value]:>6}"
+            for k in Kind
+        ]
+        return [*out, f"why: {dict(self.rules)}"]
+
 
 def draw_pairs(
     settings: Settings, kinds: Mapping[str, Kind], per_kind: int = PER_KIND, seed: int = SEED

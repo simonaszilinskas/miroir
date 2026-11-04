@@ -159,6 +159,10 @@ class Interval:
     low: float
     high: float
 
+    def percent(self) -> str:
+        """ "81.2 [74.0, 88.1]": the value and its interval, in percent."""
+        return f"{100 * self.value:.1f} [{100 * self.low:.1f}, {100 * self.high:.1f}]"
+
 
 @dataclass(frozen=True, slots=True)
 class Difference:

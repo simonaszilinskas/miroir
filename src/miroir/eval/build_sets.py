@@ -111,6 +111,32 @@ class BuildReport:
     """Images in `screening-v2` and not in `screening-20k`: what a run must still embed."""
     delta_publishable: int = 0
 
+    def lines(self) -> list[str]:
+        """A table of the sets' sizes against the spec, then the galleries' sizes."""
+        out = [
+            f"{'set':<4} {'tune':>6} {'sealed':>6} {'total':>6} {'dropped':>7} {'spec':>7}"
+            f" {'closed-ok':>9}"
+        ]
+        for s in self.sets:
+            flag = "" if s.meets_spec else "  differs from spec §7"
+            spec = f"{'>=' if s.at_least else ''}{s.spec}"
+            out.append(
+                f"{s.set_id:<4} {s.tune:>6} {s.sealed:>6} {s.tune + s.sealed:>6} {s.dropped:>7}"
+                f" {spec:>7} {s.closed_ok:>9}{flag}"
+            )
+        out.append(
+            f"galleries: full {self.full}, screening {self.screening} ({self.needed} needed by "
+            f"queries, {self.screening - self.needed} distractors), screening publishable "
+            f"{self.screening_publishable}"
+        )
+        if self.screening_v2:
+            out.append(
+                f"screening-v2 {self.screening_v2} ({self.delta} new), "
+                f"screening-v2-publishable {self.screening_v2_publishable} "
+                f"({self.delta_publishable} new)"
+            )
+        return out
+
 
 class RecordIndex:
     """Lookups over the record table."""

@@ -26,6 +26,7 @@ slice test's 3x3 table (`Scores.crops3`); everything else is the slice test's.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -34,11 +35,14 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from miroir.config import Settings, eval_result_path
 from miroir.eval.crops import (
     VARIANTS,
     QueryCase,
     Scores,
     by_group,
+    cases_of,
+    load_scores,
     look_alikes,
     rank_full,
     rank_slice,
@@ -461,3 +465,52 @@ def shifted(crop: Halves, short_whole: Floats, exact_whole: Floats) -> Halves:
     crop matches better than its photo; the exact cosine gives the scale."""
     moved = crop.astype(np.float32) - short_whole + exact_whole
     return moved.astype(np.float16)
+
+
+def measure_slice(settings: Settings) -> Path:
+    """Score shorter crop vectors on the crop slice (`miroir scw crop-short-slice` first);
+    write eval/results/R3/SL-crop-short.json and return its path."""
+    from miroir.jobs.crop_embed import SLICE_NAME, crops_dir  # noqa: PLC0415
+    from miroir.jobs.crop_slice import read_spec, slice_dir, slice_queries  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client  # noqa: PLC0415
+
+    folder = slice_dir(settings)
+    spec = read_spec((folder / "spec.json").read_bytes())
+    scores = load_scores(folder, spec)
+    cases = cases_of(spec, slice_queries(settings))
+    mine = crops_dir(settings, SLICE_NAME)
+    with np.load(mine / "queries.npz", allow_pickle=False) as data:
+        at = {str(q): i for i, q in enumerate(data["query_ids"].tolist())}
+        queries = np.asarray(data["a3"], dtype=np.float32)[[at[q] for q in scores.query_ids]]
+    with np.load(folder / "crops.npz", allow_pickle=False) as data:
+        columns = [str(f) for f in data["files"].tolist()]
+    projection_path = mine / "pop-all-a3_projection.npz"
+    if not projection_path.exists():
+        s3_client(settings).download_file(
+            bucket_name(settings, Bucket.INDEX), "pop-all/a3_projection.npz", str(projection_path)
+        )
+    with np.load(projection_path, allow_pickle=False) as data:
+        pop_pca = Projection(
+            np.asarray(data["mean"], np.float32), np.asarray(data["components"], np.float32)
+        )
+    right = {e for c in cases for e in c.right}
+    answer_files = {
+        f for f, e in zip(spec.files, scores.row_entities, strict=True) if f and e in right
+    }
+    short_path = mine / "gallery-a3-pca1024.npy"
+    out = run_measure(
+        scores,
+        cases,
+        load_pieces(mine),
+        queries,
+        columns=columns,
+        pop_pca=pop_pca,
+        answer_files=answer_files,
+        gallery_short=np.load(short_path) if short_path.exists() else None,
+    )
+    trial = mine / "trial.json"
+    if trial.exists():
+        out["trial"] = json.loads(trial.read_text())
+    path = eval_result_path("R3", "SL", "crop-short")
+    path.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+    return path

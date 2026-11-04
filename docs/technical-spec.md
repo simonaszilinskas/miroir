@@ -523,7 +523,7 @@ miroir/
   scripts/         pop_full_export.py, the full POP export (§3.4)
   src/miroir/
     config.py      every setting and path (MIROIR_DATA_DIR, MIROIR_EXPORTS_DIR, WEB_INDEX)
-    cli.py         the `miroir` command; every entry point is a subcommand
+    cli/           the `miroir` command, one module per group (records, eval, web, scw...); thin
     records/       record model, mappers per base, Parquet store  (`miroir records build`, `build-full`)
     images/        image helpers (fetch, colour, perceptual hash, finding a print on its card); no local image store
     commons/       Wikimedia Commons photos for T2, T2b, T8c and the F2 gallery

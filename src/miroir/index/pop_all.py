@@ -322,3 +322,25 @@ def build_on_machine(settings: Settings, work: Path) -> JobStatus:
         f"built in {words_s:.0f} s",
     )
     return status
+
+
+def run_pop_index(settings: Settings, *, max_hours: float) -> list[JobStatus]:
+    """Build the `pop-all` bundle on a machine with much memory; it lands in the index
+    bucket. The vectors must be in the images bucket (`pop-download`, `pop-embed`)."""
+    from miroir.jobs.objects import s3_client  # noqa: PLC0415
+    from miroir.jobs.scaleway import MEMORY_OFFERS  # noqa: PLC0415
+    from miroir.jobs.scw_bulk import index_launch, run_unattended  # noqa: PLC0415
+
+    merged = settings.scaleway_dir / "pop-all-tables"
+    records, images = merged_tables(settings, merged)
+    logger.info("tables: %d records, %d image rows", records, images)
+    sent = upload_inputs(settings, s3_client(settings), input_files(settings, merged))
+    logger.info("inputs: %d file(s) sent", sent)
+    return run_unattended(
+        settings,
+        index_launch(settings),
+        offers=MEMORY_OFFERS,
+        max_hours=max_hours,
+        purpose="pop-index",
+        poll_s=120.0,
+    )

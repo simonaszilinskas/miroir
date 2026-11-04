@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from miroir.config import Settings
 from miroir.jobs.objects import Stored, listing, part_bytes
 from miroir.parallel import bounded_map
 from miroir.web.crops import (
@@ -175,3 +176,38 @@ def crop_file_paths(folder: Path) -> list[Path]:
         RULE_FILE, "crops-facts.json",
     )  # fmt: skip
     return [folder / n for n in names]
+
+
+def build_crop_bundle(settings: Settings, *, dims: int, rule: CropRule) -> dict[str, int]:
+    """Build `NAME` in the index bucket: `SOURCE` copied there, plus the crop files made from
+    the crop run's pieces (downloaded to the Scaleway folder first). Returns the crop files'
+    facts. No model."""
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    from miroir.jobs.crop_embed import FULL_NAME, crops_dir, fetch_job  # noqa: PLC0415
+    from miroir.jobs.crop_slice import IMAGE_FILES, slice_dir  # noqa: PLC0415
+    from miroir.jobs.objects import Bucket, bucket_name, s3_client, upload_files  # noqa: PLC0415
+
+    s3 = s3_client(settings)
+    index = bucket_name(settings, Bucket.INDEX)
+    fetch_job(settings, s3, FULL_NAME)
+    folder = crops_dir(settings, FULL_NAME)
+    ids = (slice_dir(settings) / "ids.txt").read_text(encoding="utf-8").split()
+    table = pq.read_table(settings.scaleway_dir / IMAGE_FILES, columns=["image_id", "file_id"])  # pyright: ignore[reportUnknownMemberType]
+    columns = table.to_pydict()
+    file_of = dict(zip(columns["image_id"], columns["file_id"], strict=True))
+    out = settings.scaleway_dir / NAME / NAME
+    facts = write_crop_files(
+        piece_paths(folder),
+        out,
+        index_ids=ids,
+        file_of=file_of,
+        projection=folder / "projection.npz",
+        dims=dims,
+        rule=rule,
+    )
+    copied = copy_bundle(s3, index, SOURCE, NAME)
+    copy_whole(s3, bucket_name(settings, Bucket.IMAGES), FULL_NAME, index, NAME)
+    upload_files(s3, index, out.parent, crop_file_paths(out))
+    logger.info("%s: %d file(s) of %s copied, crop files sent", NAME, copied, SOURCE)
+    return facts

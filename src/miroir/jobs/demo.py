@@ -514,6 +514,116 @@ def install(
     start_containers(shell, machine, settings, index, gpu=has_gpu(machine.commercial_type))
 
 
+def reinstall(demo: Demo, machine: DemoMachine, shell: Shell, index: str) -> float:
+    """`install` on the running machine, then wait for the site. Returns the seconds waited."""
+    install(shell, demo.settings, machine, index)
+    served(demo, index)
+    assert machine.url is not None
+    return wait_site(machine.url)
+
+
+def create_site(demo: Demo, index: str) -> tuple[DemoMachine, float]:
+    """Make the demo machine (`create_demo`) and install the site on it. Returns the machine
+    and the seconds the site took to answer after the install."""
+    public = demo_key(demo.settings).with_suffix(".pub").read_text().strip()
+    machine = create_demo(demo, public)
+    assert machine.address is not None
+    logger.info("machine %s running at %s; installing", machine.server_id, machine.address)
+    shell = demo_shell(demo.settings, machine.address)
+    shell.wait()
+    return machine, reinstall(demo, machine, shell, index)
+
+
+@dataclass(frozen=True, slots=True)
+class Up:
+    """The demo machine powered on and its site answering (`bring_up`)."""
+
+    machine: DemoMachine
+    offer: Offer
+    gpu: bool
+    boot_s: float
+    total_s: float
+    idle_minutes: int
+
+
+def bring_up(
+    demo: Demo,
+    machine: DemoMachine,
+    *,
+    idle_minutes: int | None,
+    allow_cpu: bool,
+    only: str | None,
+    index: str | None,
+) -> Up:
+    """Power the machine on (`Demo.power_on`), fit the containers to its hardware, set its
+    idle timer, and wait until the site answers."""
+    start = time.monotonic()
+    machine = demo.power_on(machine, allow_cpu=allow_cpu, only=only)
+    if machine.address is None or machine.url is None:
+        msg = f"the demo machine is {machine.state} after powering on"
+        raise RuntimeError(msg)
+    booted = time.monotonic() - start
+    shell = demo_shell(demo.settings, machine.address)
+    shell.wait()  # "running" comes a little before SSH answers
+    bundle = index or read_state(demo.state_path).index or DEMO_INDEX
+    gpu = fit_hardware(shell, machine, demo.settings, bundle)
+    shell.run(idle_command(idle_minutes), timeout=60)
+    wait_site(machine.url)
+    return Up(
+        machine,
+        offer_of(machine.commercial_type),
+        gpu,
+        booted,
+        time.monotonic() - start,
+        idle_minutes or demo.settings.demo_idle_minutes,
+    )
+
+
+def minutes_since_visit(shell: Shell) -> float | None:
+    """Minutes since the site's last visitor, or None when nobody came since it started."""
+    seen = shell.run(f"stat -c %Y {ROOT}/state/{LAST_VISIT} 2>/dev/null || true", timeout=30)
+    return (time.time() - float(seen)) / 60 if seen.strip() else None
+
+
+def pull_chat_logs(settings: Settings, shell: Shell) -> tuple[list[Path], Path]:
+    """Copy the conversation logs (JSON lines, no images) that are new or grew on the machine
+    into `chat_logs_dir/hosted`. Returns the files written and that folder."""
+    import shlex  # noqa: PLC0415
+
+    from miroir.web.chatlog import pull  # noqa: PLC0415
+
+    folder = f"{ROOT}/state/{CHAT_LOGS}"
+
+    def names() -> list[str]:
+        found = shell.run(f"cd {folder} 2>/dev/null && find . -name '*.jsonl' || true")
+        return [line.removeprefix("./") for line in found.splitlines() if line.strip()]
+
+    def read(name: str) -> bytes:
+        return shell.run(f"cat {shlex.quote(f'{folder}/{name}')}").encode()
+
+    target = settings.chat_logs_dir / "hosted"
+    return pull(names, read, target), target
+
+
+def fetch_bundle(settings: Settings, index: str) -> tuple[int, int]:
+    """On the machine: copy the bundle and the weights from their buckets onto its disk.
+    Returns the files copied of each."""
+    from miroir.jobs.objects import (  # noqa: PLC0415
+        Bucket,
+        bucket_name,
+        download_tree,
+        link_siblings,
+        s3_client,
+    )
+
+    s3 = s3_client(settings)
+    root = Path(MOUNTS["web-index"])
+    link_siblings(s3, bucket_name(settings, Bucket.INDEX), root, f"{index}/")
+    got = download_tree(s3, bucket_name(settings, Bucket.INDEX), root, prefix=f"{index}/")
+    weights = download_tree(s3, bucket_name(settings, Bucket.WEIGHTS), Path(MOUNTS["weights"]))
+    return got, weights
+
+
 def start_containers(
     shell: Shell, machine: DemoMachine, settings: Settings, index: str, *, gpu: bool
 ) -> None:

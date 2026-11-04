@@ -28,6 +28,8 @@ from miroir.jobs.demo import (
     find_demo,
     has_gpu,
     hostname,
+    minutes_since_visit,
+    pull_chat_logs,
     read_state,
     rest_eur_per_hour,
     should_power_off,
@@ -43,6 +45,7 @@ from miroir.jobs.scaleway import (
     delete_leftovers,
     leftovers,
 )
+from miroir.jobs.scw_run import Shell
 from miroir.web.app import create_app
 from miroir.web.fake import LocalBackend
 from miroir.web.visits import VisitMark, last_visit
@@ -467,3 +470,32 @@ def test_tool_search_gathers_its_filter_facts_ahead() -> None:
     facts = tools._facts
     assert facts is not None
     assert len(facts.bases) == engine.catalog.entity_count
+
+
+class LogShell:
+    """Answers `find` with two log files and `cat` with their text; `stat` with a time."""
+
+    def __init__(self, visited: str) -> None:
+        self.visited = visited
+
+    def run(self, command: str, **_: object) -> str:
+        if command.startswith("cd "):
+            return "./2026-11-04/abc.jsonl\n./2026-11-04/def.jsonl\n"
+        if command.startswith("stat "):
+            return self.visited
+        return '{"turn": 1}\n'
+
+
+def test_chat_logs_come_back_once(settings: Settings) -> None:
+    shell = cast("Shell", LogShell(""))
+    written, target = pull_chat_logs(settings, shell)
+    assert target == settings.chat_logs_dir / "hosted"
+    assert sorted(p.name for p in written) == ["abc.jsonl", "def.jsonl"]
+    assert pull_chat_logs(settings, shell)[0] == []
+
+
+def test_the_last_visit_is_none_until_someone_comes() -> None:
+    assert minutes_since_visit(cast("Shell", LogShell(""))) is None
+    seen = minutes_since_visit(cast("Shell", LogShell("0")))
+    assert seen is not None
+    assert seen > 0

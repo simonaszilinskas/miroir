@@ -46,6 +46,14 @@ class PlacesReport:
         total = sum(n for (c, _), n in self.counts.items() if c == collection)
         return placed, total
 
+    def lines(self) -> list[str]:
+        """Entities per (collection, source), then each collection's coverage."""
+        out = [f"{c:<14}{s:<36}{n:>8,}" for (c, s), n in sorted(self.counts.items())]
+        for collection in sorted({c for c, _ in self.counts}):
+            placed, total = self.coverage(collection)
+            out.append(f"{collection}: {placed:,} of {total:,} entities placed")
+        return out
+
 
 def place_entities(
     records: Sequence[Record],
