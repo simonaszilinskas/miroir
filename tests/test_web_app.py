@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -19,6 +19,7 @@ from miroir.web import app as app_module
 from miroir.web import auth
 from miroir.web.app import create_app
 from miroir.web.bundle import MANIFEST_FILE
+from miroir.web.chat import ChatService
 from miroir.web.engine import SearchRequest, SearchResponse
 from miroir.web.fake import LocalBackend
 from miroir.web.ops import (
@@ -386,6 +387,68 @@ def test_a_retry_waits_for_the_search_already_running(
         other = {"image": base64.b64encode(h.photo(90)).decode()}
         assert slow.post("/api/search", json=other).status_code == 503
         assert _SlowBackend.calls == 2
+
+
+class _Conversation:
+    id = "c1"
+
+
+class _QuietChat:
+    """Opens conversations whose events stream ends at once."""
+
+    def open(self, *args: object, **kwargs: object) -> _Conversation:
+        del args, kwargs
+        return _Conversation()
+
+    def get(self, session: str, conversation_id: str) -> _Conversation:
+        del session, conversation_id
+        return _Conversation()
+
+    async def stream(self, conversation: object, after: int) -> AsyncIterator[dict[str, object]]:
+        del conversation, after
+        for event in ():
+            yield event
+
+
+def _chat_client(tmp_path: Path) -> TestClient:
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=LocalBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        chat=lambda _: cast("ChatService", _QuietChat()),
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    return TestClient(app)
+
+
+def test_new_conversations_are_capped_per_session_per_day(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth, "CONVERSATIONS_PER_DAY", 2)
+    monkeypatch.setattr(auth, "SEARCHES_PER_MINUTE", 100)
+    chat = _chat_client(tmp_path)
+    login(chat)
+    codes = [chat.post("/api/chat/open", json={"text": "un pont"}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    chat.cookies.clear()
+    login(chat)  # another session has its own count
+    assert chat.post("/api/chat/open", json={"text": "un pont"}).status_code == 200
+
+
+def test_event_streams_and_wake_ups_are_rate_limited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth, "CALLS_PER_MINUTE", 3)
+    chat = _chat_client(tmp_path)
+    login(chat)
+    body = {"conversation_id": "c1"}
+    codes = [chat.post("/api/chat/events", json=body).status_code for _ in range(3)]
+    assert codes == [200, 200, 200]
+    assert chat.post("/api/chat/events", json=body).status_code == 429
+    assert chat.post("/api/warm").status_code == 429
 
 
 def test_a_photo_too_large_to_decode_is_unreadable(

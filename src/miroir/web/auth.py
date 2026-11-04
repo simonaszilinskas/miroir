@@ -1,8 +1,8 @@
 """Access behind one shared password (functional spec §8), signed cookies, and rate limits.
 
 A session is a random id with an expiry, signed with HMAC-SHA256. Nothing is stored on the
-server, so a container restart keeps people logged in. Rate limits are kept in memory: the
-web container runs alone (max one container), so one counter sees every request.
+server, so a restart keeps people logged in. Rate limits are kept in memory: the site runs
+as one process, so one counter sees every request.
 """
 
 from __future__ import annotations
@@ -21,8 +21,15 @@ COOKIE = "miroir_session"
 SESSION_SECONDS = 7 * 24 * 3600
 #: Searches per session per minute (each one may wake a GPU).
 SEARCHES_PER_MINUTE = 30
-#: Login attempts per client address per minute.
+#: Login attempts per client address per minute. Behind Caddy the address is the visitor's:
+#: Caddy sets X-Forwarded-For, and uvicorn trusts it from the loopback only
+#: (`miroir.remote.site`).
 LOGINS_PER_MINUTE = 5
+#: Other calls per session per minute: the page's wake-up and the agent's event streams.
+CALLS_PER_MINUTE = 120
+#: New conversations (agentic searches) per session per day: each may cost up to the
+#: conversation cap, and the day cap is shared by every visitor.
+CONVERSATIONS_PER_DAY = 30
 #: Letters used for generated passwords: no 0/o, 1/l/i, easy to type on a phone.
 _PASSWORD_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789"  # noqa: S105 (an alphabet)  # gitleaks:allow
 

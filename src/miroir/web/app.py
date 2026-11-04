@@ -222,6 +222,8 @@ class Site:
     search_limit: auth.RateLimit
     detect_limit: auth.RateLimit
     login_limit: auth.RateLimit
+    call_limit: auth.RateLimit
+    conversation_limit: auth.RateLimit
     facet_options: FacetOptions
     fetch: Callable[[str], Awaitable[bytes]]
     example_cache: dict[str, bytes]
@@ -283,6 +285,8 @@ def create_app(
         search_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
         detect_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
         login_limit=auth.RateLimit(auth.LOGINS_PER_MINUTE),
+        call_limit=auth.RateLimit(auth.CALLS_PER_MINUTE),
+        conversation_limit=auth.RateLimit(auth.CONVERSATIONS_PER_DAY, window_s=24 * 3600),
         facet_options=catalog.facet_options(),
         fetch=fetch or _fetch,
         example_cache={},
@@ -387,6 +391,7 @@ async def _chat_page() -> RedirectResponse:
 
 @api.post("/login")
 async def login(body: LoginBody, request: Request, site: SiteDep) -> JSONResponse:
+    # The visitor's address: uvicorn reads it from Caddy's X-Forwarded-For (`remote.site`).
     client = request.client.host if request.client else "unknown"
     if not site.login_limit.allow(client):
         raise HTTPException(status_code=429, detail="Trop d’essais. Réessayez dans une minute.")
@@ -417,7 +422,8 @@ async def me(_: SessionId) -> dict[str, bool]:
 
 
 @api.post("/warm")
-async def warm(_: SessionId, site: SiteDep) -> dict[str, bool]:
+async def warm(session_id: SessionId, site: SiteDep) -> dict[str, bool]:
+    _calls_allowed(site, session_id)
     await site.backend.warm()
     return {"ok": True}
 
@@ -584,6 +590,11 @@ def _chat(site: Site) -> ChatService:
     return site.chat
 
 
+def _calls_allowed(site: Site, session_id: str) -> None:
+    if not site.call_limit.allow(session_id):
+        raise HTTPException(status_code=429, detail="Trop de demandes en une minute.")
+
+
 def _position(body: PositionBody | None) -> Position | None:
     return None if body is None else Position(body.latitude, body.longitude)
 
@@ -602,6 +613,11 @@ async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) ->
     image = _decode_photo(body.image)
     if image is None and not body.text.strip():
         raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
+    if not site.conversation_limit.allow(session_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Assez de recherches approfondies pour aujourd’hui. Revenez demain.",
+        )
     found = chat.open(
         session_id,
         photo=image,
@@ -639,6 +655,7 @@ async def chat_send(body: ChatSendBody, session_id: SessionId, site: SiteDep) ->
 async def chat_events(body: ChatEventsBody, session_id: SessionId, site: SiteDep) -> Response:
     """What the model does, one JSON object per line, as it happens."""
     chat = _chat(site)
+    _calls_allowed(site, session_id)
     conversation = chat.get(session_id, body.conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation introuvable. Recommencez.")
