@@ -6,11 +6,21 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 from PIL import Image as PILImage
 
 from miroir.http import send
-from miroir.images.fetch import FetchSkip, ImageCache, ImageFetcher, iiif_url, to_jpeg
+from miroir.images.fetch import (
+    LONG_SIDE,
+    RECIPE,
+    FetchSkip,
+    ImageCache,
+    ImageFetcher,
+    cache_key,
+    iiif_url,
+    to_jpeg,
+)
 from miroir.parallel import bounded_map
 from miroir.records.model import Collection, Image, ImageType
 from tests.fakes import NO_WAIT, FakePop, jpeg
@@ -209,3 +219,57 @@ def test_a_consumer_that_stops_still_gets_the_calls_in_flight() -> None:
     assert next(out) == 0
     out.close()  # as when the consumer raises BudgetError
     assert all(n in {1, 2, 3} for n in saved)
+
+
+def _open_jpeg(data: bytes) -> PILImage.Image:
+    image = PILImage.open(io.BytesIO(data))
+    image.load()
+    return image
+
+
+def _encoded(image: PILImage.Image, fmt: str, **options: object) -> bytes:
+    out = io.BytesIO()
+    image.save(out, format=fmt, **options)
+    return out.getvalue()
+
+
+def test_to_jpeg_turns_an_image_upright_as_its_exif_says() -> None:
+    wide = PILImage.new("RGB", (40, 20), (200, 30, 30))
+    exif = PILImage.Exif()
+    exif[0x0112] = 6  # orientation: the camera was turned; show it rotated 90 degrees
+    out = _open_jpeg(to_jpeg(_encoded(wide, "JPEG", exif=exif.tobytes()), 512))
+    assert out.size == (20, 40)
+
+
+def test_to_jpeg_puts_transparency_on_white_not_black() -> None:
+    clear = PILImage.new("RGBA", (16, 16), (0, 0, 0, 0))
+    for mode in ("RGBA", "LA"):
+        out = _open_jpeg(to_jpeg(_encoded(clear.convert(mode), "PNG")))
+        assert np.asarray(out).min() > 245
+
+
+def test_to_jpeg_scales_16_bit_grey_instead_of_clipping_it() -> None:
+    grey = PILImage.fromarray(np.full((8, 8), 32768, dtype=np.uint16))
+    assert grey.mode.startswith("I")
+    value = np.asarray(_open_jpeg(to_jpeg(_encoded(grey, "PNG"))))[4, 4, 0]
+    assert 120 < value < 136  # half of white, not 255
+
+
+def test_to_jpeg_shrinks_palette_images_smoothly() -> None:
+    stripes = np.zeros((64, 64), dtype=np.uint8)
+    stripes[:, ::2] = 255  # one-pixel stripes: NEAREST keeps them hard, LANCZOS greys them
+    palette = PILImage.fromarray(stripes).convert("P")
+    out = np.asarray(_open_jpeg(to_jpeg(_encoded(palette, "PNG"), 16)).convert("L"))
+    assert 60 < out.mean() < 200
+    assert out.std() < 40
+
+
+def test_the_cache_path_names_the_size_and_recipe(tmp_path: Path) -> None:
+    cache = ImageCache(tmp_path / "cache", None)
+    cache.put("ab00000000000001", b"jpeg")
+    assert (tmp_path / "cache" / cache_key("ab00000000000001")).exists()
+    assert cache_key("ab00000000000001").startswith(f"{LONG_SIDE}-{RECIPE}/ab/")
+    old = tmp_path / "cache" / "ab" / "ab00000000000002.jpg"  # made by the old recipe
+    old.parent.mkdir()
+    old.write_bytes(b"old")
+    assert cache.get("ab00000000000002") is None
