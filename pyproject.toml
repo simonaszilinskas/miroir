@@ -30,6 +30,7 @@ jobs = [
 ]
 api = [
     "fastapi>=0.143.0",
+    "mcp>=2.3.0",
     "uvicorn>=0.54.0",
 ]
 # Anything that reads the web or decodes images: Commons and geography (`testsets commons`,

@@ -200,6 +200,44 @@ uv run miroir demo chat-logs   # copies the machine's chat logs to ~/miroir-data
 
 Caps: `MIROIR_CHAT_CONVERSATION_USD` (default 0.10) and `MIROIR_CHAT_DAY_USD` (default 2), read from the environment. When both keys are set, OpenRouter wins. Locally, `miroir web dev` runs the agentic search through OpenRouter when `OPENROUTER_API_KEY` is in `.env`, else on Mistral's API when `MISTRAL_API_KEY` is (same caps), or with a scripted stand-in with `--fake-llm` or without a key.
 
+## Utiliser MIROIR depuis ChatGPT ou Claude
+
+The site is also a remote MCP server (`miroir.web.mcp`), so ChatGPT or Claude can search POP through MIROIR on their own. It runs in the site's process, on the same engine, and answers at `<address>/mcp/<token>` (Streamable HTTP, stateless) only when the machine is on (`miroir demo up`).
+
+| Tool | Does |
+|---|---|
+| `search` | The simple search: `query` (words) and/or `image_url` (a public https link; `image_base64` for clients that hold the bytes), filters (`collections`, `region`, `departement`, `domain`, `period`, matched to the site's menus whatever the case and accents; an unknown value is an error listing the valid ones), `latitude`/`longitude` (H2's prior), `top_k` up to 20. Each result: id, title, POP url, base, place, period, authors, level ("tres-proche", "proche", "ressemblance", as the site), a thumbnail link |
+| `fetch` | One result in full by its id (or a POP reference): description and facts as text, url, its POP records and images |
+| `delegate_search` | A turn of the site's own agent (§7 above, technical spec §8.1): `request` in the user's words, photo, filters, position. Returns the agent's summary, its picks with a reason each, the steps it took, and `status`: `done`, `question` (relay it, call again with `conversation_id` and `reply`), `frame` (send `region_image_url`), `running` (after `wait_seconds`, 50 by default: call again with only `conversation_id`), `stopped` (a spending cap) |
+
+`search` and `fetch` return structured content and the same JSON as text, the shape ChatGPT's deep research reads; `delegate_search` returns a short text and structured content. A commune is not a filter (the site has none): put it in the words or give a position. The agent's fine-grained tools (`more_like`, `view_results`) are not exposed: they work on a conversation's state and send thumbnails to the agent's model, and `delegate_search` already runs them.
+
+**Access.** One secret token per client, `name=token` pairs in `MIROIR_MCP_TOKENS` (`.env`), made by `miroir web mcp-token <name>` and sent to the machine by `miroir demo install` (as `MCP_TOKENS`). The token goes in the URL path (ChatGPT takes only OAuth or no authentication) or as `Authorization: Bearer` (Claude can send a fixed header). Each token has its own limits: 30 searches or fetches a minute, 4 agent turns a minute, and its own agent conversations. The agent keeps the site's caps, $0.10 a conversation and $2 a day shared with the site's visitors. The site's password is not used. The access log masks the token. OAuth would need an authorization server (accounts, consent, token issue and refresh); not built.
+
+**Images and privacy.** An image link is fetched by the server: https on port 443 only, every address of the name public (no private, loopback, link-local or reserved range), the request sent to the address checked (so DNS cannot change it in between), at most 3 redirects each checked again, 8 MB, 20 s, 50 megapixels (`miroir.web.mcp_photo`). `search` sends the photo to our GPU machine only. `delegate_search` sends it, and the words, to the agent's model through OpenRouter (or Mistral's API), as the site's Approfondi search does; its description says so. Thumbnails and images in results are publishable ones only (`publishable.txt.gz`; none without it): a link given to ChatGPT or Claude leaves our hands. Neither client documents passing a photo uploaded into the chat to a remote tool: the user gives a link.
+
+**Deploy.**
+
+```sh
+uv run miroir web mcp-token chatgpt --show   # once per client; prints /mcp/<token>
+uv run miroir demo install                   # sends the tokens; the site serves /mcp
+uv run miroir demo up                        # the connector answers while the machine is on
+```
+
+`miroir web dev` serves it too, at `http://localhost:8000/mcp/<token>`, when `MIROIR_MCP_TOKENS` is set (a client in the cloud cannot reach a laptop).
+
+**ChatGPT** (Plus, Pro, Business, Enterprise, Edu; on the web): Settings → Apps → Advanced settings → turn on Developer mode. Then "Create app": a name (MIROIR), the URL `https://51-159-130-27.sslip.io/mcp/<token>`, authentication "No authentication", tick that you trust it. In a chat, pick Developer mode in the "+" menu and turn MIROIR on. ChatGPT asks before a call unless the tool says it only reads; all three do (`readOnlyHint`).
+
+**Claude** (any plan; Free allows one custom connector): Customize → Connectors → "+ Add" → "Add custom connector": name MIROIR, the URL `https://51-159-130-27.sslip.io/mcp/<token>`, Authentication "No sign in". Or the URL without the token, `…/mcp`, and under Request headers `Authorization: Bearer <token>`. Turn it on in a chat with "+" → Connectors. Claude calls from Anthropic's servers, so the site must be on and public, as it is.
+
+**What the specs say** (read 2026-11-04; OpenAI's and Anthropic's developer pages could not be opened from the build machine, so their points come from their search snippets and are worth checking):
+
+- MCP Python SDK 2.3 ([docs](https://py.sdk.modelcontextprotocol.io/run/asgi/)): `FastMCP` is now `MCPServer`; a mounted server's session manager must run in the host app's lifespan, once per start; DNS-rebinding protection allows only localhost unless told otherwise (421 behind a real name). Structured output: the return type is the output schema, the text carries the same JSON ([structured output](https://py.sdk.modelcontextprotocol.io/servers/structured-output/)).
+- ChatGPT developer mode ([OpenAI](https://developers.openai.com/api/docs/guides/developer-mode)): remote servers over SSE or Streamable HTTP; OAuth, no authentication, or mixed; `search`/`fetch` not required; tools without `readOnlyHint` count as write actions and are confirmed. Deep research and company knowledge want `search` (results of id, title, url) and `fetch` (id, title, text, url, metadata), in structured content and as JSON text ([OpenAI, MCP servers](https://developers.openai.com/api/docs/mcp)).
+- Claude custom connectors ([help centre](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp)): a remote MCP URL; authentication "Sign in" (OAuth: Claude's published identity, automatic registration or your own client) or "No sign in"; fixed request headers for an API key or bearer token; reached from Anthropic's IP ranges.
+
+Not tried with the real clients yet: the tests drive the server with the SDK's own client over in-process HTTP (`tests/test_web_mcp.py`). To check after deploying: both clients connect and list the three tools; a `search` with a link; a `delegate_search` that asks, and its answer; how long each client waits for a tool before it gives up (the 50 s wait is a guess).
+
 ## Cost
 
 The demo machine: €0.79 an hour while on, €13.14 a month at rest (see "Hosting"). Before 2026-11-03, on Modal, an L4 with 4 CPUs and 24 GB cost about $1.18 an hour while awake and each wake-up about $0.22. Searches are limited to 30 a minute per session, other calls (the wake-up, the agentic search's event streams) to 120, new agentic searches to 30 a day per session, and logins to 5 a minute per address (the visitor's: Caddy sets `X-Forwarded-For`, which uvicorn trusts from the loopback only). A request body over 11 MB (one 8 MB photo in base64 and the rest) is refused with 413 before it is read, logged in or not. A photo is decoded once per search (`miroir.images.upload`): JPEG, PNG or WebP of at most 40 megapixels, else 422 "Cette image n’a pas pu être lue"; any other failure of a search is a 500, logged. Every answer carries a Content-Security-Policy (`miroir.web.app.CONTENT_POLICY`): scripts, styles and fonts from the site only (the DSFR is served from it, so needs no subresource integrity), images also from POP's bucket and IIIF service and from Commons, no framing; the page opens a "Voir sur POP" link only to `https://pop.culture.gouv.fr/`.

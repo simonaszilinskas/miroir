@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from miroir import logs
-from miroir.config import DEMO_INDEX, ENV_PASSWORD_KEY, WEB_INDEX, get_settings
+from miroir.config import DEMO_INDEX, ENV_MCP_TOKENS_KEY, ENV_PASSWORD_KEY, WEB_INDEX, get_settings
 
 if TYPE_CHECKING:
     from miroir.eval.build_sets import BuildReport
@@ -1509,6 +1509,23 @@ def web_secret(
         )
     else:
         typer.echo("password unchanged")
+
+
+@web_app.command("mcp-token")
+def web_mcp_token(
+    name: Annotated[str, typer.Argument(help="Who gets it: chatgpt, claude, a person's name.")],
+    *,
+    rotate: Annotated[bool, typer.Option(help="Replace this name's token.")] = False,
+    show: Annotated[bool, typer.Option(help="Print the connector's path with its token.")] = False,
+) -> None:
+    """Make an MCP connector token (ChatGPT, Claude), kept in .env (`ENV_MCP_TOKENS_KEY`)."""
+    from miroir.web.mcp import MCP_PATH  # noqa: PLC0415
+    from miroir.web.ops import set_mcp_token  # noqa: PLC0415
+
+    token = set_mcp_token(name, rotate=rotate)
+    typer.echo(f"token for {name} in .env ({ENV_MCP_TOKENS_KEY}); `miroir demo install` sends it")
+    if show:
+        typer.echo(f"connector URL: <site address>{MCP_PATH}/{token}")
 
 
 @web_app.command("dev")

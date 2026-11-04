@@ -27,6 +27,7 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 - [Prochaines étapes](#prochaines-étapes)
 - [Annexe : ce que d'autres ont fait](#annexe--ce-que-dautres-ont-fait)
 - [Lancer, tester, déployer](#lancer-tester-déployer)
+- [Utiliser MIROIR depuis ChatGPT ou Claude](#utiliser-miroir-depuis-chatgpt-ou-claude)
 - [Documentation technique](#documentation-technique)
 
 ## Le besoin
@@ -217,6 +218,20 @@ uv run miroir web dev      # le site sur http://localhost:8000, avec de faux mod
 ```
 
 Pour mettre en ligne : voir [docs/prototype.md](docs/prototype.md), section Hosting.
+
+## Utiliser MIROIR depuis ChatGPT ou Claude
+
+Le site est aussi un serveur MCP : ChatGPT ou Claude peuvent chercher dans POP à travers MIROIR, seuls. Trois outils : `search` (la recherche simple, par mots ou par lien vers une photo, avec filtres et position), `fetch` (une notice en entier) et `delegate_search` (l'agent de MIROIR mène la recherche et explique chaque choix ; il peut poser une question, que ChatGPT ou Claude relaie). Chaque client reçoit un jeton secret :
+
+```sh
+uv run miroir web mcp-token chatgpt --show   # affiche /mcp/<jeton>
+uv run miroir demo install                   # envoie les jetons au site
+```
+
+- **ChatGPT** : Réglages → Apps → Paramètres avancés → Mode développeur. « Créer une app », adresse `https://51-159-130-27.sslip.io/mcp/<jeton>`, sans authentification.
+- **Claude** : Personnaliser → Connecteurs → « Ajouter un connecteur personnalisé », même adresse, « No sign in ».
+
+La machine doit être allumée (`uv run miroir demo up`). Le détail (limites, images, vie privée) est dans [docs/prototype.md](docs/prototype.md#utiliser-miroir-depuis-chatgpt-ou-claude).
 
 ## Documentation technique
 
