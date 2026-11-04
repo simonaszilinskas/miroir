@@ -165,6 +165,8 @@ As a guide to what counts as a real difference, an interval on 231 queries spans
 
 Status (2026-10-19): R0, R1 and R2 done. R3 done for C, G and H (H1 to H5); D not run. R4 not started: the sealed halves are still closed.
 
+**Running R4** (`miroir eval r4`, technical spec §7.2). Rebuild the sets and every bundle from the full export, retrain the type guess (it now leaves out every test entity, both halves), set the cut-offs, levels and sure margin on the tune halves, then: `freeze` the bundles (the chosen one first) and commit `eval/r4.json`; `embed` the sealed Commons photos with both models; `run`, once. `run` refuses a bundle changed since the freeze, and a second run. Nothing else reads a sealed half: `miroir eval run` scores tune halves only, and `tests/test_sealed_guard.py` keeps the in-memory draw, the sealed folder and the T7 writer's answers inside the set builders.
+
 **Screening first.** Every A option is scored on the screening gallery (`screening-20k`: every image a query needs, plus seeded random distractors up to 20,000; technical spec §7). Only the top 3 embed the full collection. A screening run costs about a seventh of a full one. Closed models search `screening-20k-publishable` only, and are compared with open ones on the queries both can answer.
 
 **Why T9 is AmsterTime only.** Met cannot serve as a 2-point check here: its database is 29.7 GB, its score comes from a kNN classifier with tuning and PCA-whitening that MIROIR never uses, and the DINOv2 and DINOv3 papers report GAP 36.8 and 44.6 for the *same* model. AmsterTime is 2,462 images (0.9 GB, CC0), and the DINOv3 paper writes down its preprocessing. AnyLoc does not report AmsterTime.
