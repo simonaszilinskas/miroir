@@ -339,3 +339,49 @@ def test_a_turn_stops_at_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     assert time.monotonic() - started < 5
     assert [e["text"] for e in of(events, "error")] == [chat_prompts.OUT_OF_TIME]
     assert events[-1]["type"] == "end"
+
+
+# --- 5. calls in flight and the day's cap ------------------------------------------------------
+
+
+class Gate:
+    """A model whose calls all wait until the gate opens, then say a word and stop."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+        self.calls = 0
+
+    @property
+    def model(self) -> str:
+        return "gate"
+
+    async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
+        del body
+        self.calls += 1
+        await self.gate.wait()
+        return ChatAnswer("Bonjour", 0.001, 10, 5, "stop")
+
+
+def test_calls_in_flight_hold_their_cost_against_the_days_cap() -> None:
+    """The cap was checked before each call and the cost added after: two conversations
+    starting at once both passed a cap that had room for one call."""
+    gate = Gate()
+    spend = MemorySpend()
+    service = make_service([], model=gate, spend=spend, limits=Limits(0.10, 0.015))
+
+    async def run() -> tuple[list[dict[str, JSON]], list[dict[str, JSON]]]:
+        a = service.open("s", photo=None, words="église", position=None)
+        b = service.open("s", photo=None, words="vase", position=None)
+        after_a = service.send(a, VisitorInput(Visit.GOAL, EXACT))
+        after_b = service.send(b, VisitorInput(Visit.GOAL, EXACT))
+        await asyncio.sleep(0.05)  # both turns have reached the model, or been refused
+        gate.gate.set()
+        first = [e async for e in service.stream(a, after_a)]
+        second = [e async for e in service.stream(b, after_b)]
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert not of(first, "limit")
+    assert [e["text"] for e in of(second, "limit")] == [chat_prompts.DAY_CAP]
+    assert gate.calls == 2  # the first conversation's call and its reminder; none for b
+    assert asyncio.run(spend.spent("2026-10-16")) == pytest.approx(0.002)

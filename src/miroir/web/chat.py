@@ -60,7 +60,7 @@ from miroir.web.chat_render import (
     user_message,
     with_note,
 )
-from miroir.web.chat_spend import FileSpend, Limits, MemorySpend, SpendStore
+from miroir.web.chat_spend import Budget, Cap, FileSpend, Hold, Limits, MemorySpend, SpendStore
 from miroir.web.chat_tools import (
     MAX_RESULTS,
     OUTLINES_LISTED,
@@ -368,12 +368,13 @@ class ChatService:
         self.thumbs = thumbs
         self.spend = spend
         self.limits = limits
+        self._today = today or (lambda: datetime.now(UTC).date().isoformat())
+        self.budget = Budget(spend, limits, self._today)
         self.index_size = index_size
         """(images, entities) the index holds, for the brief."""
         self.catalog = catalog
         """Record text for read_record; None reads nothing."""
         self._clock = clock
-        self._today = today or (lambda: datetime.now(UTC).date().isoformat())
         self._conversations: dict[str, Conversation] = {}
         self._background: set[asyncio.Future[None]] = set()
         self.log: ChatLog = log or NoLog()
@@ -720,8 +721,11 @@ class ChatService:
 
     async def _ask(self, c: Conversation, body: Mapping[str, JSON]) -> ChatAnswer | str:
         """One paid model call, within the caps; what to wait for when none is made."""
-        stop = await self._over_limit(c)
-        if stop is not None:
+        # Refused when it could take the conversation or the day past its cap, guessing its
+        # cost from the last call's (the next one sends a little more).
+        hold = await self.budget.hold(c.spent_usd, c.last_call_usd)
+        if isinstance(hold, Cap):
+            stop = self._cap_text(c, hold)
             c.emit({"type": "limit", "text": stop})
             c.log({"type": "limit", "text": stop})
             return "limit"
@@ -732,11 +736,16 @@ class ChatService:
         except ModelError as err:
             logger.warning("chat %s: model call failed: %s", c.id[:8], err)
             if err.maybe_billed:  # it may have run: count what it would have cost
-                await self._paid(c, c.last_call_usd)
+                await self._paid(c, hold, hold.usd)
+            else:
+                self.budget.release(hold)
             c.emit({"type": "error", "text": chat_prompts.MODEL_DOWN})
             c.log({"type": "model", "error": str(err)[:200], "ms": _ms(start)})
             return "message"
-        await self._paid(c, answer.cost_usd)
+        except BaseException:  # the turn's deadline: the call may run on, and be paid for
+            await self._paid(c, hold, hold.usd)
+            raise
+        await self._paid(c, hold, answer.cost_usd)
         c.log(
             {
                 "type": "model",
@@ -879,24 +888,19 @@ class ChatService:
 
     # --- money ---------------------------------------------------------------------------------
 
-    async def _over_limit(self, c: Conversation) -> str | None:
-        """Why the next call may not be made, or None. It is refused when it could take the
-        conversation or the day past its cap, guessing its cost from the last call's."""
-        guess = c.last_call_usd
-        if c.spent_usd + guess > self.limits.conversation_usd:
+    def _cap_text(self, c: Conversation, cap: Cap) -> str:
+        if cap is Cap.CONVERSATION:
             logger.info("chat %s: conversation cap reached at $%.4f", c.id[:8], c.spent_usd)
             return chat_prompts.CONVERSATION_CAP.format(cap=_dollars(self.limits.conversation_usd))
-        if await self.spend.spent(self._today()) + guess > self.limits.day_usd:
-            logger.info("chat %s: day cap reached", c.id[:8])
-            return chat_prompts.DAY_CAP
-        return None
+        logger.info("chat %s: day cap reached", c.id[:8])
+        return chat_prompts.DAY_CAP
 
-    async def _paid(self, c: Conversation, usd: float) -> None:
+    async def _paid(self, c: Conversation, hold: Hold, usd: float) -> None:
         c.calls += 1
         c.spent_usd += usd
         if usd > 0:  # the next call sends a little more: guess it costs what this one did
             c.last_call_usd = usd
-        day = await self.spend.add(self._today(), usd)
+        day = await self.budget.settle(hold, usd)
         logger.info(
             "chat %s call %d: $%.4f (conversation $%.4f, today $%.4f)",
             c.id[:8],

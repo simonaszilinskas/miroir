@@ -1,9 +1,18 @@
-"""What the agentic search (step H5) spends: per conversation, and per UTC day for all."""
+"""What the agentic search (step H5) spends: per conversation, and per UTC day for all.
+
+A call is checked against the caps before it is made, and its cost added once it is known.
+In between, `Budget` holds its guessed cost, so calls made at once cannot each pass a cap
+that had room for one. The holds live in the site's process, where every conversation runs;
+a `SpendStore` only adds real costs (`LedgerSpend` writes each one to the project ledger).
+A site of several processes sharing one store would need the holds in the store too.
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
@@ -58,3 +67,58 @@ class FileSpend:
 class Limits:
     conversation_usd: float
     day_usd: float
+
+
+class Cap(StrEnum):
+    """The cap a call would pass."""
+
+    CONVERSATION = "conversation"
+    DAY = "day"
+
+
+@dataclass(frozen=True, slots=True)
+class Hold:
+    """A call's guessed cost, held against the day's cap until its real cost is known."""
+
+    day: str
+    usd: float
+
+
+class Budget:
+    """The caps of `Limits`, with the calls in flight counted."""
+
+    def __init__(self, store: SpendStore, limits: Limits, today: Callable[[], str]) -> None:
+        self.store = store
+        self.limits = limits
+        self._today = today
+        self._held: dict[str, float] = {}
+
+    def held(self, day: str) -> float:
+        return self._held.get(day, 0.0)
+
+    async def hold(self, conversation_usd: float, guess: float) -> Hold | Cap:
+        """Hold `guess` for a call, or the cap it could pass (conversation, then day)."""
+        if conversation_usd + guess > self.limits.conversation_usd:
+            return Cap.CONVERSATION
+        day = self._today()
+        spent = await self.store.spent(day)
+        # No await from here to the hold: another call's check sees it.
+        if spent + self.held(day) + guess > self.limits.day_usd:
+            return Cap.DAY
+        self._held[day] = self.held(day) + guess
+        return Hold(day, guess)
+
+    async def settle(self, hold: Hold, usd: float) -> float:
+        """The call's real cost replaces its hold. Returns the day's new total."""
+        try:
+            return await self.store.add(hold.day, usd)
+        finally:
+            self.release(hold)
+
+    def release(self, hold: Hold) -> None:
+        """A held call that cost nothing (refused before it ran)."""
+        left = self.held(hold.day) - hold.usd
+        if left > 1e-12:
+            self._held[hold.day] = left
+        else:
+            self._held.pop(hold.day, None)
