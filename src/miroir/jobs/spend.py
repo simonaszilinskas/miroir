@@ -8,9 +8,10 @@
 - Every paid call is held against the budget while in flight (`SpendLedger.hold`): under a
   lock shared by every process on the Mac, its worst case is written as a hold line, and the
   call is refused if spend plus every open hold plus it would pass the usable budget
-  (`openrouter_budget_usd` minus `openrouter_reserve_usd`). The line of its real cost settles
-  the hold. Two runs started side by side therefore cannot both spend the last dollars. A call
-  that fails after it may have been billed is settled at its expected cost, marked `estimated`.
+  (`budget_usd` minus `budget_reserve_usd`, caps in `miroir.config`). The line of its real
+  cost settles the hold. Two runs started side by side therefore cannot both spend the last
+  dollars. A call that fails after it may have been billed is settled at its expected cost,
+  marked `estimated`.
 - A probe embeds 100 images and stores the cost per image (`Settings.probe_path`).
   Probes together, on both services, may not spend more than `probe_budget_usd`.
 - A full run needs a probe on file for the same model and image size, and refuses to start
@@ -135,8 +136,8 @@ class Budget:
     @classmethod
     def from_settings(cls, settings: Settings) -> Budget:
         return cls(
-            cap_usd=settings.openrouter_budget_usd,
-            reserve_usd=settings.openrouter_reserve_usd,
+            cap_usd=settings.budget_usd,
+            reserve_usd=settings.budget_reserve_usd,
             probe_cap_usd=settings.probe_budget_usd,
         )
 
@@ -403,7 +404,7 @@ def check_run(
             f"(calls in flight included): ${spent:.2f}. Together that passes the "
             f"${budget.usable_usd:.2f} usable budget (${budget.cap_usd:.2f} cap minus "
             f"${budget.reserve_usd:.2f} reserve). "
-            "Ask the project lead before raising the openrouter_budget_usd setting."
+            "Raising the cap (BUDGET_USD in config.py) needs the project lead's yes."
         )
         raise BudgetError(msg)
     return projected

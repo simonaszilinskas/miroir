@@ -122,7 +122,7 @@ def test_probe_then_run_writes_vectors_and_logs_spend(built: Settings) -> None:
 def test_run_refused_when_key_spend_is_near_the_cap(built: Settings) -> None:
     write_gallery(built, "g", image_ids(built, publishable=True))
     probe(embedder(built, FakeOpenRouter()), "g")
-    near_cap = FakeOpenRouter(key_usage=built.openrouter_budget_usd)
+    near_cap = FakeOpenRouter(key_usage=built.budget_usd)
     with pytest.raises(BudgetError, match="usable budget"):
         embed_gallery(embedder(built, near_cap), "g")
     assert near_cap.embedding_bodies == []

@@ -55,7 +55,7 @@ Each POP export is a folder holding `<base>.jsonl` (one record per line, POP fie
 | `joconde` | 33,000 | 32,997 | 54,825 | 12,000 records have 2 or more views |
 | `rose-valand` (base `rose-valland`, Mongo collection `mnr`) | 2,400 | 2,400 | 16,961 | Median 4 images per record, max 52 |
 
-"Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table.
+"Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table. Every table of the data dir is written to a temporary file and renamed when complete, so a failed build keeps the last good one; each carries a schema version (`records/store.py`), and a reader refuses a table of another version or with other columns: rebuild it.
 
 The full export of every POP record with an image (3.4) uses the same format and adds Mérimée, Palissy and Muséofile. `uv run miroir records build-full` maps it into separate tables (11.1); each new mapper keeps only the fields of 3.2.
 
@@ -75,7 +75,7 @@ Every mapper turns a POP record into this shape:
 | `authors` | keyword[] + text | `AUTR`, `AUTP` |
 | `period` | keyword[] | `EPOQ`, `PERI`, `MILL`, decade of `DATPV` ("années 1940") |
 | `region`, `departement`, `commune` | keyword | `REGION`/`REG`, `DPT`/`DPT_LETTRE`, `VILLE_M`/`COM` (first value; `departement` is the name, not the number) |
-| `publishable` | boolean | `false` when Joconde `DIFFU` is "non" or Mémoire `DIFF` asks for permission |
+| `publishable` | boolean | `false` when Joconde `DIFFU` is "non" or Mémoire `DIFF` asks for permission, or when the field is missing |
 | `pop_url` | keyword | `https://pop.culture.gouv.fr/notice/<mongo collection>/<REF>` |
 | `linked_refs` | keyword[] | Rose Valland `RENV`: refs of related records in the same base. A Jeu de Paume room photo lists the artworks it shows; each artwork lists its room photo(s). Empty elsewhere |
 | `photographers`, `photo_date` | keyword[], keyword | Mémoire `AUTP` and `DATPV` as written (`DATPV` is a year in 92% of records). Together they mark a photo shoot, which T1 keeps apart from its answers (§7). Empty elsewhere |
@@ -84,7 +84,7 @@ Every mapper turns a POP record into this shape:
 ### 3.3 Images
 
 - **Source.** Fetch from the POP asset bucket: Joconde and Mémoire `IMG`, Rose Valland `VIDEO`, all relative to the `imageUrl` host. For Mémoire, `IMG` is already the largest variant. `images.parquet` stores the percent-encoded URL. Some files are missing from the bucket (for example some names with accents return 404); the IIIF manifest (`iiif_manifest`, IIIF v3, level-2 image service) serves as fallback and for larger sizes.
-- **Image id.** First 16 hex characters of SHA-1 over `ref` and `url`, so it never depends on row order.
+- **Image id.** First 16 hex characters of SHA-1 over `ref` and the file's bucket key (`records.images.bucket_key`: the export path without host, not percent-encoded, Unicode NFC), so it never depends on row order, the asset host or how the URL is spelt. The same file listed in two Unicode forms is one image. *Changed 2026-11-04, before the full re-index (§3.4):* ids used to hash the full percent-encoded URL. Every id made before (the July tables, vectors under `MIROIR_DATA_DIR/vectors/`, test sets, galleries, web bundles, and the image ids inside committed `eval/results/`) belongs to the old scheme and matches no table built since. Nothing is migrated: the full re-index rebuilds them all. Until then, do not rebuild the July tables over a data dir whose vectors and sets you still use; tables of the old scheme carry no schema version (§3.1). `tests/test_images.py` pins a few ids.
 - **Skip:**
   - the shared 1×1 placeholder GIF, which `imageUrl` holds when a record lists no image (3 Joconde, 1 Mémoire)
   - `sur_demande.jpg` ("image on request", 10 Mémoire records)
@@ -105,7 +105,7 @@ Every mapper turns a POP record into this shape:
 
 ### 3.4 Full export
 
-`scripts/pop_full_export.py` builds the full export from public sources, with no account. It writes `~/miroir-data/exports-full/<base>/<base>.jsonl` and a `metadata.json` per base (sources, licence, date, filter, counts). Records only: it downloads no image.
+`scripts/pop_full_export.py` builds the full export from public sources, with no account. It writes `$MIROIR_DATA_DIR/exports-full/<base>/<base>.jsonl` (`MIROIR_DATA_DIR` from the environment or `.env`, as `config.py` reads it) and a `metadata.json` per base (sources, licence, date, filter, counts, and a fingerprint of what the build read). Records only: it downloads no image.
 
 **Sources.**
 
@@ -114,7 +114,7 @@ Every mapper turns a POP record into this shape:
 - Rose-Valland and Enluminures have no open-data file (the MNR files in the ministry bucket refuse access). The script reads the record that each POP notice page carries (`pop.culture.gouv.fr/notice/<base>/<REF>`), at one page a second, for each REF that has images in the bucket.
 - `api.pop.culture.gouv.fr` is never called: its robots.txt forbids all robots.
 
-**Shape.** Keys are POP field codes where the script could match a CSV column to one: it compares values with 40 notice pages per file, then falls back to the labels in the July `field-docs.json`. Unmatched columns keep their CSV name; `_raw/fieldmap/<file>.json` lists every match. Each record gains `IMG`, `imageUrl`, `imageUrls`, `iiif_manifest` (with the base name the API accepts, `rose-valland` not `mnr`), `sourceCollection` and `sourceFile`. Records from notice pages keep every POP field. CSV records lack the internal POP fields (`POP_IMPORT`, `PRODUCTEUR` and so on), and their lists come from splitting on `;`.
+**Shape.** Keys are POP field codes where the script could match a CSV column to one: it compares values with 40 notice pages per file, then falls back to the labels in the July `field-docs.json` (`--field-docs`, default `MIROIR_EXPORTS_DIR`). Both `fieldmap` and `build` stop when a Mémoire file maps no column to `DIFF`: rights would be unknown (§11.1). Unmatched columns keep their CSV name; `_raw/fieldmap/<file>.json` lists every match. Each record gains `IMG`, `imageUrl`, `imageUrls`, `iiif_manifest` (with the base name the API accepts, `rose-valland` not `mnr`), `sourceCollection` and `sourceFile`. Records from notice pages keep every POP field. CSV records lack the internal POP fields (`POP_IMPORT`, `PRODUCTEUR` and so on), and their lists come from splitting on `;`.
 
 **Counts (October 2026).**
 
@@ -127,7 +127,7 @@ Every mapper turns a POP record into this shape:
 | `enluminures` | 76,373 REFs in the bucket | all | One notice page each: about 22 hours |
 | `rose-valland`, `museo` | from the bucket | see `metadata.json` | |
 
-**Rerun.** Each step resumes where it stopped; `all` runs them in order:
+**Rerun.** Each step resumes where it stopped: a CSV download goes on from the bytes it has (a server that ignores `Range` sends the whole file, which replaces the partial one), and a line half-written when a run stopped is dropped. `build` skips a base whose sources are unchanged: CSV etags, field maps, the bucket listing and the scraped pages. `all` runs the steps in order:
 
 ```sh
 python3 scripts/pop_full_export.py all      # download, list-images, fieldmap, scrape, build
@@ -310,11 +310,12 @@ A closed model may run a query only when the query image is publishable and one 
 
 **Commons sets (T2, T2b, T8c; October 2026).** Queries that look like what visitors upload: recent colour photos from Wikimedia Commons, with the answer taken from an official id on Wikidata. For each Wikidata item with a Mérimée id (P380) or a Joconde id (P347) we read its image (P18) and the 50 newest files of its Commons category (P373); for T2 buildings also up to two subcategories named for the interior or details. Items are left out when their id sits on two items or one item holds two ids (which building a photo shows is then unclear): 3,096 T2 buildings and 1,235 T2b works remain. A file is kept when it looks like a camera photo of today:
 
+- its page names a licence;
 - a JPEG, at least 480 px on its short side;
 - EXIF make and model present, and not a scanner or a copy-stand back (Phase One, Leaf, Sinar);
 - taken in 2000 or later (EXIF date, else the file page's date);
 - title and categories say nothing of a plan, map, drawing, engraving, postcard, scan or old photo (for buildings, nor of a painting); not an archive upload (Médiathèque du patrimoine, Paris Musées, Gallica) nor credited to an author whose dates all fall before 2000;
-- if its page links to POP records (the Mérimée and Joconde templates do), one of them is the answer.
+- if its page links to POP records (the Mérimée and Joconde templates do), one of them is the answer. The API sends a long list of links in several answers (`continue`); all are read, so no file loses its links. Files are matched to Wikidata's P18 titles through the API's `normalized` list.
 
 Files whose page names the answer, and P18, come first; then files whose title holds a distinctive word of the category name; the rest in seeded order. Up to 3 per entity: one exterior, one interior, one detail where the words allow, then other visits (another author or day) before more of the same. T2 draws buildings at random until it has 1,000 photos. T2b looks at every work and drops files whose 64-bit perceptual hash, on the 512 px copies, is within 12 bits of an image of the Joconde record (`miroir.images.phash`): the museum's own reproduction. The distances bunch at 0–2 bits (copies) and above 16 (other photos); at 12–14 bits we found both kinds, so a few same-photo copies (a background swapped) remain. A file chosen for two entities shows both, so it is dropped (11 files). Each photo's licence, author, credit, camera, date, and EXIF GPS where present (106 of T2, 6 of T2b, 45 of T8c) are in `commons.parquet`. T2 views: 688 exterior, 129 interior, 183 detail, guessed from file words.
 
@@ -561,7 +562,7 @@ The download test ran on Modal (`miroir records fetch-probe`, removed on 2026-11
 
 **Mappers.** Joconde, Mémoire and Rose Valland keep their July fields. Mérimée: title `TICO`, period `SCLE` and `DATE`, place `REG`, `DPT_LETTRE`, `COM`. Palissy: title `TITR` then `TICO`, domain `CATE`, same places. Muséofile: museum name `NOMOFF`, `HIST` and `ATOUT`, domains `DOMPAL`. Two skips are new. The bucket keeps copies of Joconde images under other names (`M500145_0001074_P.JPG` beside `0001074.jpg`, or the same name in other letter case): the mapper keeps one file per name (`RENAMED_COPY`, 800,401 files, half of Joconde). Old links and documents in image lists (12,761 PDFs, web addresses, `[object Object]`) are skipped (`NOT_AN_IMAGE`).
 
-**Publishable.** Same rule as today where the field exists: Mémoire `DIFF`. The open-data Joconde file has no `DIFFU`, so a Joconde record is publishable only when the July export holds it with `DIFFU` other than "non": 28,404 of 605,160. Mérimée and Palissy have no rights field; a record is publishable when every Mémoire photo it lists belongs to a Mémoire record that allows reproduction. Rose Valland and Muséofile: publishable, as today. Unknown means not publishable. In all, 1,097,443 distinct images (51%) may go to outside services. This does not limit our open models on Modal (§9).
+**Publishable.** Same rule as today where the field exists: Mémoire `DIFF`. The open-data Joconde file has no `DIFFU`, so a Joconde record is publishable only when the July export holds it with `DIFFU` other than "non": 28,404 of 605,160. Mérimée and Palissy have no rights field; a record is publishable when every image it lists is a Mémoire photo of a Mémoire record that allows reproduction; a file of its own in the bucket (`merimee/<REF>/…`) has no rights source and closes it. Rose Valland: publishable, as today. Muséofile: not publishable until a rights source exists. Unknown means not publishable: a missing `DIFF` or `DIFFU` closes the record, and a list value is read whole. `build-full` stops when a Mémoire line has no `DIFF` field or when no Mémoire record comes out closed, the signs that the export did not map the rights column. In all, 1,097,443 distinct images (51%) may go to outside services (counted before Mérimée and Palissy bucket files and Muséofile were closed; the next build gives the new count). This does not limit our open models on Modal (§9).
 
 **What "all of POP" holds.** Every POP record with an image and an open-data record (Enluminures, 76,373 records read one page at a time, is not in the export):
 

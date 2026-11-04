@@ -218,7 +218,7 @@ def test_calls_are_refused_near_the_cap(built: Settings) -> None:
     write_gallery(built, "g", image_ids(built, publishable=True))
     r, _ = runner(built)
     r.probe(GEMMA, "g")
-    near, calls = runner(built, key_usage=built.openrouter_budget_usd - 5.1)
+    near, calls = runner(built, key_usage=built.budget_usd - 5.1)
     with pytest.raises(BudgetError, match="usable budget"):
         near.embed_gallery(GEMMA, "g")
     assert calls.calls == []

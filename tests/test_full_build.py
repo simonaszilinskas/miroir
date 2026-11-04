@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import json
 import shutil
-from pathlib import Path
+from typing import cast
 
 import pytest
 
 from miroir.config import Settings
 from miroir.records.full import build_full, count_full
 from miroir.records.images import ImageSkip, copy_key, skip_reason
+from miroir.records.mappers import RawRecord, Rights, full_field_maps
 from miroir.records.model import Collection, Record
 from miroir.records.store import read_records
-
-FIXTURE_FULL = Path(__file__).parent / "fixtures" / "exports-full"
+from tests.helpers import FIXTURE_FULL, full_raw_record
 
 
 @pytest.fixture
@@ -85,3 +86,51 @@ def test_full_counts_each_file_once(full: Settings) -> None:
     unique = full.full_image_list("unique").read_text(encoding="utf-8").split()
     assert len(unique) == report["unique_images"]
     assert full.full_report_json.exists()
+
+
+def _rewrite(settings: Settings, base: str, change: dict[str, RawRecord | None]) -> None:
+    """Replace (or, with None, drop) lines of one base of the copied fixtures, by REF."""
+    path = settings.full_export_jsonl(base)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    kept = [change.get(raw["REF"], raw) for raw in lines]
+    path.write_text(
+        "".join(json.dumps(raw, ensure_ascii=False) + "\n" for raw in kept if raw is not None),
+        encoding="utf-8",
+    )
+
+
+def test_full_build_refuses_memoire_records_without_rights(full: Settings) -> None:
+    raw = full_raw_record("memoire", "AP55P00431")
+    _rewrite(full, "memoire", {"AP55P00431": {k: v for k, v in raw.items() if k != "DIFF"}})
+    with pytest.raises(ValueError, match="DIFF"):
+        build_full(full)
+
+
+def test_full_build_refuses_a_memoire_file_where_everything_is_open(full: Settings) -> None:
+    _rewrite(full, "memoire", {"ARR74_03870002ZA": None})
+    with pytest.raises(ValueError, match="publishable"):
+        build_full(full)
+
+
+def _merimee_open(raw: RawRecord, memoire_open: frozenset[str]) -> bool:
+    rights = Rights(joconde_open=frozenset(), memoire_open=memoire_open)
+    return full_field_maps(rights)[Collection.MERIMEE].publishable(raw)
+
+
+def test_merimee_own_bucket_files_leave_rights_unknown() -> None:
+    raw = full_raw_record("merimee", "PA00078066")
+    photos = frozenset({"AP55P00431", "AP55P00432"})
+    assert _merimee_open(raw, photos)
+    assert not _merimee_open(raw, frozenset({"AP55P00431"}))
+    paths = cast("list[str]", raw["IMG"])
+    own = {**raw, "IMG": ["merimee/PA00078066/pa00078066_1.jpg", *paths]}
+    assert not _merimee_open(own, photos)
+    # A link that is no image says nothing about rights and does not close the record.
+    link = {**raw, "IMG": [*paths, "http://www.culture.gouv.fr/x.pdf"]}
+    assert _merimee_open(link, photos)
+
+
+def test_museofile_photos_are_not_publishable() -> None:
+    rights = Rights(joconde_open=frozenset(), memoire_open=frozenset())
+    museo = full_field_maps(rights)[Collection.MUSEO]
+    assert not museo.publishable(full_raw_record("museo", "M1128"))

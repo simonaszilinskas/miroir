@@ -97,6 +97,86 @@ def test_category_listing_keeps_licence_author_exif_and_pop_links(tmp_path: Path
     assert by_title["File:Pietro Perugino cat66.jpg"].pop_refs == ("06570007477",)
 
 
+class _Answers:
+    """A Commons API that answers one query in parts, as it does for long props."""
+
+    def __init__(self, parts: list[dict[str, object]]) -> None:
+        self.parts = parts
+        self.params: list[dict[str, str]] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        query = {k: v[0] for k, v in parse_qs(urlsplit(str(request.url)).query).items()}
+        self.params.append(query)
+        return httpx.Response(200, json=self.parts[len(self.params) - 1])
+
+
+def _perugino_page(**changes: object) -> dict[str, object]:
+    pages = _fixture("titles.json")["query"]["pages"]  # type: ignore[index]
+    page = next(p for p in pages if p["title"] == "File:Pietro Perugino cat66.jpg")
+    return {**page, **changes}
+
+
+def test_file_info_follows_continue_for_long_link_lists(tmp_path: Path) -> None:
+    # The links of one page come in two answers; the second has no imageinfo.
+    first = _perugino_page(extlinks=[{"url": "https://www.pop.culture.gouv.fr/notice/x/1"}])
+    rest = {
+        "title": first["title"],
+        "ns": 6,
+        "extlinks": [{"url": "https://www.pop.culture.gouv.fr/notice/joconde/06570007477"}],
+    }
+    answers = _Answers(
+        [
+            {
+                "continue": {"elcontinue": "3828491|42", "continue": "||"},
+                "query": {"pages": [first]},
+            },
+            {"batchcomplete": True, "query": {"pages": [rest]}},
+        ]
+    )
+    client = _client_for(answers, tmp_path)
+    found = api.files_by_title(client, ["File:Pietro Perugino cat66.jpg"])
+    assert found["File:Pietro Perugino cat66.jpg"].pop_refs == ("06570007477",)
+    assert found["File:Pietro Perugino cat66.jpg"].licence == "Public domain"
+    assert answers.params[1]["elcontinue"] == "3828491|42"
+
+
+def test_file_info_keys_files_by_the_title_asked(tmp_path: Path) -> None:
+    normalized = [
+        {
+            "fromencoded": False,
+            "from": "File:Pietro_Perugino_cat66.jpg",
+            "to": "File:Pietro Perugino cat66.jpg",
+        }
+    ]
+    answers = _Answers(
+        [{"batchcomplete": True, "query": {"normalized": normalized, "pages": [_perugino_page()]}}]
+    )
+    found = api.files_by_title(_client_for(answers, tmp_path), ["File:Pietro_Perugino_cat66.jpg"])
+    assert list(found) == ["File:Pietro_Perugino_cat66.jpg"]
+    assert found["File:Pietro_Perugino_cat66.jpg"].title == "File:Pietro Perugino cat66.jpg"
+
+
+def test_category_listing_stops_at_the_end_of_its_batch(tmp_path: Path) -> None:
+    # The generator's next batch (gcmcontinue) is older files: never fetched.
+    answers = _Answers(
+        [
+            {
+                "batchcomplete": True,
+                "continue": {"gcmcontinue": "file|123", "continue": "gcmcontinue||"},
+                "query": {"pages": [_perugino_page()]},
+            }
+        ]
+    )
+    listing = api.category_files(_client_for(answers, tmp_path), "Category:Perugino")
+    assert [f.title for f in listing.files] == ["File:Pietro Perugino cat66.jpg"]
+    assert len(answers.params) == 1
+
+
+def _client_for(answers: _Answers, cache: Path) -> WikimediaClient:
+    http = httpx.Client(transport=httpx.MockTransport(answers.handler))
+    return WikimediaClient(http, cache, retry=NO_WAIT, max_per_second=1e9, sleep=lambda _s: None)
+
+
 # --- which files pass -------------------------------------------------------------
 
 
@@ -127,6 +207,8 @@ def _file(**changes: object) -> CommonsFile:
     ("changes", "reason"),
     [
         ({}, None),
+        ({"licence": ""}, Reject.NO_LICENCE),
+        ({"licence": "  "}, Reject.NO_LICENCE),
         ({"mime": "image/png"}, Reject.NOT_JPEG),
         ({"width": 400}, Reject.TOO_SMALL),
         ({"pop_refs": ("PA00000002",)}, Reject.OTHER_RECORD),

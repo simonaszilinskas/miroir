@@ -11,11 +11,13 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import cast
 
 from miroir.config import POP_NOTICE_URL
 from miroir.records.images import (
     ImageSkip,
     asset_url,
+    bucket_key,
     copy_key,
     image_type_from_path,
     is_copy_name,
@@ -88,14 +90,33 @@ def _memoire_entity_id(raw: RawRecord) -> str:
     return _ref(raw)
 
 
+def _rights(raw: RawRecord, code: str) -> str | None:
+    """A rights field, lower case, list values joined with ";". None when missing or not text:
+    the caller then fails closed (not publishable)."""
+    value = raw.get(code)
+    if isinstance(value, list):
+        items = cast("list[object]", value)
+        if not all(isinstance(item, str) for item in items):
+            return None
+        return ";".join(str(item) for item in items).strip().lower()
+    return value.strip().lower() if isinstance(value, str) else None
+
+
 def _joconde_publishable(raw: RawRecord) -> bool:
-    return _text(raw, "DIFFU").lower() != "non"
+    diffu = _rights(raw, "DIFFU")
+    return diffu is not None and "non" not in {part.strip() for part in diffu.split(";")}
 
 
 def _memoire_publishable(raw: RawRecord) -> bool:
     # DIFF values seen: "", "reproduction soumise à autorisation du titulaire ...",
     # "communication libre, reproduction soumise à autorisation".
-    return "autorisation" not in _text(raw, "DIFF").lower()
+    diff = _rights(raw, "DIFF")
+    return diff is not None and "autorisation" not in diff
+
+
+def memoire_rights_known(raw: RawRecord) -> bool:
+    """True when a Mémoire line carries its rights field (`DIFF`), even empty."""
+    return _rights(raw, "DIFF") is not None
 
 
 FIELD_MAPS: dict[Collection, FieldMap] = {
@@ -184,11 +205,13 @@ def full_field_maps(rights: Rights) -> dict[Collection, FieldMap]:
         return _ref(raw) in rights.joconde_open
 
     def photos_open(raw: RawRecord) -> bool:
-        for path in _values(raw, "IMG"):
+        # Paths that are no image (links, documents) are skipped by `map_record` and ignored.
+        paths = [path for path in _values(raw, "IMG") if skip_reason(path) is None]
+        for path in paths:
             parts = path.split("/")
-            if parts[0] == "memoire" and (len(parts) < 3 or parts[1] not in rights.memoire_open):
+            if parts[0] != "memoire" or len(parts) < 3 or parts[1] not in rights.memoire_open:
                 return False
-        return True
+        return bool(paths)
 
     return {
         Collection.JOCONDE: replace(
@@ -206,7 +229,7 @@ def full_field_maps(rights: Rights) -> dict[Collection, FieldMap]:
             region=("REG",),
             departement=("DPT_LETTRE",),
             commune=("COM",),
-            # Mémoire photos linked to the building, then the building's own files.
+            # The building's own bucket files, then the Mémoire photos linked to it.
             images="IMG",
             publishable=photos_open,
         ),
@@ -234,7 +257,8 @@ def full_field_maps(rights: Rights) -> dict[Collection, FieldMap]:
             departement=("DPT",),
             commune=("VILLE_M",),
             images="IMG",
-            publishable=lambda _raw: True,
+            # No rights source for the museum's photos yet: unknown, so not publishable.
+            publishable=lambda _raw: False,
         ),
     }
 
@@ -289,16 +313,18 @@ def _select_images(
         # Keep the plain name POP lists; its bucket copies come after it and are dropped.
         ordered.sort(key=is_copy_name)
     kept: list[str] = []
+    files: set[str] = set()
     keys: set[str] = set()
     skips: list[ImageSkip] = []
     for path in ordered:
         reason = skip_reason(path)
-        if reason is None and path in kept:
+        if reason is None and bucket_key(path) in files:
             reason = ImageSkip.DUPLICATE
         if reason is None and drop_renamed_copies and copy_key(path) in keys:
             reason = ImageSkip.RENAMED_COPY
         if reason is None:
             kept.append(path)
+            files.add(bucket_key(path))
             keys.add(copy_key(path))
         else:
             skips.append(reason)
@@ -315,7 +341,7 @@ def _build_images(
         url = asset_url(path)
         images.append(
             Image(
-                image_id=make_image_id(ref, url),
+                image_id=make_image_id(ref, bucket_key(path)),
                 ref=ref,
                 entity_id=entity_id,
                 collection=collection,
