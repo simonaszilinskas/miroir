@@ -54,13 +54,7 @@ def render(
 ) -> list[JSON]:
     """The messages with images as data URLs. Only the last `KEEP_THUMBS` thumbnails go
     again; `check` sees each thumbnail's id once more before it leaves."""
-    thumb_parts = [
-        (i, j)
-        for i, m in enumerate(messages)
-        for j, p in enumerate(parts_of(m))
-        if isinstance(p, dict) and p.get("type") == "image_ref" and p.get("ref") == "thumb"
-    ]
-    keep = set(thumb_parts[-KEEP_THUMBS:])
+    keep = {(i, j) for i, j, _ in _sent_thumbs(messages)}
     keep_queries = set(list(query_images)[-KEEP_QUERY_IMAGES:])
     out: list[JSON] = []
     for i, message in enumerate(messages):
@@ -93,6 +87,22 @@ def render(
                 rendered.append(data_url(to_jpeg(photo, PHOTO_SIDE)))
         out.append({**message, "content": rendered})
     return out
+
+
+def sent_thumbs(messages: Sequence[Message]) -> set[str]:
+    """The ids of the thumbnails `render` sends again: the conversation keeps only those."""
+    return {image_id for _, _, image_id in _sent_thumbs(messages)}
+
+
+def _sent_thumbs(messages: Sequence[Message]) -> list[tuple[int, int, str]]:
+    """(message, part, image id) of the last `KEEP_THUMBS` thumbnails named."""
+    named = [
+        (i, j, str(p.get("image_id")))
+        for i, m in enumerate(messages)
+        for j, p in enumerate(parts_of(m))
+        if isinstance(p, dict) and p.get("type") == "image_ref" and p.get("ref") == "thumb"
+    ]
+    return named[-KEEP_THUMBS:] if KEEP_THUMBS > 0 else []
 
 
 def shown_images(

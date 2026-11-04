@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from miroir.jobs.mistral import PRICES
 from miroir.jobs.openrouter import JSON, ChatAnswer
 from miroir.web import chat as chat_module
-from miroir.web import chat_model, chat_prompts
+from miroir.web import chat_model, chat_prompts, chat_render
 from miroir.web.chat import (
     ChatModel,
     ChatService,
@@ -409,3 +409,54 @@ def test_the_model_is_told_a_position_was_shared_never_where() -> None:
     assert "1.44" not in sent
     assert rig.backend.queries[-1].filters.near is not None
     assert card_ids(events) == ["PA1"]
+
+
+# --- 8. what one conversation may hold ---------------------------------------------------------
+
+
+def test_a_new_event_stream_replaces_the_old_one() -> None:
+    """One visitor could hold many open streams of one conversation."""
+    gate = Gate()
+    service = make_service([], model=gate)
+
+    async def run() -> tuple[list[dict[str, JSON]], list[dict[str, JSON]]]:
+        c = service.open("s", photo=None, words="église", position=None)
+        after = service.send(c, VisitorInput(Visit.GOAL, EXACT))
+
+        async def read() -> list[dict[str, JSON]]:
+            return [e async for e in service.stream(c, after)]
+
+        old = asyncio.ensure_future(read())
+        await asyncio.sleep(0.05)
+        new = asyncio.ensure_future(read())
+        replaced = await asyncio.wait_for(old, 1.0)  # at once, not at its next ping
+        gate.gate.set()
+        return replaced, await new
+
+    replaced, current = asyncio.run(run())
+    assert replaced[-1]["type"] == "replaced"
+    assert current[-1]["type"] == "end"
+
+
+def test_a_conversation_keeps_only_the_thumbnails_it_still_sends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_render, "KEEP_THUMBS", 1)
+    script = [
+        calls([("text_search", {"query": "église vase nature", "why": WHY})]),
+        calls([("view_results", {"entity_ids": ["PA1", "OBJ1", "OBJ2"], "why": WHY})]),
+        shown("PA1"),
+    ]
+    service = make_service(script)
+
+    async def run() -> Conversation:
+        c = service.open("s", photo=None, words="église", position=None)
+        after = service.send(c, VisitorInput(Visit.GOAL, EXACT))
+        _ = [e async for e in service.stream(c, after)]
+        return c
+
+    c = asyncio.run(run())
+    assert len(c.thumbs) == 1
+    model = service.model
+    assert isinstance(model, ScriptedModel)
+    assert body_text(model.bodies[-1]).count("data:image/jpeg") == 1

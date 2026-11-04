@@ -43,6 +43,7 @@ from miroir.web.chat_method import COUNTED, FINISHING, MAX_REFUSED, Method
 from miroir.web.chat_model import ChatModel, MistralModel, ModelError, OpenRouterModel, chat_model
 from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE, ONESHOT_NOTE
 from miroir.web.chat_render import (
+    KEEP_QUERY_IMAGES,
     CardView,
     Event,
     Message,
@@ -52,6 +53,7 @@ from miroir.web.chat_render import (
     card_of_hit,
     image_ref,
     render,
+    sent_thumbs,
     shown_images,
     step_event,
     summarised,
@@ -242,6 +244,9 @@ class Conversation:
         """The detector's outlines of the photo, started with the first look."""
         self.query_images: dict[str, bytes] = {}
         """Transformed photos the model searched, kept for it to look at, by key."""
+        self.query_count = 0
+        self.stream_id = 0
+        """The number of the one event stream open: a new one ends the one before."""
         self.task: asyncio.Future[None] | None = None
         self.running = False
         """A turn is under way: set when it starts, cleared just before its end event."""
@@ -316,9 +321,19 @@ class Conversation:
         return found.boxes[:OUTLINES_LISTED]
 
     def keep_query_image(self, jpeg: bytes) -> str:
-        key = f"query-{len(self.query_images) + 1}"
+        self.query_count += 1
+        key = f"query-{self.query_count}"
         self.query_images[key] = jpeg
         return key
+
+    def forget_images(self) -> None:
+        """Drop the images the model is no longer sent: older thumbnails and transformed
+        photos become a note in the messages (`miroir.web.chat_render.render`)."""
+        sent = sent_thumbs(self.messages)
+        for image_id in [i for i in self.thumbs if i not in sent]:
+            del self.thumbs[image_id]
+        for key in list(self.query_images)[:-KEEP_QUERY_IMAGES]:
+            del self.query_images[key]
 
     def title_of(self, entity_id: str) -> str:
         known = self.known.get(entity_id)
@@ -341,6 +356,10 @@ class Conversation:
 
     def emit(self, event: Event) -> None:
         self.events.append(event)
+        self.wake()
+
+    def wake(self) -> None:
+        """Wake the open stream: an event came, or a new stream replaces it."""
         done, self.changed = self.changed, asyncio.Event()
         done.set()
 
@@ -457,10 +476,17 @@ class ChatService:
         return after
 
     async def stream(self, conversation: Conversation, after: int) -> AsyncIterator[Event]:
-        """Events from number `after` on, until the turn ends or `STREAM_S` pass."""
+        """Events from number `after` on, until the turn ends or `STREAM_S` pass. One stream
+        per conversation: a new one ends the one before, which says it was replaced."""
         deadline = self._clock() + STREAM_S
         n = max(after, 0)
+        conversation.stream_id += 1
+        mine = conversation.stream_id
+        conversation.wake()
         while True:
+            if conversation.stream_id != mine:
+                yield {"type": "replaced"}
+                return
             waiter = conversation.changed
             while n < len(conversation.events):
                 yield {**conversation.events[n], "n": n}
@@ -716,6 +742,7 @@ class ChatService:
                 kind, at = reply.wait
                 c.pending = _Pending(kind, len(c.messages) + at)
             c.messages.extend(reply.messages)
+            c.forget_images()
             if reply.waiting is not None:
                 return reply.waiting
             refused = refused + 1 if reply.refused == len(ids) else 0
