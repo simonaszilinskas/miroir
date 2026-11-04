@@ -16,7 +16,8 @@ from miroir.config import Settings
 from miroir.jobs.openrouter import JSON
 from miroir.web import chat_method
 from miroir.web.chat import BRIEF, LOCKED_NOTE
-from miroir.web.chat_tools import NOT_FOUND, ToolName
+from miroir.web.chat_method import Method
+from miroir.web.chat_tools import NOT_FOUND, ToolName, ToolOutcome
 from miroir.web.chatlog import FileChatLog, pull, redact
 from miroir.web.toolsearch import SearchKind, ToolQuery, ToolSearch
 from tests import web_helpers as h
@@ -293,6 +294,74 @@ def test_best_names_only_records_the_model_has_seen() -> None:
     assert "Best so far: none named yet" in replies[0]
     assert "Best so far: PA1 (" in replies[1]
     assert "PA999" not in replies[1]
+
+
+# --- the method alone, without a model ---------------------------------------------------------
+
+OFFERED = {t.value for t in ToolName}
+
+
+def search(
+    method: Method,
+    name: str = "text_search",
+    *,
+    hits: tuple[str, ...] = (),
+    best: list[str] | None = None,
+) -> str | None:
+    """Ask for a search; when not refused, run it as listing `hits`."""
+    args: dict[str, object] = {} if best is None else {"best": best}
+    refused = method.refusal(name, args, offered=OFFERED, waiting=False, seen=bool)
+    if refused is None:
+        method.ran(name, ToolOutcome("ok", hit_ids=hits), tuple(method.best))
+    return refused
+
+
+def test_the_method_locks_after_its_searches_without_a_sure_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 2)
+    monkeypatch.setattr(chat_method, "MAX_STALE", 99)
+    method = Method()
+    assert search(method) is None
+    assert not method.finishing
+    assert search(method) is None
+    assert method.finishing
+    refused = search(method)
+    assert refused is not None
+    assert refused.startswith("not run: 2 searches without a sure match")
+    method.new_turn()
+    assert search(method) is None
+
+
+def test_the_method_counts_a_search_stale_unless_its_results_enter_the_best() -> None:
+    method = Method()
+    search(method, hits=("A", "B"))
+    search(method, hits=("C",), best=["B"])  # B came from the first: not stale
+    assert method.turn.stale == 0
+    search(method, hits=("D",), best=["B"])  # nothing from C entered the best
+    assert method.turn.stale == 1
+
+
+def test_the_method_wants_a_look_at_the_first_look_before_a_search() -> None:
+    method = Method()
+    method.first_look(["A", "B", "C", "D", "E"], sure=())
+    assert method.best == ["A", "B", "C"]
+    refused = search(method)
+    assert refused is not None
+    assert "A, B, C, D" in refused
+    assert search(method, "view_results", hits=("B",)) is None
+    assert search(method) is None
+
+
+def test_a_failed_search_uses_a_call_but_not_a_search() -> None:
+    method = Method()
+    refused = method.refusal("text_search", {}, offered=OFFERED, waiting=False, seen=bool)
+    assert refused is None
+    method.ran("text_search", ToolOutcome("error: down", error=True), ())
+    assert (method.turn.used, method.turn.searches) == (1, 0)
+    assert method.refusal("image_search", {}, offered=set(), waiting=False, seen=bool) == (
+        "error: image_search is not available in this search."
+    )
 
 
 # --- 5. end honestly ---------------------------------------------------------------------------
