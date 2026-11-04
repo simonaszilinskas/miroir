@@ -159,39 +159,39 @@ class ScriptedModel:
 _LISTED = re.compile(r"^\d+\. ([^ |]+) \|", re.MULTILINE)
 
 
-_ONESHOT_SEARCH: dict[str, JSON] = {
-    "model": "auto",
-    "top_k": 10,
-    "why": "Personne ne répondra : je relance par l’image.",
-}
-
-
-def _oneshot_search(messages: Sequence[Mapping[str, object]]) -> dict[str, JSON]:
-    """A one-shot image search: cropped to the first outline and in black and white when the
+def _image_search(messages: Sequence[Mapping[str, object]]) -> dict[str, JSON]:
+    """An image search: cropped to the first outline and in black and white when the
     detector found one, so the page shows a transformed search."""
     outlined = any("Outlines the detector found" in _content_text(m) for m in messages)
     if not outlined:
-        return _ONESHOT_SEARCH
+        why = "Les premiers résultats ne tranchent pas ; je relance par l’image."
+        return {"model": "auto", "top_k": 10, "why": why}
     transform: dict[str, JSON] = {"outline": 1, "grayscale": True}
     why = "Je cherche la première œuvre repérée, en noir et blanc comme les tirages d’archives."
-    return {**_ONESHOT_SEARCH, "transform": transform, "why": why}
+    return {"model": "auto", "top_k": 10, "transform": transform, "why": why}
 
 
-def _searched(messages: Sequence[Mapping[str, object]]) -> bool:
-    """Whether the model has called image_search yet."""
+#: The tools that search.
+_SEARCHES = frozenset({"image_search", "text_search", "more_like"})
+
+
+def _called(messages: Sequence[Mapping[str, object]], names: frozenset[str]) -> bool:
+    """Whether the model has called one of these tools yet."""
     return any(
-        _dict(c.get("function")).get("name") == "image_search"
+        _dict(c.get("function")).get("name") in names
         for m in messages
         for c in _dicts(m.get("tool_calls"))
     )
 
 
 class FakeGuide:
-    """A rule-following stand-in for the model, so the page runs on the Mac at no cost. With
-    a photo it looks at the first look's top thumbnails, then asks one question (or asks to
-    frame part of the photo when the goal says "cadre"), then runs an image search, looks at
-    three results and shows them as close. A message from the visitor gets a text search of
-    their first words. Every search and look says why."""
+    """A rule-following stand-in for the model, so the page runs on the Mac at no cost. It
+    looks at the first look's top thumbnails, searches once (by image, or by the visitor's
+    words), looks at what came back, then asks where the photo was taken (or asks to frame
+    part of the photo when the goal says "cadre"). The answer starts a search of its words
+    (near the visitor when they shared their position); it looks at the new results and shows
+    them as close. A message from the visitor gets a text search of their first words. Every
+    search and look says why."""
 
     @property
     def model(self) -> str:
@@ -204,11 +204,8 @@ class FakeGuide:
         role = last.get("role")
         content = _content_text(last)
         listed = [i for m in messages if m.get("role") == "tool" for i in _ids(_content_text(m))]
-        asked = any(
-            _dict(c.get("function")).get("name") == "ask_visitor"
-            for m in messages
-            for c in _dicts(m.get("tool_calls"))
-        )
+        searched = _called(messages, _SEARCHES)
+        asked = _called(messages, frozenset({"ask_visitor", "ask_region"}))
         if role == "user" and "The visitor's goal" in content:
             if "ask_region" in tools and "cadre" in content:
                 reason = {"reason": "Encadrez la partie de la photo qui vous intéresse."}
@@ -220,52 +217,70 @@ class FakeGuide:
                     "why": "Je regarde d’abord les premiers résultats de près.",
                 }
                 return _answer("", [("view_results", look)])
-            if "image_search" in tools and "ask_visitor" in tools:
-                return _answer("Modèle factice : une question d’abord.", [_QUESTION])
             if "image_search" in tools:
-                return _answer("", [("image_search", _oneshot_search(messages))])
+                return _answer("", [("image_search", _image_search(messages))])
             words = _between(content, "typed words: «", "»") or "église"
             return _answer("", [("text_search", _words_search(words))])
-        if "Thumbnails asked for" in content and "image_search" in tools and not asked:
-            # A one-shot search offers no question: search by image instead.
-            if "ask_visitor" in tools:
-                return _answer("Modèle factice : une question d’abord.", [_QUESTION])
-            if not _searched(messages):
-                return _answer("", [("image_search", _oneshot_search(messages))])
         if role == "user" and "The part the visitor framed" in content:
             search = {"source": "region", "model": "auto", "why": "Je cherche la partie encadrée."}
             return _answer("", [("image_search", search)])
-        if role == "tool" and ("The visitor answers" in content or "framed nothing" in content):
-            why = "La réponse précise la recherche ; je relance par l’image."
-            return _answer("", [("image_search", {"model": "auto", "top_k": 10, "why": why})])
+        if role == "tool" and "The visitor answers" in content:
+            return _answer("", [_after_answer(content)])
+        if role == "tool" and "framed nothing" in content:
+            why = "Toute la photo compte ; je relance par l’image, autrement."
+            return _answer("", [("image_search", {"model": "mix", "top_k": 10, "why": why})])
         if role == "user" and "The visitor writes" in content:
             words = _between(content, "«", "»") or "église"
             return _answer("", [("text_search", _words_search(words))])
+        thumbnails = "Thumbnails asked for" in content
+        if thumbnails and not searched and "image_search" in tools:
+            return _answer("", [("image_search", _image_search(messages))])
         looked = _looked_at(messages)
         fresh = [i for i in dict.fromkeys(listed[-10:]) if i not in looked][:3]
-        if role == "tool" and fresh and "view_results" not in content:
+        if fresh and not thumbnails:
             why = "Je regarde de près les premiers résultats nouveaux."
             ids: list[JSON] = list[JSON](fresh)
             return _answer("", [("view_results", {"entity_ids": ids, "why": why})])
-        picks: list[JSON] = [
-            {"id": i, "reason": "Choix du modèle factice"}
-            for i in list(dict.fromkeys(reversed(listed)))[:3]
-        ]
-        shown: dict[str, JSON] = {
-            "found": "close",
-            "summary": "Modèle factice : voici ce qui ressemble le plus.",
-            "results": picks,
-        }
-        return _answer("", [("show_results", shown)])
+        if searched and not asked and "ask_visitor" in tools:
+            return _answer("Je ne suis pas encore sûr : une précision m’aiderait.", [_QUESTION])
+        return _answer("", [("show_results", _shown(listed))])
 
+
+_REASONS = ("Même silhouette et mêmes matériaux", "Même type d’édifice", "Proche par le décor")
 
 _QUESTION: tuple[str, Mapping[str, JSON]] = (
     "ask_visitor",
     {
-        "question": "Que montre votre photo, en quelques mots ?",
-        "choices": ["Un bâtiment", "Un tableau", "Un objet"],
+        "question": "Savez-vous où la photo a été prise ? Une commune suffit.",
+        "choices": ["Dans une ville", "Dans un village", "Dans un musée"],
+        "about": "place",
+        "offer_position": True,
     },
 )
+
+
+def _shown(listed: Sequence[str]) -> dict[str, JSON]:
+    """The last results listed, latest first, as close."""
+    picks: list[JSON] = [
+        {"id": i, "reason": _REASONS[n % len(_REASONS)]}
+        for n, i in enumerate(list(dict.fromkeys(reversed(listed)))[:3])
+    ]
+    summary = "Modèle factice : voici ce qui ressemble le plus."
+    return {"found": "close", "summary": summary, "results": picks}
+
+
+def _after_answer(content: str) -> tuple[str, Mapping[str, JSON]]:
+    """The search that follows the visitor's answer."""
+    if "shared their position" in content:
+        why = "Vous êtes sur place : je cherche ce qui est près de vous."
+        near: dict[str, JSON] = {"near": "visitor"}
+        return "image_search", {"model": "A3", "top_k": 10, "filters": near, "why": why}
+    answer = _between(content, "«", "»")
+    if answer and "ne sais pas" not in answer:
+        why = "Je cherche le lieu que vous donnez."
+        return "text_search", {**_words_search(answer), "why": why}
+    why = "Sans lieu, je compare autrement : la forme d’abord."
+    return "image_search", {"model": "A7", "top_k": 10, "why": why}
 
 
 def _looked_at(messages: Sequence[Mapping[str, object]]) -> set[str]:

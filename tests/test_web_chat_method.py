@@ -16,8 +16,9 @@ from miroir.config import Settings
 from miroir.jobs.openrouter import JSON
 from miroir.web import chat_method
 from miroir.web.chat import BRIEF, LOCKED_NOTE
-from miroir.web.chat_method import Method
-from miroir.web.chat_tools import NOT_FOUND, ToolName, ToolOutcome
+from miroir.web.chat_method import Method, early_question
+from miroir.web.chat_prompts import ASK_CLOSE, ASK_PLACE
+from miroir.web.chat_tools import NOT_FOUND, ToolName, ToolOutcome, Wait
 from miroir.web.chatlog import FileChatLog, pull, redact
 from miroir.web.toolsearch import SearchKind, ToolQuery, ToolSearch
 from tests import web_helpers as h
@@ -362,6 +363,126 @@ def test_a_failed_search_uses_a_call_but_not_a_search() -> None:
     assert method.refusal("image_search", {}, offered=set(), waiting=False, seen=bool) == (
         "error: image_search is not available in this search."
     )
+
+
+# --- 6. ask when unsure ------------------------------------------------------------------------
+
+
+def asked(method: Method, name: str = "ask_visitor") -> str | None:
+    """Ask the visitor; when not refused, count it as asked."""
+    refused = method.refusal(name, {}, offered=OFFERED, waiting=False, seen=bool)
+    if refused is None:
+        method.ran(name, ToolOutcome("", wait=Wait.ANSWER, counted=False), tuple(method.best))
+    return refused
+
+
+def test_after_two_searches_without_a_sure_match_the_model_is_told_to_ask_once() -> None:
+    method = Method()
+    search(method, hits=("A", "B"))
+    assert method.ask_note() is None
+    search(method, hits=("C",))
+    note = method.ask_note()
+    assert note is not None
+    assert note.startswith("2 searches and no sure match")
+    assert "ask_visitor" in note
+    search(method, hits=("D",))
+    assert method.ask_note() is None  # once a message
+    method.new_turn()
+    search(method)
+    search(method)
+    assert method.ask_note() is not None
+
+
+def test_a_search_whose_top_two_are_close_tells_the_model_to_ask() -> None:
+    method = Method()
+    gap = chat_method.CLOSE_GAP / 2
+    method.ran("text_search", ToolOutcome("ok", hit_ids=("A", "B"), top_gap=gap), ())
+    assert method.ask_note() == ASK_CLOSE
+    clear = Method()
+    clear.ran("text_search", ToolOutcome("ok", hit_ids=("A", "B"), top_gap=0.2), ())
+    assert clear.ask_note() is None
+
+
+def test_no_note_to_ask_after_a_question_or_with_a_sure_match() -> None:
+    method = Method()
+    assert asked(method) is None
+    search(method)
+    search(method)
+    assert method.ask_note() is None
+    sure = Method()
+    sure.first_look(["A", "B"], sure=("A",))
+    sure.must_view = ()
+    search(sure)
+    search(sure)
+    assert sure.ask_note() is None
+
+
+def test_questions_use_no_search_and_stop_at_their_cap() -> None:
+    method = Method()
+    for n in range(chat_method.MAX_QUESTIONS):
+        assert asked(method, "ask_region" if n else "ask_visitor") is None
+        method.new_turn()
+    assert (method.turn.used, method.turn.searches) == (0, 0)
+    refused = asked(method)
+    assert refused is not None
+    assert refused.startswith(f"not run: {chat_method.MAX_QUESTIONS} questions already")
+    assert method.ask_note() is None  # none left to ask
+    assert search(method) is None
+
+
+@pytest.mark.parametrize(
+    ("building", "position", "caption_place", "sure", "asks"),
+    [
+        (True, False, False, False, True),
+        (True, True, False, False, False),
+        (True, False, True, False, False),
+        (True, False, False, True, False),
+        (False, False, False, False, False),
+    ],
+)
+def test_a_building_with_no_position_asks_where_first(
+    building: bool, position: bool, caption_place: bool, sure: bool, asks: bool
+) -> None:
+    note = early_question(
+        building=building, position=position, caption_place=caption_place, sure=sure
+    )
+    assert note == (ASK_PLACE if asks else "")
+
+
+def test_the_opening_asks_for_the_place_of_a_building_without_a_position() -> None:
+    with Rig([shown("PA1")], cutoff=NOT_SURE) as rig:  # the tiny engine guesses building
+        cid = rig.start()
+        rig.send(cid, "goal", EXACT)
+    assert ASK_PLACE in body_text(rig.model.bodies[0])
+    with Rig([shown("PA1")], cutoff=NOT_SURE) as rig:
+        cid = rig.start(position={"latitude": 43.6, "longitude": 1.44})
+        rig.send(cid, "goal", EXACT)
+    assert ASK_PLACE not in body_text(rig.model.bodies[0])
+
+
+def test_the_model_reads_the_note_to_ask_in_its_second_searchs_result() -> None:
+    script = [
+        LOOK,
+        searching("image_search", {"model": "A3"}),
+        searching("text_search", {"query": "église"}),
+        call("ask_visitor", {**ASK, "about": "place", "offer_position": True}),
+    ]
+    with Rig(script, cutoff=NOT_SURE) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    replies = last_tools(rig)
+    assert "Before searching again, ask the visitor" not in replies[1]
+    assert "2 searches and no sure match" in replies[2]
+    question = of(events, "question")[0]
+    assert (question["about"], question["position"], question["region"]) == ("place", True, False)
+    assert events[-1]["waiting"] == "answer"
+
+
+def test_the_brief_makes_asking_a_first_class_move() -> None:
+    assert "Ask the visitor." in BRIEF
+    assert "offer_position" in BRIEF
+    assert "A question uses no search" in BRIEF
+    assert "{questions}" in BRIEF
 
 
 # --- 5. end honestly ---------------------------------------------------------------------------

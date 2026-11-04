@@ -144,6 +144,21 @@ class Wait(StrEnum):
     REGION = "region"
 
 
+class About(StrEnum):
+    """What a question asks about: the page shows it with its own icon."""
+
+    PLACE = "place"
+    """Where it is: the commune, the building, the museum."""
+    PERIOD = "period"
+    KIND = "kind"
+    """What it is: a building, a painting, an object, an archive print."""
+    WORK = "work"
+    """Which one, when the photo shows several."""
+    TEXT = "text"
+    """A caption, a label, a signature the model cannot read."""
+    OTHER = "other"
+
+
 # --- what a handler returns ------------------------------------------------------------------
 
 
@@ -177,6 +192,10 @@ class Question:
     text: str
     choices: tuple[str, ...]
     offer_position: bool = False
+    """The page offers "Partager ma position" with the answers."""
+    offer_region: bool = False
+    """The page offers "Encadrer l’œuvre" with the answers: the framed part is the answer."""
+    about: About = About.OTHER
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +220,8 @@ class ToolOutcome:
     """show_results: what the visitor reads above the cards."""
     hit_ids: tuple[str, ...] = ()
     """The entities a search or a look listed, in order."""
+    top_gap: float | None = None
+    """A search: its first score minus its second (None with fewer than two results)."""
     error: bool = False
     counted: bool = True
     """It used one of the turn's tool calls (searches and views do; questions do not)."""
@@ -763,10 +784,12 @@ def _listing(
     n = len(found.hits)
     summary = f"{n} résultat{'s' if n > 1 else ''}" if n else "aucun résultat"
     thumbs = tuple(StepThumb(h.entity_id, h.title, h.image_url) for h in found.hits[:STEP_THUMBS])
+    gap = found.hits[0].score - found.hits[1].score if n > 1 else None
     return ToolOutcome(
         f"{head}\nid | score | base | title | place | authors | date\n{body}",
         Step(label, summary, thumbs),
         hit_ids=tuple(h.entity_id for h in found.hits),
+        top_gap=gap,
     )
 
 
@@ -903,7 +926,6 @@ async def more_like(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome
 
 
 async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
-    del ctx
     question = str(args.get("question") or "").strip()
     if not question:
         msg = "ask_visitor needs a question, in French"
@@ -914,13 +936,18 @@ async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
     if not MIN_CHOICES <= len(choices) <= MAX_CHOICES:
         msg = f"ask_visitor needs {MIN_CHOICES} to {MAX_CHOICES} short suggested answers"
         raise ArgumentError(msg)
-    offer = args.get("offer_position") is True
-    return ToolOutcome(
-        "",
-        wait=Wait.ANSWER,
-        question=Question(question[:300], choices, offer),
-        counted=False,
+    about = str(args.get("about") or About.OTHER.value).strip().lower()
+    if about not in {a.value for a in About}:
+        msg = f"unknown about {about!r}: {', '.join(About)}"
+        raise ArgumentError(msg)
+    asked = Question(
+        question[:300],
+        choices,
+        offer_position=args.get("offer_position") is True,
+        offer_region=args.get("offer_region") is True and ctx.photo is not None,
+        about=About(about),
     )
+    return ToolOutcome("", wait=Wait.ANSWER, question=asked, counted=False)
 
 
 async def ask_region(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
@@ -1144,14 +1171,33 @@ TOOLS: tuple[Tool, ...] = (
     Tool(
         ToolName.ASK_VISITOR,
         "Ask the visitor one short question in French, in plain words, with 2 to 4 suggested "
-        "answers. They may also type their own answer or say they do not know. Set "
-        "offer_position when where they stand would help.",
+        "answers. They may also type their own answer or say they do not know. Uses no "
+        "search. Ends your turn until they answer.",
         {
             "type": "object",
             "properties": {
                 "question": {"type": "string"},
-                "choices": {"type": "array", "items": {"type": "string"}},
-                "offer_position": {"type": "boolean"},
+                "choices": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2 to 4 short likely answers, in French.",
+                },
+                "about": {
+                    "type": "string",
+                    "enum": [a.value for a in About],
+                    "description": "place: the town, street, building or museum. period: "
+                    "when. kind: what it is. work: which one of several in the photo. text: "
+                    "a caption or label you cannot read. other.",
+                },
+                "offer_position": {
+                    "type": "boolean",
+                    "description": "Offer 'share my position': where the visitor stands "
+                    "now (a building in front of them).",
+                },
+                "offer_region": {
+                    "type": "boolean",
+                    "description": "Offer to frame the work in the photo as an answer.",
+                },
             },
             "required": ["question", "choices"],
         },
@@ -1208,14 +1254,13 @@ TOOLS: tuple[Tool, ...] = (
 BY_NAME: dict[str, Tool] = {t.name.value: t for t in TOOLS}
 
 
-#: The tools that wait for the visitor: left out when nobody will answer (one-shot search).
+#: The tools that wait for the visitor.
 ASKING = frozenset({ToolName.ASK_VISITOR, ToolName.ASK_REGION})
 
 
-def tools_for(*, photo: bool, ask: bool = True) -> tuple[Tool, ...]:
-    """The tools a conversation offers: without a photo, no image search, no framing; without
-    `ask` (the page's one-shot "Approfondi" search), no question to the visitor."""
-    return tuple(t for t in TOOLS if (photo or not t.needs_photo) and (ask or t.name not in ASKING))
+def tools_for(*, photo: bool) -> tuple[Tool, ...]:
+    """The tools a conversation offers: without a photo, no image search, no framing."""
+    return tuple(t for t in TOOLS if photo or not t.needs_photo)
 
 
 async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:

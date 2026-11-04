@@ -40,10 +40,11 @@ from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import DETECT_SIDE, Box, Outlines
 from miroir.web import chat_method, chat_prompts
 from miroir.web.catalog import Catalog, CatalogRecord, Filters
-from miroir.web.chat_method import COUNTED, FINISHING, MAX_REFUSED, Method
+from miroir.web.chat_method import COUNTED, FINISHING, MAX_REFUSED, Method, early_question
 from miroir.web.chat_model import ChatModel, MistralModel, ModelError, OpenRouterModel, chat_model
-from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE, ONESHOT_NOTE
+from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE
 from miroir.web.chat_render import (
+    FIRST_LOOK,
     KEEP_QUERY_IMAGES,
     PHOTO_SIDE,
     CardView,
@@ -89,7 +90,6 @@ from miroir.web.toolsearch import THUMB_SIDE, Hit, ToolHits, ToolQuery
 __all__ = [
     "BRIEF",
     "LOCKED_NOTE",
-    "ONESHOT_NOTE",
     "BusyError",
     "CardView",
     "ChatModel",
@@ -116,7 +116,7 @@ MAX_MODEL_CALLS = 25
 #: Seconds the model may work on one visitor message, its first look apart.
 TURN_S = 300.0
 #: First-look results the model is told about.
-FIRST_LOOK = 10
+FIRST_LOOK_TOLD = 10
 #: The cost guessed for a first call, before one is known.
 FIRST_CALL_USD = 0.01
 #: A stream request ends after this many seconds; the page asks again.
@@ -225,7 +225,6 @@ class Conversation:
         words: str,
         position: Position | None,
         now: float,
-        oneshot: bool = False,
         filters: Filters | None = None,
     ) -> None:
         self.service = service
@@ -234,8 +233,6 @@ class Conversation:
         self.photo_bytes = photo
         self.words = words
         self.position_given = position
-        self.oneshot = oneshot
-        """The page's "Approfondi" search: one turn, no question to the visitor."""
         self.filters = filters or Filters()
         """The filters the visitor set on the page."""
         self.touched = now
@@ -342,6 +339,13 @@ class Conversation:
         for key in list(self.query_images)[:-KEEP_QUERY_IMAGES]:
             del self.query_images[key]
 
+    def shortlist(self) -> list[JSON]:
+        """The best-so-far as the page shows it: id, title and image of each."""
+        cards = [self.known[e] for e in self.method.best if e in self.known]
+        return [
+            {"entity_id": k.entity_id, "title": k.title, "image_url": k.image_url} for k in cards
+        ]
+
     def title_of(self, entity_id: str) -> str:
         known = self.known.get(entity_id)
         return "" if known is None else known.title
@@ -419,12 +423,11 @@ class ChatService:
         photo: bytes | None,
         words: str,
         position: Position | None,
-        oneshot: bool = False,
         filters: Filters | None = None,
     ) -> Conversation:
         """A new conversation. With a photo, the site's usual search starts at once.
-        `oneshot`: the page's "Approfondi" search, which asks the visitor nothing; `filters`:
-        those the visitor set, which the first look applies and the model is told about."""
+        `filters`: those the visitor set, which the first look applies and the model is told
+        about."""
         self._forget_old()
         conversation = Conversation(
             self,
@@ -433,7 +436,6 @@ class ChatService:
             words=words.strip()[:MAX_WORDS],
             position=position,
             now=self._clock(),
-            oneshot=oneshot,
             filters=filters,
         )
         if photo is not None:
@@ -452,7 +454,6 @@ class ChatService:
                 "photo": photo is not None,
                 "words": conversation.words,
                 "position": position is not None,
-                "oneshot": oneshot,
                 "filters": not conversation.filters.empty,
                 "model": self.model.model,
             }
@@ -593,7 +594,8 @@ class ChatService:
                 )
             )
             return
-        if pending.kind is Wait.REGION and given.kind is Visit.REGION:
+        # A framed part answers a request to frame, or a question that offered framing.
+        if given.kind is Visit.REGION:
             if given.region is None:
                 c.messages[pending.message]["content"] = chat_prompts.FRAMED_NOTHING
                 return
@@ -613,8 +615,6 @@ class ChatService:
 
     async def _opening(self, c: Conversation, goal: str) -> Message:
         parts: list[JSON] = [text_part(chat_prompts.GOAL.format(goal=goal or "?"))]
-        if c.oneshot:
-            parts.append(text_part(ONESHOT_NOTE))
         if not c.filters.empty:
             parts.append(text_part(chat_prompts.filters_note(c.filters)))
         if c.photo_bytes is None:
@@ -637,16 +637,16 @@ class ChatService:
         c.steps += 1
         step = c.steps
         label = chat_prompts.FIRST_LOOK_LABEL
-        c.emit({"type": "step", "id": step, "state": "running", "label": label})
+        c.emit({"type": "step", "id": step, "tool": FIRST_LOOK, "state": "running", "label": label})
         start = time.monotonic()
         try:
             found = await asyncio.wait_for(asyncio.shield(c.first_look), FIRST_LOOK_WAIT_S)
         except Exception as err:  # the model can search on its own: the turn goes on
             logger.warning("chat %s: first look failed: %r", c.id[:8], err)
-            c.emit(step_event(step, label, "pas de résultat", (), error=True))
+            c.emit(step_event(step, FIRST_LOOK, label, "pas de résultat", (), error=True))
             c.log({"type": "first_look", "error": True, "ms": _ms(start)})
             return chat_prompts.FIRST_LOOK_FAILED
-        cards = found.cards[:FIRST_LOOK]
+        cards = found.cards[:FIRST_LOOK_TOLD]
         c.method.first_look(
             [k.entity_id for k in cards],
             (k.entity_id for k in cards if k.level is Level.VERY_CLOSE),
@@ -682,7 +682,8 @@ class ChatService:
             {"entity_id": k.entity_id, "title": k.title, "image_url": k.image_url}
             for k in cards[:8]
         ]
-        c.emit(step_event(step, label, f"{len(found.cards)} résultats", thumbs))
+        done = step_event(step, FIRST_LOOK, label, f"{len(found.cards)} résultats", thumbs)
+        c.emit({**done, "shortlist": c.shortlist()})
         lines = [
             f"{i}. {k.entity_id} | {k.collection} | {k.title} | {k.place} | {k.level_label}"
             for i, k in enumerate(cards, start=1)
@@ -695,11 +696,17 @@ class ChatService:
         sure = c.method.sure
         sure_line = chat_prompts.FIRST_LOOK_SURE.format(ids=", ".join(sorted(sure))) if sure else ""
         look = chat_prompts.FIRST_LOOK_LOOK.format(ids=", ".join(c.method.must_view))
-        return f"{head}\n" + "\n".join(lines) + f"\n{sure_line}\n{look}"
+        ask = early_question(
+            building=found.guessed_type == "building",
+            position=c.position_given is not None,
+            caption_place=found.caption_place is not None,
+            sure=bool(sure),
+        )
+        return f"{head}\n" + "\n".join(lines) + f"\n{sure_line}\n{look}\n{ask}".rstrip()
 
     async def _loop(self, c: Conversation) -> str:
         """Model calls and their tools until the model shows results, asks, or stops."""
-        tools = tools_for(photo=c.photo_bytes is not None, ask=not c.oneshot)
+        tools = tools_for(photo=c.photo_bytes is not None)
         c.method.new_turn()
         schemas = [t.schema() for t in tools]
         # Locked or out of searches, the model is offered only what still runs.
@@ -837,6 +844,7 @@ class ChatService:
                 running: Event = {
                     "type": "step",
                     "id": step,
+                    "tool": call.name,
                     "state": "running",
                     "label": running_label(call.name, args) or chat_prompts.RUNNING[call.name],
                 }
@@ -875,6 +883,9 @@ class ChatService:
             ran = not outcome.error
             if ran and (counted or call.name == ToolName.VIEW_RESULTS.value):
                 outcome = with_note(outcome, method.best_line(c.title_of))
+            ask = method.ask_note() if ran and counted else None
+            if ask is not None:
+                outcome = with_note(outcome, ask)
             reply.waiting = self._outcome(
                 c, reply, outcome, step=step, call_id=call_id, name=call.name, why=why
             )
@@ -902,7 +913,9 @@ class ChatService:
                         "type": "question",
                         "text": q.text,
                         "choices": list(q.choices),
+                        "about": q.about.value,
                         "position": q.offer_position,
+                        "region": q.offer_region,
                     }
                 )
                 return "answer"
@@ -925,9 +938,11 @@ class ChatService:
                 {"entity_id": t.entity_id, "title": t.title, "image_url": t.image_url}
                 for t in s.thumbs
             ]
-            event = step_event(step, s.label, s.summary, thumbs, error=s.error)
+            event = step_event(step, name, s.label, s.summary, thumbs, error=s.error)
             if why:
                 event["why"] = why
+            if not s.error and (name in COUNTED or name == ToolName.VIEW_RESULTS.value):
+                event["shortlist"] = c.shortlist()
             c.emit(event)
         return None
 
@@ -966,6 +981,7 @@ class ChatService:
             views=chat_method.MAX_VIEWS,
             searches=chat_method.MAX_SEARCHES,
             stale=chat_method.MAX_STALE,
+            questions=chat_method.MAX_QUESTIONS,
         )
 
     def _render(self, c: Conversation) -> list[JSON]:
