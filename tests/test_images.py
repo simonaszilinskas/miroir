@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import unicodedata
+
 import pytest
 
 from miroir.records.images import (
     ImageSkip,
     asset_url,
+    bucket_key,
     image_type_from_path,
     make_image_id,
     skip_reason,
 )
-from miroir.records.model import ImageType
+from miroir.records.mappers import map_record
+from miroir.records.model import Collection, ImageType
+from tests.helpers import raw_record
 
 
 @pytest.mark.parametrize(
@@ -63,9 +68,47 @@ def test_asset_url_percent_encodes_the_path() -> None:
     )
 
 
-def test_image_id_depends_on_ref_and_url_only() -> None:
-    a = make_image_id("REF1", "https://x/a.jpg")
-    assert a == make_image_id("REF1", "https://x/a.jpg")
+def test_image_id_depends_on_ref_and_key_only() -> None:
+    a = make_image_id("REF1", "mnr/REF1/a.jpg")
+    assert a == make_image_id("REF1", "mnr/REF1/a.jpg")
     assert len(a) == 16
-    assert a != make_image_id("REF2", "https://x/a.jpg")
-    assert a != make_image_id("REF1", "https://x/b.jpg")
+    assert a != make_image_id("REF2", "mnr/REF1/a.jpg")
+    assert a != make_image_id("REF1", "mnr/REF1/b.jpg")
+
+
+# Golden ids: a change here changes every image id, so every vector run and test set made
+# before it (technical spec §3.3). Change them only with a full re-index.
+@pytest.mark.parametrize(
+    ("collection", "ref", "position", "image_id"),
+    [
+        (Collection.JOCONDE, "M1222019757", 0, "31e508966c676ef6"),
+        (Collection.MEMOIRE, "APMH00125797", 0, "8b9a425a80ae10cc"),
+        # "ER 2_photo_Georges_Poncet.JPG": the URL encodes the space, the id does not.
+        (Collection.ROSE_VALLAND, "AEG00007", 0, "7d6c1cf4f5df7836"),
+    ],
+)
+def test_image_ids_of_real_export_lines_are_pinned(
+    collection: Collection, ref: str, position: int, image_id: str
+) -> None:
+    record = map_record(collection, raw_record(collection, ref)).record
+    assert record is not None
+    assert record.images[position].image_id == image_id
+
+
+def test_image_id_ignores_how_an_accented_name_is_spelt() -> None:
+    path = "mnr/OAR620/OAR620_CopyrightMuséeduLouvre2021_Détail.JPG"
+    decomposed = unicodedata.normalize("NFD", path)
+    assert decomposed != path
+    assert bucket_key(decomposed) == bucket_key("/" + path) == path
+    assert make_image_id("OAR620", bucket_key(decomposed)) == "b339f33b2cd9e85d"
+    assert make_image_id("OAR620", bucket_key(path)) == "b339f33b2cd9e85d"
+
+
+def test_one_file_spelt_two_ways_is_one_image() -> None:
+    raw = raw_record(Collection.ROSE_VALLAND, "MNR00564")
+    path = "mnr/MNR00564/MNR564_détail.jpg"
+    twice = {**raw, "VIDEO": [path, unicodedata.normalize("NFD", path)]}
+    result = map_record(Collection.ROSE_VALLAND, twice)
+    assert result.record is not None
+    assert len(result.record.images) == 1
+    assert result.image_skips == (ImageSkip.DUPLICATE,)

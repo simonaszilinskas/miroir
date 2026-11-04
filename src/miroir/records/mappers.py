@@ -17,6 +17,7 @@ from miroir.config import POP_NOTICE_URL
 from miroir.records.images import (
     ImageSkip,
     asset_url,
+    bucket_key,
     copy_key,
     image_type_from_path,
     is_copy_name,
@@ -312,16 +313,18 @@ def _select_images(
         # Keep the plain name POP lists; its bucket copies come after it and are dropped.
         ordered.sort(key=is_copy_name)
     kept: list[str] = []
+    files: set[str] = set()
     keys: set[str] = set()
     skips: list[ImageSkip] = []
     for path in ordered:
         reason = skip_reason(path)
-        if reason is None and path in kept:
+        if reason is None and bucket_key(path) in files:
             reason = ImageSkip.DUPLICATE
         if reason is None and drop_renamed_copies and copy_key(path) in keys:
             reason = ImageSkip.RENAMED_COPY
         if reason is None:
             kept.append(path)
+            files.add(bucket_key(path))
             keys.add(copy_key(path))
         else:
             skips.append(reason)
@@ -338,7 +341,7 @@ def _build_images(
         url = asset_url(path)
         images.append(
             Image(
-                image_id=make_image_id(ref, url),
+                image_id=make_image_id(ref, bucket_key(path)),
                 ref=ref,
                 entity_id=entity_id,
                 collection=collection,

@@ -29,8 +29,9 @@ _STRINGS = pa.list_(pa.string())
 
 #: Parquet metadata key holding the version of this module's schemas.
 SCHEMA_VERSION_KEY = b"miroir.schema_version"
-#: Bump on any change of columns or of what a value means. Tables written before versions
-#: existed carry none; they read if their columns match.
+#: Bump on any change of columns or of what a value means. 1: image ids hash the bucket key
+#: (`records.images.make_image_id`). Tables written before versions existed carry none; they
+#: read if their columns match, and their image ids hash the URL (the July scheme).
 SCHEMA_VERSION = b"1"
 
 

@@ -84,7 +84,7 @@ Every mapper turns a POP record into this shape:
 ### 3.3 Images
 
 - **Source.** Fetch from the POP asset bucket: Joconde and Mémoire `IMG`, Rose Valland `VIDEO`, all relative to the `imageUrl` host. For Mémoire, `IMG` is already the largest variant. `images.parquet` stores the percent-encoded URL. Some files are missing from the bucket (for example some names with accents return 404); the IIIF manifest (`iiif_manifest`, IIIF v3, level-2 image service) serves as fallback and for larger sizes.
-- **Image id.** First 16 hex characters of SHA-1 over `ref` and `url`, so it never depends on row order.
+- **Image id.** First 16 hex characters of SHA-1 over `ref` and the file's bucket key (`records.images.bucket_key`: the export path without host, not percent-encoded, Unicode NFC), so it never depends on row order, the asset host or how the URL is spelt. The same file listed in two Unicode forms is one image. *Changed 2026-11-04, before the full re-index (§3.4):* ids used to hash the full percent-encoded URL. Every id made before (the July tables, vectors under `MIROIR_DATA_DIR/vectors/`, test sets, galleries, web bundles, and the image ids inside committed `eval/results/`) belongs to the old scheme and matches no table built since. Nothing is migrated: the full re-index rebuilds them all. Until then, do not rebuild the July tables over a data dir whose vectors and sets you still use; tables of the old scheme carry no schema version (§3.1). `tests/test_images.py` pins a few ids.
 - **Skip:**
   - the shared 1×1 placeholder GIF, which `imageUrl` holds when a record lists no image (3 Joconde, 1 Mémoire)
   - `sur_demande.jpg` ("image on request", 10 Mémoire records)
