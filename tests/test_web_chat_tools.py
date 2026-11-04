@@ -3,17 +3,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
+import json
 
 import pytest
+from PIL import Image as PILImage
 
 from miroir.eval.bm25 import tokens
 from miroir.records.bases import Base, base_of, place_key
 from miroir.records.model import Collection
 from miroir.web import facets
+from miroir.web.chat import ThumbSource
+from miroir.web.chat_tools import BEST, BY_NAME
 from miroir.web.engine import Engine, PhotoCosines
+from miroir.web.publishable import Publishable
 from miroir.web.toolsearch import SearchKind, ToolFilters, ToolQuery, ToolSearch
 from tests import web_helpers as h
+from tests.test_web_chat import EXACT, WHY, Rig, calls, shown, tool_messages
 
 
 def brute_mask(engine: Engine, filters: ToolFilters) -> list[str]:
@@ -105,3 +112,67 @@ def test_the_photos_cosines_are_worked_out_once_for_its_searches_and_looks(
     search.run(ToolQuery(SearchKind.IMAGE, image=other))
     assert len(embedded) == 2
     assert [x.entity_id for x in first.hits] == [x.entity_id for x in again.hits]
+
+
+@pytest.mark.parametrize(
+    ("filters", "said"),
+    [
+        (ToolFilters(communes=("Tolouse",)), "unknown commune 'Tolouse' (did you mean Toulouse?)"),
+        (ToolFilters(departements=("Seine-Maritim",), hard=True), "did you mean Seine-Maritime?"),
+        (ToolFilters(domains=("orfèvrerie",)), "unknown domain 'orfèvrerie'"),
+        (ToolFilters(periods=("Renaissance tardive",)), "unknown period 'Renaissance tardive'"),
+    ],
+)
+def test_a_filter_value_no_record_has_is_named_with_close_ones(
+    filters: ToolFilters, said: str
+) -> None:
+    """A commune spelt wrong once favoured nothing, or with hard hid everything, unsaid."""
+    engine, _ = h.engine()
+    found = ToolSearch(engine).run(ToolQuery(SearchKind.TEXT, text="église", filters=filters))
+    assert found.hits == ()
+    assert any(said in u for u in found.unknown), found.unknown
+
+
+def test_filter_values_records_have_are_not_unknown() -> None:
+    engine, _ = h.engine()
+    filters = ToolFilters(
+        communes=("toulouse",),
+        departements=("Haute Garonne",),
+        domains=("architecture",),
+        periods=("années 1960", "20e siècle"),
+    )
+    found = ToolSearch(engine).run(ToolQuery(SearchKind.TEXT, text="église", filters=filters))
+    assert found.unknown == ()
+    assert [x.entity_id for x in found.hits] == ["PA1"]
+
+
+def test_the_best_so_far_holds_as_many_ids_as_the_schema_says() -> None:
+    schema = json.dumps(BY_NAME["image_search"].schema())
+    assert f"Up to {BEST} ids" in schema
+
+
+def test_a_thumbnail_too_big_to_decode_is_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PILImage, "MAX_IMAGE_PIXELS", 100)  # a 64 by 48 photo is now a bomb
+
+    async def fetch(url: str) -> bytes:
+        del url
+        return h.photo(120)
+
+    source = ThumbSource(Publishable(["j1"]), fetch)
+    assert asyncio.run(source.jpeg("j1", "https://example.org/j1.jpg")) is None
+
+
+def test_the_model_reads_which_filter_value_is_unknown_and_may_search_again() -> None:
+    misspelt = {"query": "église", "why": WHY, "filters": {"commune": ["Tolouse"], "mode": "hard"}}
+    script = [
+        calls([("text_search", misspelt)]),
+        calls([("text_search", {**misspelt, "filters": {"commune": ["Toulouse"]}})]),
+        shown("PA1"),
+    ]
+    with Rig(script) as rig:
+        cid = rig.start(photo=False, words="église")
+        rig.send(cid, "goal", EXACT)
+    refused, searched = tool_messages(rig.model.bodies[-1])
+    assert refused.startswith("error: unknown commune 'Tolouse' (did you mean Toulouse?)")
+    assert "Nothing was searched" in refused
+    assert searched.startswith("text_search 'église'")

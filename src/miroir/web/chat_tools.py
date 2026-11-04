@@ -723,6 +723,7 @@ async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
         ToolQuery(SearchKind.TEXT, text=query, filters=filters, top_k=_top_k(args))
     )
     label = f"Recherche par mots « {query[:60]} »"
+    _known_filters(found)
     if found.words_found is False:
         return ToolOutcome(
             f"text_search {query!r}: no record holds these words. Try other French words "
@@ -735,9 +736,20 @@ async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
     )
 
 
+def _known_filters(found: ToolHits) -> None:
+    """An unknown filter value is an error naming it and the closest known ones."""
+    if found.unknown:
+        msg = (
+            "; ".join(found.unknown) + ": no record has it. Nothing was searched; call again "
+            "with a value records use, or leave that filter out."
+        )
+        raise ArgumentError(msg)
+
+
 def _listing(
     ctx: ToolContext, head: str, label: str, filters: ToolFilters, found: ToolHits
 ) -> ToolOutcome:
+    _known_filters(found)
     ctx.remember(found.hits)
     described = describe_filters(filters)
     if described:
@@ -985,8 +997,8 @@ _WHY: JSON = {
 _BEST: JSON = {
     "type": "array",
     "items": {"type": "string"},
-    "description": "Up to 3 ids you have seen that are the closest so far, best first ([] when "
-    "none fits). Kept across steps; leave it out to keep it as it is.",
+    "description": f"Up to {BEST} ids you have seen that are the closest so far, best first "
+    "([] when none fits). Kept across steps; leave it out to keep it as it is.",
 }
 
 _TRANSFORM_SCHEMA: dict[str, JSON] = {

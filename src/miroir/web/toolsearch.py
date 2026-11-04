@@ -19,6 +19,7 @@ test: a hard filter on a wrong guess lost the answer).
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import threading
@@ -159,6 +160,8 @@ class ToolHits:
     """The photo is an archive print on its card: the print alone was searched."""
     near_ignored: bool = False
     """A position was given but the index knows no places."""
+    unknown: tuple[str, ...] = ()
+    """Filter values no record has, each said with the closest ones: nothing was searched."""
 
 
 _BASES = tuple(Base)
@@ -176,6 +179,8 @@ class _Facts:
     period_words: Mapping[str, Rows]
     periods: Mapping[str, Rows]
     """Broad periods (`facets.PERIODS`)."""
+    names: Mapping[str, str]
+    """A commune's or département's name as records write it, by its key."""
 
 
 class ToolSearch:
@@ -193,6 +198,10 @@ class ToolSearch:
         self._entity_facts()
 
     def run(self, query: ToolQuery) -> ToolHits:
+        if query.kind is not SearchKind.VIEW and query.filters.fields:
+            unknown = self.unknown(query.filters)
+            if unknown:
+                return ToolHits((), unknown=unknown)
         match query.kind:
             case SearchKind.IMAGE:
                 return self._image(query)
@@ -350,6 +359,32 @@ class ToolSearch:
         matching = None if filters.empty else int((mask & alive).sum())
         return _Ranked(tuple(hits), matching, near_ignored)
 
+    def unknown(self, filters: ToolFilters) -> tuple[str, ...]:
+        """Each filter value no record has, said with the closest values records have
+        (a filter on it would favour nothing, or with hard, hide everything)."""
+        facts = self._entity_facts()
+        out: list[str] = []
+        for field_name, values, index in (
+            ("commune", filters.communes, facts.communes),
+            ("departement", filters.departements, facts.departements),
+        ):
+            for value in values:
+                if place_key(value) not in index:
+                    close = _close(place_key(value), index)
+                    out.append(_said(field_name, value, [facts.names.get(k, k) for k in close]))
+        for value in filters.domains:
+            words = tokens(value)
+            if words and not any(w in facts.domain_words for w in words):
+                out.append(_said("domain", value, _close(words[0], facts.domain_words)))
+        for value in filters.periods:
+            broad = facets.periods((value,))
+            words = [w for w in tokens(value) if w not in _PERIOD_NOISE]
+            known = any(p in facts.periods for p in broad)
+            if not known and not any(w in facts.period_words for w in words):
+                close = [*facts.periods][:4] if not words else _close(words[0], facts.period_words)
+                out.append(_said("period", value, close))
+        return tuple(out)
+
     def mask(self, filters: ToolFilters) -> Bools:
         """Entities that match every given field (`near` aside)."""
         n = self.engine.catalog.entity_count
@@ -382,6 +417,7 @@ class ToolSearch:
         domains: dict[str, list[int]] = {}
         period_words: dict[str, list[int]] = {}
         periods: dict[str, list[int]] = {}
+        names: dict[str, str] = {}
 
         def add(index: dict[str, list[int]], keys: Iterable[str], row: int) -> None:
             for key in keys:
@@ -392,10 +428,11 @@ class ToolSearch:
         for record, row in zip(catalog.records, map(int, catalog.record_entity), strict=True):
             if bases[row] < 0:
                 bases[row] = _BASES.index(base_of(Collection(record.collection), record.entity_id))
-            if record.commune:
-                add(communes, (place_key(record.commune),), row)
-            if record.departement:
-                add(depts, (place_key(record.departement),), row)
+            for place, index in ((record.commune, communes), (record.departement, depts)):
+                if place:
+                    key = place_key(place)
+                    names.setdefault(key, place)
+                    add(index, (key,), row)
             add(domains, tokens(" ".join((*record.domain, *record.denomination))), row)
             add(period_words, tokens(" ".join(record.period)), row)
             add(periods, facets.periods(record.period), row)
@@ -406,6 +443,7 @@ class ToolSearch:
             domain_words=_rows(domains),
             period_words=_rows(period_words),
             periods=_rows(periods),
+            names=names,
         )
         return self._facts
 
@@ -461,6 +499,15 @@ class _Ranked:
     hits: tuple[Hit, ...]
     matching: int | None
     near_ignored: bool
+
+
+def _close(key: str, known: Iterable[str]) -> list[str]:
+    return difflib.get_close_matches(key, list(known), n=3, cutoff=0.7)
+
+
+def _said(field_name: str, value: str, close: Iterable[str]) -> str:
+    near = ", ".join(close)
+    return f"unknown {field_name} {value!r}" + (f" (did you mean {near}?)" if near else "")
 
 
 def _rows(index: Mapping[str, list[int]]) -> dict[str, Rows]:

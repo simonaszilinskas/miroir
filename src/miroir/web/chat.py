@@ -33,6 +33,7 @@ from enum import StrEnum
 from typing import Protocol
 
 import httpx
+from PIL import Image as PILImage
 
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
@@ -156,7 +157,7 @@ class ThumbSource:
         try:
             data = await self._fetch(url)
             small = await asyncio.to_thread(to_jpeg, data, THUMB_SIDE)
-        except (httpx.HTTPError, OSError, ValueError) as err:
+        except (httpx.HTTPError, OSError, ValueError, PILImage.DecompressionBombError) as err:
             logger.info("thumbnail %s not fetched: %s", image_id, type(err).__name__)
             return None
         if len(self._cache) > 2000:
