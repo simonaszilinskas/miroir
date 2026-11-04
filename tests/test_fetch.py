@@ -138,3 +138,41 @@ def test_an_uncapped_cache_never_evicts(tmp_path: Path) -> None:
     for n in range(5):
         cache.put(f"{n:016x}", b"x" * 1000)
     assert all(cache.get(f"{n:016x}") is not None for n in range(5))
+
+
+def _counting(*outcomes: httpx.Response | Exception) -> tuple[httpx.Client, list[str]]:
+    sent: list[str] = []
+    pending = iter(outcomes)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request.method)
+        outcome = next(pending)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return httpx.Client(transport=httpx.MockTransport(answer)), sent
+
+
+def test_a_paid_post_is_never_sent_twice_once_it_may_have_run() -> None:
+    client, sent = _counting(httpx.ReadTimeout("slow"), httpx.Response(200))
+    with pytest.raises(httpx.ReadTimeout):
+        send(client, client.build_request("POST", "https://x.test/batches"), NO_WAIT)
+    assert sent == ["POST"]
+    client, sent = _counting(httpx.Response(502), httpx.Response(200))
+    response = send(client, client.build_request("POST", "https://x.test/batches"), NO_WAIT)
+    assert (response.status_code, sent) == (502, ["POST"])
+
+
+def test_a_post_is_sent_again_when_it_provably_did_not_run() -> None:
+    client, sent = _counting(
+        httpx.ConnectError("refused"), httpx.Response(429), httpx.Response(200)
+    )
+    response = send(client, client.build_request("POST", "https://x.test/"), NO_WAIT)
+    assert (response.status_code, sent) == (200, ["POST"] * 3)
+
+
+def test_a_read_is_retried_on_a_dropped_answer() -> None:
+    client, sent = _counting(httpx.ReadTimeout("slow"), httpx.Response(502), httpx.Response(200))
+    response = send(client, client.build_request("GET", "https://x.test/"), NO_WAIT)
+    assert (response.status_code, sent) == (200, ["GET"] * 3)
