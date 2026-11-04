@@ -71,7 +71,7 @@ def fuse(signals: Sequence[Signal]) -> Floats:
 
 def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
     """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
-    score of -inf, off the shortlist, cannot turn an EmbeddingGemma 2-only score into NaN)."""
+    score of -inf, a filtered image, cannot turn an EmbeddingGemma 2-only score into NaN)."""
     if a7_weight >= 1:
         return np.asarray(a7, dtype=np.float32)
     if a7_weight <= 0:

@@ -10,9 +10,12 @@ mid-range GPU holds. A bundle built with a shortlist (`IndexSpec.a3_shortlist_di
 
 A photo search takes the `SHORTLIST` images closest by EmbeddingGemma 2 and the `SHORTLIST`
 closest by reduced MegaLoc (filters applied first), then reads their int8 rows and scores them
-exactly. Every other image scores -inf for MegaLoc, so a MegaLoc-weighted search ranks only
-shortlisted images. On the full-f2 tune halves this keeps every set within a point of the
-float16 search (docs/results.md, "Storage for all of POP").
+exactly. Every other image keeps its reduced cosine, capped at the lowest exact one: it ranks
+below every shortlisted image on MegaLoc but stays in the ranking, so words can still bring
+it up, and min-max scaling spans every entity for both models, as with whole vectors (a
+-inf would drop it from any search MegaLoc takes part in, and scale MegaLoc over the
+shortlist alone). On the full-f2 tune halves the shortlist kept every set within a point of
+the float16 search (docs/results.md, "Storage for all of POP", measured with -inf).
 """
 
 from __future__ import annotations
@@ -98,10 +101,12 @@ def top_rows(scores: Floats, size: int) -> Ints:
 
 
 def shortlist(
-    a7: Floats, reduced: Floats, size: int = SHORTLIST, extra: Ints | None = None
+    a7: Floats, reduced: Floats, size: int | None = None, extra: Ints | None = None
 ) -> Ints:
-    """Rows on either model's shortlist (filtered images score -inf and stay off), and the
-    `extra` rows (those whose crops match best, `miroir.web.crops`)."""
+    """Rows on either model's shortlist of `size` (default `SHORTLIST`; filtered images
+    score -inf and stay off), and the `extra` rows (those whose crops match best,
+    `miroir.web.crops`)."""
+    size = SHORTLIST if size is None else size
     rows = np.union1d(top_rows(a7, size), top_rows(reduced, size))
     if extra is not None:
         rows = np.union1d(rows, extra)
@@ -113,12 +118,15 @@ def shortlist_cosines(
     query: Floats,
     a7: Floats,
     reduced: Floats,
-    size: int = SHORTLIST,
+    size: int | None = None,
     *,
     extra: Ints | None = None,
 ) -> Floats:
-    """Exact MegaLoc cosines of the shortlisted images; -inf for every other image."""
+    """Exact MegaLoc cosines of the shortlisted images; every other image keeps its reduced
+    cosine, at most the lowest exact one (module doc). Filtered images (-inf) stay -inf."""
     rows = shortlist(a7, reduced, size, extra)
-    out = np.full(a7.shape, -np.inf, dtype=np.float32)
-    out[rows] = store.cosines(query, rows)
+    exact = store.cosines(query, rows)
+    floor = float(exact.min()) if exact.size else -np.inf
+    out = np.minimum(reduced, np.float32(floor)).astype(np.float32)
+    out[rows] = exact
     return out

@@ -262,7 +262,7 @@ def site_search(bundle: SiteBundle, asked: AskedSet, *, top: int) -> list[SiteHi
                 found = ranking.best_image(catalog.entity_image_rows(int(e)), per_image, shown)
                 images.append("" if found is None else catalog.images[found].image_id)
             # Right entities with an image left to find (EmbeddingGemma 2 scores every image).
-            # One the ranking leaves out (-inf: off a MegaLoc shortlist) is a miss.
+            # One the ranking leaves out (-inf: filtered) is a miss.
             wanted = [
                 r
                 for e in asked.right[q]

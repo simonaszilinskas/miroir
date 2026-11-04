@@ -10,6 +10,7 @@ import pytest
 
 from miroir.eval.scoring import first_rank
 from miroir.eval.vectors import Route, RunInfo, write_vectors
+from miroir.web import store as store_module
 from miroir.web.bundle import write_shortlist_store
 from miroir.web.engine import A3_FILE, SearchRequest, read_projection
 from miroir.web.store import (
@@ -64,10 +65,31 @@ def test_only_shortlisted_images_get_an_exact_cosine() -> None:
     rows, scale = quantize_rows(x)
     store = ExactStore(rows=rows, scale=scale)
     a7 = np.asarray([0.9, 0.1, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    reduced = np.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.5], dtype=np.float32)
+    reduced = np.asarray([0.0, 0.0, 0.0, 0.0, -np.inf, 0.5], dtype=np.float32)
     got = shortlist_cosines(store, x[5], a7, reduced, size=1)
-    assert np.isfinite(got).tolist() == [True, False, False, False, False, True]
+    exact = x @ x[5]
+    assert got[[0, 5]] == pytest.approx(exact[[0, 5]], abs=0.01)
     assert got[5] == pytest.approx(1.0, abs=0.01)
+    # The others keep their reduced cosine, never above the worst exact one; a filtered
+    # image (-inf) stays out.
+    floor = min(exact[0], exact[5])
+    assert got[[1, 2, 3]] == pytest.approx(np.minimum(reduced[[1, 2, 3]], floor), abs=0.01)
+    assert got[4] == -np.inf
+
+
+def test_an_entity_off_the_shortlist_stays_in_a_photo_and_words_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(store_module, "SHORTLIST", 1)
+    engine, _ = h.engine(building=False)  # objects: MegaLoc weighs 0.8
+    rows, scale = quantize_rows(h.unit_rows(6, 8))
+    engine.exact = ExactStore(rows=rows, scale=scale)
+    for request in (
+        SearchRequest(image=h.photo(130)),
+        SearchRequest(image=h.photo(130), text="lièvre"),
+    ):
+        found = engine.search(request)
+        assert {c.entity_id for c in found.cards} == {"PA1", "OBJ1", "OBJ2"}
 
 
 def test_a_shortlist_engine_ranks_as_the_float_engine() -> None:
