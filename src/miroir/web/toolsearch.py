@@ -19,7 +19,11 @@ test: a hard filter on a wrong guess lost the answer).
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -32,13 +36,14 @@ from miroir.records.bases import Base, base_of, place_key
 from miroir.records.model import Collection
 from miroir.web import facets, ranking
 from miroir.web.catalog import CARD_SIDE, COLLECTION_LABELS, MATCHED_LABELS, display_url
-from miroir.web.engine import Engine, weighted
+from miroir.web.engine import Engine, PhotoCosines, weighted
 from miroir.web.nearby import Position
 
 logger = logging.getLogger(__name__)
 
 Floats = NDArray[np.float32]
 Bools = NDArray[np.bool_]
+Rows = NDArray[np.int64]
 
 #: Added to an entity's 0-1 score when it matches a soft filter (H4's value).
 BOOST = 0.25
@@ -49,6 +54,9 @@ DEFAULT_TOP_K = 10
 MODEL_IMAGES = 4
 #: Side asked of the image service for a thumbnail the model sees.
 THUMB_SIDE = 256
+#: Photos whose cosines are kept, so a conversation's searches and looks embed each once.
+#: Each holds two floats per image of the index (18 MB on all of POP).
+PHOTOS_KEPT = 4
 #: Words too common in period fields to tell records apart.
 _PERIOD_NOISE = frozenset({"siecle", "quart", "moitie", "milieu", "debut", "fin", "annee"})
 
@@ -153,16 +161,20 @@ class ToolHits:
     """A position was given but the index knows no places."""
 
 
+_BASES = tuple(Base)
+
+
 @dataclass(frozen=True, slots=True)
 class _Facts:
-    """What filters read, per entity (catalog entity order)."""
+    """What filters read: each entity's base (its index in `_BASES`, -1 when unknown), and
+    for each value a filter may name, the entities (catalog rows) that have it."""
 
-    bases: tuple[Base | None, ...]
-    communes: tuple[frozenset[str], ...]
-    departements: tuple[frozenset[str], ...]
-    domain_words: tuple[frozenset[str], ...]
-    period_words: tuple[frozenset[str], ...]
-    periods: tuple[frozenset[str], ...]
+    bases: NDArray[np.int8]
+    communes: Mapping[str, Rows]
+    departements: Mapping[str, Rows]
+    domain_words: Mapping[str, Rows]
+    period_words: Mapping[str, Rows]
+    periods: Mapping[str, Rows]
     """Broad periods (`facets.PERIODS`)."""
 
 
@@ -172,6 +184,8 @@ class ToolSearch:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
         self._facts: _Facts | None = None
+        self._photos: OrderedDict[str, tuple[PhotoCosines, bool]] = OrderedDict()
+        self._lock = threading.Lock()
 
     def warm(self) -> None:
         """Gather each entity's facts for the filters now (about 50 s on all of POP), so the
@@ -195,8 +209,7 @@ class ToolSearch:
         if query.image is None:
             msg = "an image search needs a photo"
             raise ValueError(msg)
-        photo, mount = _print_alone(query.image)
-        cosines = self.engine.photo_cosines(photo)
+        cosines, mount = self._cosines(query.image)
         w = cosines.bucket.a7_weight if query.a7_weight is None else query.a7_weight
         w = min(max(w, 0.0), 1.0)
         catalog = self.engine.catalog
@@ -273,8 +286,7 @@ class ToolSearch:
         catalog = self.engine.catalog
         per_image: Floats | None = None
         if query.image is not None:
-            photo, _ = _print_alone(query.image)
-            cosines = self.engine.photo_cosines(photo)
+            cosines, _ = self._cosines(query.image)
             per_image = weighted(cosines.a7, cosines.a3, cosines.bucket.a7_weight)
         hits: list[Hit] = []
         for entity_id in dict.fromkeys(query.entity_ids):
@@ -285,6 +297,22 @@ class ToolSearch:
             if hit is not None:
                 hits.append(hit)
         return ToolHits(tuple(hits))
+
+    def _cosines(self, image: bytes) -> tuple[PhotoCosines, bool]:
+        """The photo's cosines with every image (its print alone when it shows an archive
+        print on its card), and whether it did; kept for the last `PHOTOS_KEPT` photos."""
+        key = hashlib.sha256(image).hexdigest()
+        with self._lock:
+            if key in self._photos:
+                self._photos.move_to_end(key)
+                return self._photos[key]
+        photo, mount = _print_alone(image)
+        found = (self.engine.photo_cosines(photo), mount)
+        with self._lock:
+            self._photos[key] = found
+            while len(self._photos) > PHOTOS_KEPT:
+                self._photos.popitem(last=False)
+        return found
 
     # --- ranking and filters ---------------------------------------------------------------------
 
@@ -324,59 +352,60 @@ class ToolSearch:
 
     def mask(self, filters: ToolFilters) -> Bools:
         """Entities that match every given field (`near` aside)."""
-        facts = self._entity_facts()
         n = self.engine.catalog.entity_count
         keep = np.ones(n, dtype=bool)
         if not filters.fields:
             return keep
-        bases = set(filters.bases)
-        depts = {place_key(d) for d in filters.departements}
-        communes = {place_key(c) for c in filters.communes}
-        domains = set(tokens(" ".join(filters.domains)))
-        broad = set(facets.periods(filters.periods))
-        period_words = set(tokens(" ".join(filters.periods))) - _PERIOD_NOISE
-        for j in range(n):
-            keep[j] = (
-                (not bases or facts.bases[j] in bases)
-                and (not depts or bool(depts & facts.departements[j]))
-                and (not communes or bool(communes & facts.communes[j]))
-                and (not domains or bool(domains & facts.domain_words[j]))
-                and (
-                    not filters.periods
-                    or bool(broad & facts.periods[j])
-                    or bool(period_words & facts.period_words[j])
-                )
-            )
+        facts = self._entity_facts()
+        if filters.bases:
+            keep &= np.isin(facts.bases, [_BASES.index(b) for b in filters.bases])
+        for index, wanted in (
+            (facts.departements, {place_key(d) for d in filters.departements}),
+            (facts.communes, {place_key(c) for c in filters.communes}),
+            (facts.domain_words, set(tokens(" ".join(filters.domains)))),
+        ):
+            if wanted:
+                keep &= _any(index, wanted, n)
+        if filters.periods:
+            broad = facets.periods(filters.periods)
+            words = set(tokens(" ".join(filters.periods))) - _PERIOD_NOISE
+            keep &= _any(facts.periods, broad, n) | _any(facts.period_words, words, n)
         return keep
 
     def _entity_facts(self) -> _Facts:
         if self._facts is not None:
             return self._facts
         catalog = self.engine.catalog
-        n = catalog.entity_count
-        bases: list[Base | None] = [None] * n
-        communes: list[set[str]] = [set() for _ in range(n)]
-        depts: list[set[str]] = [set() for _ in range(n)]
-        domains: list[set[str]] = [set() for _ in range(n)]
-        period_words: list[set[str]] = [set() for _ in range(n)]
-        periods: list[set[str]] = [set() for _ in range(n)]
+        bases = np.full(catalog.entity_count, -1, dtype=np.int8)
+        communes: dict[str, list[int]] = {}
+        depts: dict[str, list[int]] = {}
+        domains: dict[str, list[int]] = {}
+        period_words: dict[str, list[int]] = {}
+        periods: dict[str, list[int]] = {}
+
+        def add(index: dict[str, list[int]], keys: Iterable[str], row: int) -> None:
+            for key in keys:
+                rows = index.setdefault(key, [])
+                if not rows or rows[-1] != row:
+                    rows.append(row)
+
         for record, row in zip(catalog.records, map(int, catalog.record_entity), strict=True):
-            if bases[row] is None:
-                bases[row] = base_of(Collection(record.collection), record.entity_id)
+            if bases[row] < 0:
+                bases[row] = _BASES.index(base_of(Collection(record.collection), record.entity_id))
             if record.commune:
-                communes[row].add(place_key(record.commune))
+                add(communes, (place_key(record.commune),), row)
             if record.departement:
-                depts[row].add(place_key(record.departement))
-            domains[row].update(tokens(" ".join((*record.domain, *record.denomination))))
-            period_words[row].update(tokens(" ".join(record.period)))
-            periods[row].update(facets.periods(record.period))
+                add(depts, (place_key(record.departement),), row)
+            add(domains, tokens(" ".join((*record.domain, *record.denomination))), row)
+            add(period_words, tokens(" ".join(record.period)), row)
+            add(periods, facets.periods(record.period), row)
         self._facts = _Facts(
-            bases=tuple(bases),
-            communes=tuple(frozenset(s) for s in communes),
-            departements=tuple(frozenset(s) for s in depts),
-            domain_words=tuple(frozenset(s) for s in domains),
-            period_words=tuple(frozenset(s) for s in period_words),
-            periods=tuple(frozenset(s) for s in periods),
+            bases=bases,
+            communes=_rows(communes),
+            departements=_rows(depts),
+            domain_words=_rows(domains),
+            period_words=_rows(period_words),
+            periods=_rows(periods),
         )
         return self._facts
 
@@ -432,6 +461,20 @@ class _Ranked:
     hits: tuple[Hit, ...]
     matching: int | None
     near_ignored: bool
+
+
+def _rows(index: Mapping[str, list[int]]) -> dict[str, Rows]:
+    return {key: np.unique(np.asarray(rows, dtype=np.int64)) for key, rows in index.items()}
+
+
+def _any(index: Mapping[str, Rows], keys: Iterable[str], n: int) -> Bools:
+    """The entities that have one of `keys`."""
+    out = np.zeros(n, dtype=bool)
+    for key in keys:
+        rows = index.get(key)
+        if rows is not None:
+            out[rows] = True
+    return out
 
 
 def _print_alone(data: bytes) -> tuple[bytes, bool]:
