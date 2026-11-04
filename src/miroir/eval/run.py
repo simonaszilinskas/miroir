@@ -1,4 +1,4 @@
-"""What the `miroir eval` commands do: score a vector run on a test set, a benchmark, or compare."""
+"""What the `miroir eval` commands do: score a vector run on a test set, or compare."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from pathlib import Path
 from miroir.commons.images import commons_photos
 from miroir.commons.model import View, is_commons_image
 from miroir.config import Settings, eval_result_path
-from miroir.eval import amstertime
 from miroir.eval.rerank import MIX_INLIERS, SHORTLIST, Rerank, read_matches, rerank, search_times
 from miroir.eval.results import (
-    RunResult,
     SetScore,
     find_set_score,
     read_result,
@@ -41,8 +39,6 @@ from miroir.jobs.spend import SpendKind, SpendLedger
 from miroir.records.store import read_commons, read_images, read_records
 
 logger = logging.getLogger(__name__)
-
-AMSTERTIME_SET = amstertime.GALLERY
 
 
 def score_test_set(
@@ -206,34 +202,6 @@ def score_rerank(
         )
         out.append(scored)
     return out
-
-
-def score_amstertime(
-    settings: Settings, *, vector_run: str, option: str, round_id: str = "R0", step: str = "A"
-) -> RunResult:
-    """Score a vector run of AmsterTime in all three directions and write one result file."""
-    vectors = read_vectors(settings.vectors_path(vector_run))
-    amstertime.check_ids(vectors.ids)
-    scores = [
-        set_score(
-            amstertime.score_amstertime(vectors, direction),
-            test_set=f"{AMSTERTIME_SET}-{direction.value}",
-            half="all",
-            gallery=AMSTERTIME_SET,
-        )
-        for direction in amstertime.Direction
-    ]
-    return write_result(
-        eval_result_path(round_id, step, option),
-        round_id=round_id,
-        step=step,
-        option=option,
-        vector_run=vector_run,
-        query_vector_run=vector_run,
-        vectors=vectors.info,
-        scores=scores,
-        today=_today(),
-    )
 
 
 def compare(

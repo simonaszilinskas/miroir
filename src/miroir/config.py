@@ -58,8 +58,6 @@ WIKIMEDIA_USER_AGENT = (
 # exist only there; each mirrors a bucket (`miroir.jobs.objects`).
 #: Model weights (Hugging Face and torch caches), shared by every run.
 WEIGHTS_MOUNT = "/weights"
-#: Public benchmarks (AmsterTime), downloaded on the machine.
-BENCHMARKS_MOUNT = "/benchmarks"
 #: POP images resized to 512 px, filled once (`miroir embed images`) so model runs read
 #: images there instead of from POP.
 IMAGES_MOUNT = "/images"

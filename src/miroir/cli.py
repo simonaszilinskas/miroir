@@ -29,14 +29,10 @@ testsets_app = typer.Typer(
     no_args_is_help=True, help="Test sets T1, T2, T2b, T3, T5, T8, VET, PARTS and galleries."
 )
 app.add_typer(testsets_app, name="testsets")
-amstertime_app = typer.Typer(no_args_is_help=True, help="AmsterTime (T9, round R0).")
-eval_app.add_typer(amstertime_app, name="amstertime")
 embed_app = typer.Typer(no_args_is_help=True, help="Embedding runs on remote models.")
 app.add_typer(embed_app, name="embed")
 rerank_app = typer.Typer(no_args_is_help=True, help="Step E1: re-rank shortlists by keypoints.")
 app.add_typer(rerank_app, name="rerank")
-r0_app = typer.Typer(no_args_is_help=True, help="Round R0: harness check on AmsterTime (T9).")
-app.add_typer(r0_app, name="r0")
 index_app = typer.Typer(
     no_args_is_help=True, help="Full-sample index for the website: PCA and the guess."
 )
@@ -829,19 +825,6 @@ def eval_viewer(
     typer.echo(f"{out}: {size / 1e6:.1f} MB, models: {labels}")
 
 
-@amstertime_app.command("score")
-def amstertime_score(
-    *,
-    run: Annotated[str, typer.Option(help="Vector run name.")] = "R0-dinov2-giant-224-amstertime",
-    option: Annotated[str, typer.Option(help="Result file label.")] = "dinov2-giant-224",
-) -> None:
-    """Score an AmsterTime run in the three directions of the official code (old, new, all)."""
-    from miroir.eval.run import score_amstertime  # noqa: PLC0415
-
-    result = score_amstertime(get_settings(), vector_run=run, option=option)
-    _echo_scores(result.scores)
-
-
 def _pct(i: Interval) -> str:
     return f"{100 * i.value:.1f} [{100 * i.low:.1f}, {100 * i.high:.1f}]"
 
@@ -998,26 +981,6 @@ def embed_images(
         runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         counts = runner.fill_images(gallery)
     typer.echo(f"{gallery}: {counts}")
-
-
-@r0_app.command("run")
-def r0_run(
-    model: Annotated[
-        str, typer.Option(help="dinov2-giant-224 (expect 48.9 mAP) or dinov3-vit7b16-224 (56.5).")
-    ] = "dinov2-giant-224",
-    max_hours: MaxHours = 1.0,
-) -> None:
-    """Download AmsterTime on a GPU machine and embed it there; vectors come back here."""
-    from miroir.jobs.gpu_run import GpuRunner  # noqa: PLC0415
-    from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
-
-    settings = get_settings()
-    with open_scaleway(settings, max_hours=max_hours, purpose=f"r0 {model}") as calls:
-        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
-        done = runner.r0(model)
-    run = settings.vectors_path(f"R0-{model}-amstertime").name
-    typer.echo(f"{run}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")
-    typer.echo(f"next: uv run miroir eval amstertime score --run {run} --option {model}")
 
 
 @vlm_app.command("ask")

@@ -87,13 +87,12 @@ with its volume and IP: on success, on error and on Ctrl-C. The machine also del
 machine that lives on is the website's demo machine (`miroir demo`, prototype.md, section
 Hosting): `scw ps` lists it as `demo` and `scw cleanup` leaves it alone.
 
-Four Object Storage buckets hold the files the machines and the website read
+Three Object Storage buckets hold the files the machines and the website read
 (`src/miroir/jobs/objects.py`):
 
 | Bucket | Holds |
 |---|---|
 | `miroir-weights` | Hugging Face and torch model caches |
-| `miroir-benchmarks` | AmsterTime |
 | `miroir-images` | POP images at 512 px |
 | `miroir-index` | The website's index bundles |
 
@@ -109,10 +108,10 @@ uv run miroir scw cleanup        # delete them (asks first; --yes does not)
 ```
 
 Every command that runs a GPU job starts its own machine: `embed scw`, `embed f2`,
-`embed extra`, `embed grey`, `embed images`, `r0 run`, `words embed`, `rerank run`,
+`embed extra`, `embed grey`, `embed images`, `words embed`, `rerank run`,
 `rerank site`, `detect locate`, `detect rooms`, `detect single` and `archive remote`.
 `--max-hours` sets a machine's longest life: 1 hour for `scw up`, `scw smoke`, `web dev --scw`,
-`r0 run`, `words embed`, the `detect` commands and `archive remote`; 2 for the `embed` and
+`words embed`, the `detect` commands and `archive remote`; 2 for the `embed` and
 `rerank` commands.
 
 **Money.** Each machine's life goes to its own ledger, `~/miroir-data/scaleway/spend.jsonl`,

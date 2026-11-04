@@ -102,9 +102,7 @@ TORCH_INDEXES = ((13.0, "cu130"), (12.8, "cu128"), (12.6, "cu126"))
 CONTEXT_FILES = ("pyproject.toml", "README.md", "LICENSE")
 #: The bucket mirrors, mounted into the job containers at the paths the model code reads
 #: (`config.WEIGHTS_MOUNT`, ...).
-MOUNTS = " ".join(
-    f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "benchmarks", "web-index")
-)
+MOUNTS = " ".join(f"-v {REMOTE_ROOT}/{name}:/{name}" for name in ("weights", "images", "web-index"))
 
 
 class Shell:
@@ -370,12 +368,6 @@ class ScalewayCalls:
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
         self.gate.check([i.image_id for c in chunks for i in c])
         return cast("dict[str, int]", self._call("fill_images", [list(c) for c in chunks]))
-
-    def amstertime_download(self) -> int:
-        return cast("int", self._call("amstertime_download"))
-
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        return cast("ChunkResult", self._call("amstertime_embed", option))
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
         self.gate.check([i for t in tasks for i in (t.image_id, *t.candidates)])

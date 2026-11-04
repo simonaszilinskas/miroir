@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from miroir.config import (
-    BENCHMARKS_MOUNT,
     IMAGES_MOUNT,
     WEB_INDEX_MOUNT,
     WEIGHTS_MOUNT,
@@ -66,8 +65,6 @@ class Worker:
             "embed": self.embed,
             "embed_texts": self.embed_texts,
             "fill_images": self.fill_images,
-            "amstertime_download": self.amstertime_download,
-            "amstertime_embed": self.amstertime_embed,
             "match": self.match,
             "detect_rooms": self.detect_rooms,
             "locate_artworks": self.locate_artworks,
@@ -84,7 +81,7 @@ class Worker:
         return bucket_name(self.settings, bucket)
 
     def start(self) -> None:
-        for mount in (WEIGHTS_MOUNT, IMAGES_MOUNT, BENCHMARKS_MOUNT):
+        for mount in (WEIGHTS_MOUNT, IMAGES_MOUNT):
             Path(mount).mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
         count = download_tree(self.s3, self._bucket(Bucket.WEIGHTS), Path(WEIGHTS_MOUNT))
@@ -148,26 +145,6 @@ class Worker:
             for key, n in counts.items():
                 totals[key] = totals.get(key, 0) + n
         return totals
-
-    def amstertime_download(self) -> int:
-        from miroir.eval import amstertime  # noqa: PLC0415
-
-        root = Path(BENCHMARKS_MOUNT)
-        download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        images = amstertime.download(root / "amstertime")
-        upload_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        return len(amstertime.image_ids(images))
-
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        from miroir.eval import amstertime  # noqa: PLC0415
-        from miroir.remote.models import embed_files  # noqa: PLC0415
-
-        root = Path(BENCHMARKS_MOUNT)
-        download_tree(self.s3, self._bucket(Bucket.BENCHMARKS), root)
-        images = root / "amstertime" / "images"
-        result = embed_files(option, [(i, images / i) for i in amstertime.image_ids(images)])
-        self._save_weights(result.load_s)
-        return result
 
     def match(self, tasks: list) -> object:
         from miroir.remote.matching import match_tasks  # noqa: PLC0415

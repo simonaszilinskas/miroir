@@ -1,4 +1,4 @@
-"""Embedding runs on the GPU machine, driven from the Mac: probe, gallery run, and R0.
+"""Embedding runs on the GPU machine, driven from the Mac: probe, gallery run, query run.
 
 Every call goes to one Scaleway GPU machine (`miroir.jobs.scw_run.open_scaleway`), which
 yields the calls (`RemoteCalls`) and the machine's price (`RemoteCalls.machine`).
@@ -43,7 +43,6 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from miroir.commons.images import CommonsImages, split_commons
 from miroir.config import SEED, Settings
-from miroir.eval import amstertime
 from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_matches
 from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
@@ -53,12 +52,9 @@ from miroir.jobs.remote_spec import (
     CHUNK_IMAGES,
     CHUNK_TEXTS,
     CHUNK_TIMEOUT_S,
-    DOWNLOAD_TIMEOUT_S,
     FILL_TIMEOUT_S,
     MATCH_QUERIES,
     OPTIONS,
-    R0_OPTIONS,
-    R0_TIMEOUT_S,
     TEXT_PROMPT,
     ChunkResult,
     Family,
@@ -121,8 +117,6 @@ class RemoteCalls(Protocol):
         self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult: ...
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]: ...
-    def amstertime_download(self) -> int: ...
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult: ...
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk: ...
 
 
@@ -533,49 +527,6 @@ class GpuRunner:
         if missing:
             logger.warning("%s: %d image(s) could not be read on the machine", name, len(missing))
         return len(held)
-
-    def r0(self, name: str) -> VectorSet:
-        """Round R0: download AmsterTime on the machine and embed its 2,462 images there."""
-        if name not in R0_OPTIONS:
-            msg = f"unknown R0 model {name!r}; known: {', '.join(R0_OPTIONS)}"
-            raise ValueError(msg)
-        opt = R0_OPTIONS[name]
-        run = run_name(opt, amstertime.GALLERY)
-        out = self.settings.vectors_path(run)
-        refuse_existing(out)
-        start = self._clock()
-        downloaded = self._hold_call(
-            self._calls.amstertime_download,
-            timeout_s=DOWNLOAD_TIMEOUT_S,
-            option="R0",
-            run=f"{run}-download",
-            model="none",
-            items=0,
-        )
-        logger.info("AmsterTime on the machine: %d images", downloaded.result)
-        paid = self._hold_call(
-            lambda: self._calls.amstertime_embed(opt),
-            timeout_s=R0_TIMEOUT_S,
-            option="R0",
-            run=run,
-            model=opt.model,
-            items=downloaded.result,
-        )
-        done = paid.result
-        check_answer(run, done.ids, done.ids, done.vectors)
-        amstertime.check_ids(done.ids)
-        cost = downloaded.cost_usd + paid.cost_usd
-        info = self._info(
-            opt,
-            gallery=amstertime.GALLERY,
-            cost=cost,
-            wall=self._clock() - start,
-            skips=done.skips,
-        )
-        logger.info(
-            "%s: $%.4f, model load %.0f s, embed %.0f s", run, cost, done.load_s, done.embed_s
-        )
-        return write_vectors(out, done.ids, done.vectors, info)
 
     # --- the one resumable run --------------------------------------------------------------
 

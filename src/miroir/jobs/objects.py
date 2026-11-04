@@ -3,7 +3,6 @@
 | Bucket | Was, on Modal (before 2026-11-03) | What it holds |
 |---|---|---|
 | `<prefix>-weights` | `miroir-weights` | Hugging Face and torch hub caches (`hf/`, `torch/`) |
-| `<prefix>-benchmarks` | `miroir-benchmarks` | AmsterTime |
 | `<prefix>-images` | `miroir-images` | POP images at 512 px, `512-v2/<id[:2]>/<id>.jpg` |
 | `<prefix>-index` | `miroir-web-index` | The website's index bundles, `<name>/<file>` |
 
@@ -41,7 +40,6 @@ MIN_PART_BYTES = 8 * 1024 * 1024
 
 class Bucket(StrEnum):
     WEIGHTS = "weights"
-    BENCHMARKS = "benchmarks"
     IMAGES = "images"
     INDEX = "index"
 

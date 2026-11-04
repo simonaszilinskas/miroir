@@ -10,7 +10,6 @@ import pytest
 
 from miroir.commons.model import CommonsSet
 from miroir.config import Settings
-from miroir.eval import amstertime
 from miroir.eval.rerank import CandidateMatch, MatchChunk, MatchTask, QueryMatches, read_matches
 from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors, write_vectors
@@ -21,7 +20,6 @@ from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     MATCH_QUERIES,
     OPTIONS,
-    R0_OPTIONS,
     ChunkResult,
     Machine,
     ModelOption,
@@ -96,11 +94,6 @@ class FakeCalls:
         self.clock.now += SECONDS_PER_CALL
         return {"ok": sum(len(c) for c in chunks)}
 
-    def amstertime_download(self) -> int:
-        self.calls.append(("download", 0))
-        self.clock.now += SECONDS_PER_CALL
-        return 2 * amstertime.PAIRS
-
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
         self.calls.append(("match", len(tasks)))
         self.clock.now += SECONDS_PER_CALL
@@ -116,14 +109,6 @@ class FakeCalls:
             for t in tasks
         )
         return MatchChunk(done, load_s=5.0, missing=())
-
-    def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        self.calls.append((option.id, 2 * amstertime.PAIRS))
-        self.clock.now += SECONDS_PER_CALL
-        places = [f"{n:04d}" for n in range(amstertime.PAIRS)]
-        ids = (*(f"old/{p}.jpg" for p in places), *(f"new/{p}.png" for p in places))
-        vectors = np.random.default_rng(0).normal(size=(len(ids), 8)).astype(np.float32)
-        return ChunkResult(ids, vectors, {}, load_s=60.0, embed_s=30.0)
 
 
 @pytest.fixture
@@ -152,7 +137,6 @@ def gate(settings: Settings, *, all_images: bool = False) -> ImageGate:
 
 def test_options_name_their_model_and_machine() -> None:
     assert option(GEMMA).model == "google/embeddinggemma-2"
-    assert option("R0-dinov2-giant-224").model == "facebook/dinov2-giant"
     with pytest.raises(ValueError, match="unknown model option"):
         option("A99")
     assert all(o.dtype != "float16" for o in OPTIONS.values())
@@ -250,25 +234,6 @@ def test_a_failed_call_still_costs(built: Settings) -> None:
     assert r.ledger.total(service=Service.SCALEWAY) == pytest.approx(
         SECONDS_PER_CALL * L4.usd_per_s
     )
-
-
-def test_r0_downloads_on_the_machine_and_writes_the_run(settings: Settings) -> None:
-    r, calls = runner(settings)
-    done = r.r0("dinov2-giant-224")
-    assert [c[0] for c in calls.calls] == ["download", "R0-dinov2-giant-224"]
-    assert done.info.gallery == "amstertime"
-    assert done.info.pooling == "cls"
-    loaded = read_vectors(settings.vectors_path("R0-dinov2-giant-224-amstertime"))
-    assert len(loaded.ids) == 2 * amstertime.PAIRS
-    assert done.info.cost_usd == pytest.approx(r.ledger.total(service=Service.SCALEWAY))
-    with pytest.raises(FileExistsError):
-        r.r0("dinov2-giant-224")
-
-
-def test_r0_options_follow_the_dinov3_paper() -> None:
-    for opt in R0_OPTIONS.values():
-        assert (opt.resolution, opt.pooling) == (224, "cls")
-    assert R0_OPTIONS["dinov3-vit7b16-224"].gated
 
 
 def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
