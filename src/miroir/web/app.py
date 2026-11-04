@@ -148,7 +148,8 @@ class FiltersBody(BaseModel):
 
 
 class PositionBody(BaseModel):
-    """Where the person stands, sent only when they turned on "Utiliser ma position"."""
+    """Where the photo was taken (its EXIF GPS, sent unless the person turns it off) or where
+    the person stands (only when they turned on "Utiliser ma position")."""
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
@@ -738,7 +739,10 @@ def entity_page(catalog: Catalog, entity_id: str) -> EntityPage | None:
         Fact("Commune", main.commune or ""),
         Fact("Département", main.departement or ""),
         Fact("Région", main.region or ""),
-        Fact("Référence", entity_id if entity_id != main.ref else main.ref),
+        # The entity (a Mérimée building, a Palissy object) and the notice the page links to.
+        Fact(
+            "Référence", entity_id if entity_id == main.ref else f"{entity_id} (notice {main.ref})"
+        ),
     ]
     return EntityPage(
         entity_id=entity_id,

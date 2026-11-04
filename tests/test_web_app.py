@@ -240,6 +240,12 @@ def test_record_page_groups_an_entity(client: TestClient) -> None:
     assert client.get("/api/entity/NOPE").status_code == 404
 
 
+def test_a_record_page_gives_the_entity_and_the_notice_it_shows(client: TestClient) -> None:
+    login(client)
+    facts = {f["label"]: f["value"] for f in client.get("/api/entity/PA1").json()["facts"]}
+    assert facts["Référence"] == "PA1 (notice AP1)"  # Mémoire photos of a Mérimée building
+
+
 def test_example_photos_are_served_after_login(client: TestClient) -> None:
     assert client.get("/api/examples").status_code == 401
     login(client)
