@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, cast
 
 import httpx
 
-from miroir.config import REPO_ROOT, Settings
+from miroir.config import REPO_ROOT, WEB_UI_BUILD, WEB_UI_SOURCE, Settings
 from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     LIGHTGLUE,
@@ -51,6 +51,7 @@ from miroir.jobs.scaleway import (
 )
 from miroir.jobs.scaleway import Machine as GpuMachine
 from miroir.records.model import Image
+from miroir.web.pagebuild import check_built
 
 if TYPE_CHECKING:
     from miroir.eval.rerank import MatchChunk, MatchTask
@@ -173,8 +174,13 @@ def requirements() -> str:
     return "\n".join((*MODEL_LIBRARIES, *WORKER_LIBRARIES)) + "\n"
 
 
-def build_context() -> bytes:
-    """The Dockerfile, the pinned requirements and this checkout's package, as a .tar.gz."""
+def build_context(*, page: bool = False) -> bytes:
+    """The Dockerfile, the pinned requirements and this checkout's package, as a .tar.gz.
+
+    The package carries the site's built page (`miroir.web.pagebuild`): with `page`, refuse
+    to ship one that is missing or older than its sources."""
+    if page:
+        check_built(WEB_UI_SOURCE, WEB_UI_BUILD)
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         tar.add(REPO_ROOT / "docker" / "Dockerfile", arcname="Dockerfile")
@@ -235,10 +241,16 @@ def start_worker(
 
 
 def build_image(
-    shell: Shell, settings: Settings, *, match: bool = False, torch_tag: str = ""
+    shell: Shell,
+    settings: Settings,
+    *,
+    match: bool = False,
+    torch_tag: str = "",
+    page: bool = False,
 ) -> None:
     """Send the keys and the build context, and build the job image on the machine.
-    `torch_tag` (e.g. "cu126") overrides the wheels picked from the driver: an older GPU
+    `page`: the image serves the site, so its built page must be there and current (the demo
+    machine). `torch_tag` (e.g. "cu126") overrides the wheels picked from the driver: an older GPU
     needs a build that still carries its kernels."""
     send_env(shell, settings)
     smi = shell.run("nvidia-smi", check=False)
@@ -252,7 +264,7 @@ def build_image(
     shell.run(
         f"rm -rf {REMOTE_ROOT}/build && mkdir -p {REMOTE_ROOT}/build "
         f"&& tar -xzf - -C {REMOTE_ROOT}/build",
-        stdin=build_context(),
+        stdin=build_context(page=page),
     )
     start = time.monotonic()
     logger.info("building the job image on the machine (a few minutes)")

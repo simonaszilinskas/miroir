@@ -104,11 +104,9 @@ def test_the_why_rides_on_the_running_and_the_done_step() -> None:
     with Rig(script) as rig:
         cid = rig.start()
         events = rig.send(cid, "goal", EXACT)
-        page = rig.client.get("/static/chat.js").text
     searches = [s for s in of(events, "step") if "Recherche par image" in str(s["label"])]
     assert {str(s["state"]) for s in searches} == {"running", "done"}
     assert all(s["why"] == WHY for s in searches)
-    assert "Pourquoi : " in page
 
 
 # --- 3. pivot from evidence --------------------------------------------------------------------
@@ -184,6 +182,7 @@ def test_the_brief_asks_for_words_from_evidence_never_guesses() -> None:
 def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(chat_module, "MAX_SEARCHES", 3)  # a script short enough to read
     monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # this test is about the count alone
     script = [
         LOOK,
@@ -211,7 +210,10 @@ def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_result
     assert not last_tools(rig)[-2].startswith("not run")
 
 
-def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn() -> None:
+def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
     script = [
         LOOK,  # the first look's three entities are already the best so far
         searching("image_search", {"model": "A3"}),
@@ -231,6 +233,7 @@ def test_a_search_that_brings_a_new_best_resets_the_stale_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(chat_module, "MAX_SEARCHES", 99)
+    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
     script = [
         searching("text_search", {"query": "église"}),
         searching("text_search", {"query": "vase", "best": ["PA1"]}),  # PA1 came from the 1st
@@ -317,17 +320,6 @@ def test_found_none_says_so_plainly_even_when_the_model_did_not() -> None:
     assert said == f"{NOT_FOUND} Rien de tel ici."
     assert of(events, "results")[0]["cards"] == []
     assert of(events, "results")[0]["found"] == "none"
-
-
-# --- 6. the goal chips -------------------------------------------------------------------------
-
-
-def test_the_goal_chips_ask_what_where_more_and_who() -> None:
-    with Rig([]) as rig:
-        page = rig.client.get("/static/chat.js").text
-    for label in ("C’est quoi ?", "C’est où ?", "D’autres comme ça", "Qui l’a fait ?"):
-        assert f"label: '{label}'" in page
-    assert "Cet objet précis" not in page
 
 
 # --- 7. the log --------------------------------------------------------------------------------

@@ -21,7 +21,8 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
 - `src/miroir/eval/`: test sets, the vector contract (`vectors.py`), scoring. Results go to
   `eval/results/`.
 - `src/miroir/web/`: the prototype website (FastAPI, on the demo machine): ranking, card levels, the agentic
-  search (`chat.py`, `chat_tools.py`) and the page in `static/`.
+  search (`chat.py`, `chat_tools.py`). The page itself is a React app in `web-ui/` (DSFR through
+  `@codegouvfr/react-dsfr`), built by `make ui` into `src/miroir/web/ui/` (not in git).
 - `scripts/pop_full_export.py`: builds the full POP export from public sources.
 - `tests/fixtures/exports/`: real export lines, one per edge case.
 

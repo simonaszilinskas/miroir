@@ -430,10 +430,12 @@ def test_the_visit_mark_is_touched_at_most_every_30_seconds(tmp_path: Path) -> N
     assert last_visit(mark.path) != 1.0
 
 
-def test_only_requests_with_a_session_count_as_visits() -> None:
+def test_only_requests_with_a_session_count_as_visits(tmp_path: Path) -> None:
     visits: list[int] = []
     engine, _ = h.engine(building=False)
+    (tmp_path / "index.html").write_text("<p>Miroir</p>")
     app = create_app(
+        ui_dir=tmp_path,
         catalog=engine.catalog,
         backend=LocalBackend(engine),
         password=PASSWORD,

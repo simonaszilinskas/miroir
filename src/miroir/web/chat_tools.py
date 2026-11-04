@@ -25,12 +25,25 @@ import logging
 import math
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol
 
 from miroir.eval.bm25 import fold, tokens
+from miroir.images.fetch import to_jpeg
+from miroir.images.transform import (
+    CELL_NAMES_FR,
+    CELLS,
+    DEFAULT_PAD,
+    MAX_PAD,
+    TURNS,
+    Transform,
+    TransformError,
+    apply,
+    padded,
+)
 from miroir.jobs.openrouter import JSON
+from miroir.outlines import Box
 from miroir.records.bases import Base
 from miroir.web.catalog import CatalogRecord
 from miroir.web.nearby import Position
@@ -64,6 +77,27 @@ MAX_CHOICES = 4
 SAME_WORDS = 0.75
 #: Thumbnails a step shows the visitor.
 STEP_THUMBS = 8
+#: Long side of a transformed photo as searched, and as the model sees it after the search.
+TRANSFORM_SIDE = 1024
+TRANSFORM_VIEW_SIDE = 384
+#: Outlines listed to the model (the detector's surest, biggest and most central first).
+OUTLINES_LISTED = 20
+#: The detector's prompts (`miroir.outlines.PROMPTS`) in the visitor's words.
+OUTLINE_LABELS_FR = {
+    "painting": "tableau",
+    "sculpture": "sculpture",
+    "statue": "statue",
+    "vase": "vase",
+    "furniture": "meuble",
+    "building": "bâtiment",
+    "stained glass window": "vitrail",
+}
+TURNS_FR = {
+    90: "tourne d’un quart de tour à droite",
+    180: "retourne tête en bas",
+    270: "tourne d’un quart de tour à gauche",
+}
+TRANSFORM_KEYS = ("outline", "box", "cell", "pad", "grayscale", "stretch", "rotate", "mirror")
 #: Characters of a title in a result line.
 TITLE_CHARS = 90
 #: Most words in a text query (the hosted test's drifting queries ran to 10 and more).
@@ -203,6 +237,15 @@ class ToolContext(Protocol):
     def title_of(self, entity_id: str) -> str: ...
     def records(self, entity_id: str) -> Sequence[CatalogRecord]:
         """The entity's records in the index (several for a building and its photos)."""
+        ...
+
+    async def outlines(self) -> Sequence[Box]:
+        """The works the detector found in the visitor's photo, numbered from 1 in this order
+        (empty without a photo or when the detector failed)."""
+        ...
+
+    def keep_query_image(self, jpeg: bytes) -> str:
+        """Keep a transformed photo for the model to look at; returns its key."""
         ...
 
 
@@ -428,21 +471,34 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
         msg = f"there is no {what}"
         raise ArgumentError(msg)
     model = str(args.get("model", "auto")).strip().lower()
-    weights = {"auto": None, "a7": 1.0, "a3": 0.0}
-    if model == "mix":
-        weight: float | None = min(max(_number(args.get("a7_weight"), 0.5), 0.0), 1.0)
-    elif model in weights:
-        weight = weights[model]
-    else:
-        msg = f"unknown model {model!r}: auto, A7, A3 or mix"
-        raise ArgumentError(msg)
+    weight = _image_weight(model, args)
     filters = parse_filters(args.get("filters"), ctx.position)
+    asked = await _transform_of(ctx, args.get("transform"), source)
     signature = Signature(
         ToolName.IMAGE_SEARCH,
-        json.dumps([source, weight, _filters_key(filters), len(ctx.region or b"")]),
+        json.dumps(
+            [
+                source,
+                weight,
+                _filters_key(filters),
+                len(ctx.region or b""),
+                None if asked is None else repr(asked.transform),
+            ]
+        ),
     )
     if (step := ctx.repeats(signature)) is not None:
         return _repeated(step, "the same image search")
+    names = {None: "réglage automatique", 1.0: "EmbeddingGemma 2", 0.0: "MegaLoc"}
+    used = names.get(weight, f"mélange, {round(100 * (weight or 0))} % EmbeddingGemma 2")
+    label = f"Recherche par image ({used})"
+    head = f"image_search {source}, model {model}"
+    viewed: tuple[Thumbnail, ...] = ()
+    if asked is not None:
+        image, viewed = _transformed(ctx, image, asked)
+        label = f"{asked.french}, puis cherche par image ({used})"
+        head += f", on the photo {asked.english} (the image searched follows)"
+    if source == "region":
+        label += ", sur la partie encadrée"
     found = await ctx.search(
         ToolQuery(
             SearchKind.IMAGE,
@@ -452,17 +508,182 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
             top_k=_top_k(args),
         )
     )
-    names = {None: "réglage automatique", 1.0: "EmbeddingGemma 2", 0.0: "MegaLoc"}
-    used = names.get(weight, f"mélange, {round(100 * (weight or 0))} % EmbeddingGemma 2")
-    label = f"Recherche par image ({used})"
-    if source == "region":
-        label += ", sur la partie encadrée"
-    head = f"image_search {source}, model {model}"
     if found.a7_weight is not None:
         head += f" (A7 weight {found.a7_weight:g}, photo routed as {found.bucket})"
     if found.mount:
         head += "; an archive print on its card: the print alone was searched"
-    return _listing(ctx, head, label, filters, found)
+    listed = _listing(ctx, head, label, filters, found)
+    return replace(listed, thumbnails=viewed) if viewed else listed
+
+
+def running_label(name: str, args: Mapping[str, object]) -> str | None:
+    """The step line while an image search on a transformed photo runs, from its arguments
+    as written (« Recadre sur le contour 3, passe en noir et blanc… »); None otherwise."""
+    raw = args.get("transform")
+    if name != ToolName.IMAGE_SEARCH.value or not isinstance(raw, dict):
+        return None
+    given: dict[str, object] = {str(k): v for k, v in raw.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    parts: list[str] = []
+    if given.get("outline") is not None:
+        parts.append(f"recadre sur le contour {given['outline']}")
+    elif str(given.get("cell") or "").lower() in CELL_NAMES_FR:
+        parts.append(f"recadre sur la case {CELL_NAMES_FR[str(given['cell']).lower()]}")
+    elif given.get("box") is not None:
+        parts.append("recadre sur une partie de la photo")
+    turn = given.get("rotate")
+    if isinstance(turn, int) and turn % 360 in TURNS_FR:
+        parts.append(TURNS_FR[turn % 360])
+    if given.get("mirror") is True:
+        parts.append("retourne en miroir")
+    if given.get("grayscale") is True or given.get("stretch") is True:
+        parts.append("passe en noir et blanc")
+    if not parts:
+        return None
+    text = ", ".join(parts)
+    return f"{text[0].upper()}{text[1:]}, puis cherche par image…"
+
+
+def _image_weight(model: str, args: Mapping[str, object]) -> float | None:
+    """EmbeddingGemma 2's share for the model asked for; None: the site's routed choice."""
+    if model == "mix":
+        return min(max(_number(args.get("a7_weight"), 0.5), 0.0), 1.0)
+    weights = {"auto": None, "a7": 1.0, "a3": 0.0}
+    if model not in weights:
+        msg = f"unknown model {model!r}: auto, A7, A3 or mix"
+        raise ArgumentError(msg)
+    return weights[model]
+
+
+# --- transforms ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AskedTransform:
+    transform: Transform
+    french: str
+    """For the step line: « Recadre sur le contour 3 (sculpture), passe en noir et blanc »."""
+    english: str
+    """For the model: "cropped to outline 3 (sculpture), in black and white"."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Crop:
+    box: tuple[float, float, float, float]
+    french: str
+    english: str
+
+
+def _transformed(
+    ctx: ToolContext, image: bytes, asked: AskedTransform
+) -> tuple[bytes, tuple[Thumbnail, ...]]:
+    """The image with the transform done, and the thumbnail of it the model looks at next."""
+    try:
+        done = apply(image, asked.transform, TRANSFORM_SIDE)
+    except (TransformError, OSError) as err:
+        raise ArgumentError(str(err)) from err
+    key = ctx.keep_query_image(to_jpeg(done, TRANSFORM_VIEW_SIDE))
+    return done, (Thumbnail(f"The image searched: {asked.english}", key),)
+
+
+async def _transform_of(ctx: ToolContext, raw: object, source: str) -> AskedTransform | None:
+    """The `transform` argument, checked; None when it asks for nothing (the whole photo)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        msg = f"transform must be an object with keys among: {', '.join(TRANSFORM_KEYS)}"
+        raise ArgumentError(msg)
+    given: dict[str, object] = {str(k): v for k, v in raw.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    unknown = [k for k in given if k not in TRANSFORM_KEYS]
+    if unknown:
+        msg = f"unknown transform key(s): {', '.join(unknown)}. Valid: {', '.join(TRANSFORM_KEYS)}"
+        raise ArgumentError(msg)
+    if source == "region" and given.get("outline") is not None:
+        msg = "outlines are boxes of the whole photo: use source photo to crop to one"
+        raise ArgumentError(msg)
+    crop = await _crop_of(ctx, given)
+    french = [crop.french] if crop else []
+    english = [crop.english] if crop else []
+    rotate = _number(given.get("rotate"), 0.0)
+    if not rotate.is_integer() or int(rotate) % 360 not in TURNS:
+        msg = f"rotate must be one of {', '.join(map(str, TURNS))} (degrees clockwise)"
+        raise ArgumentError(msg)
+    turn = int(rotate) % 360
+    if turn:
+        french.append(TURNS_FR[turn])
+        english.append(f"turned {turn}° clockwise")
+    mirror = given.get("mirror") is True
+    if mirror:
+        french.append("retourne en miroir")
+        english.append("mirrored left to right")
+    stretch = given.get("stretch") is True
+    grey = given.get("grayscale") is True or stretch
+    if grey:
+        french.append("passe en noir et blanc" + (" contrasté" if stretch else ""))
+        english.append("in black and white" + (" with its contrast stretched" if stretch else ""))
+    transform = Transform(
+        crop=crop.box if crop else None, rotate=turn, mirror=mirror, grayscale=grey, stretch=stretch
+    )
+    if transform.empty:
+        return None
+    first, *rest = french
+    return AskedTransform(
+        transform, ", ".join([first[0].upper() + first[1:], *rest]), ", ".join(english)
+    )
+
+
+async def _crop_of(ctx: ToolContext, given: Mapping[str, object]) -> _Crop | None:
+    """The part of the photo the transform asks for, padded, or None (the whole photo)."""
+    crops = [k for k in ("outline", "box", "cell") if given.get(k) is not None]
+    if not crops:
+        return None
+    if len(crops) > 1:
+        msg = "crop with one of outline, box or cell, not several"
+        raise ArgumentError(msg)
+    pad = _number(given.get("pad"), 0.0 if crops == ["cell"] else DEFAULT_PAD)
+    if crops == ["outline"]:
+        found = list(await ctx.outlines())
+        n = _number(given.get("outline"), 0.0)
+        if not found:
+            msg = "the detector found no outline in this photo: crop with a box or a cell"
+            raise ArgumentError(msg)
+        if not (n.is_integer() and 1 <= n <= len(found)):
+            msg = f"outline must be a number from 1 to {len(found)}"
+            raise ArgumentError(msg)
+        box = found[int(n) - 1]
+        name = OUTLINE_LABELS_FR.get(box.label, "")
+        crop = _Crop(
+            (box.x0, box.y0, box.x1, box.y1),
+            f"Recadre sur le contour {int(n)}" + (f" ({name})" if name else ""),
+            f"cropped to outline {int(n)}" + (f" ({box.label})" if box.label else ""),
+        )
+    elif crops == ["box"]:
+        values = _box_values(given.get("box"))
+        crop = _Crop(values, "Recadre sur une partie de la photo", f"cropped to box {list(values)}")
+    else:
+        cell = str(given.get("cell")).strip().lower()
+        if cell not in CELLS:
+            msg = f"unknown cell {cell!r}. Cells: {', '.join(CELLS)}"
+            raise ArgumentError(msg)
+        crop = _Crop(
+            CELLS[cell],
+            f"Recadre sur la case {CELL_NAMES_FR[cell]}",
+            f"cropped to the {cell} cell of a 3 by 3 grid",
+        )
+    try:
+        box = padded(crop.box, pad)
+    except TransformError as err:
+        raise ArgumentError(str(err)) from err
+    return _Crop(box, crop.french, crop.english + (f" with {pad:g} padding" if pad else ""))
+
+
+def _box_values(raw: object) -> tuple[float, float, float, float]:
+    """[left, top, right, bottom] as four numbers."""
+    items: list[object] = list(raw) if isinstance(raw, list) else []  # pyright: ignore[reportUnknownArgumentType]
+    numbers = [float(v) for v in items if isinstance(v, int | float) and not isinstance(v, bool)]
+    if len(numbers) != 4 or len(items) != 4:
+        msg = "box must be [left, top, right, bottom], each a share of the photo, 0 to 1"
+        raise ArgumentError(msg)
+    return (round(numbers[0], 3), round(numbers[1], 3), round(numbers[2], 3), round(numbers[3], 3))
 
 
 async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
@@ -747,15 +968,51 @@ _BEST: JSON = {
     "none fits). Kept across steps; leave it out to keep it as it is.",
 }
 
+_TRANSFORM_SCHEMA: dict[str, JSON] = {
+    "type": "object",
+    "description": (
+        "Leave it out to search the whole photo. Otherwise what to do to the photo before the "
+        "search; it counts as a search. Crop with one of "
+        "outline, box or cell; combine freely with rotate, mirror and grayscale."
+    ),
+    "properties": {
+        "outline": {
+            "type": "integer",
+            "description": "Crop to this numbered outline from the detector's list (1 = first).",
+        },
+        "box": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "Crop to [left, top, right, bottom], shares of the photo, 0 to 1.",
+        },
+        "cell": {"type": "string", "enum": list[JSON](CELLS), "description": "3 by 3 grid cell."},
+        "pad": {
+            "type": "number",
+            "description": f"Extra margin around the crop, a share of its size: 0 to "
+            f"{MAX_PAD:g} (default {DEFAULT_PAD:g}; 0 for a cell).",
+        },
+        "grayscale": {"type": "boolean", "description": "Turn it black and white."},
+        "stretch": {
+            "type": "boolean",
+            "description": "Black and white with the contrast spread out (faded prints).",
+        },
+        "rotate": {"type": "integer", "enum": list[JSON](TURNS), "description": "Clockwise."},
+        "mirror": {"type": "boolean", "description": "Flip left to right."},
+    },
+}
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         ToolName.IMAGE_SEARCH,
-        "Search by the look of the visitor's photo (or of the part they framed). Lists "
-        "entities: id | score | base | title | place | authors | date; * marks a filter match.",
+        "Search by the look of the visitor's photo (or of the part they framed), whole or "
+        "transformed: cropped to one part, turned, mirrored, or in black and white. Lists "
+        "entities: id | score | base | title | place | authors | date; * marks a filter match. "
+        "A transformed search also shows you the image it searched.",
         {
             "type": "object",
             "properties": {
                 "source": {"type": "string", "enum": ["photo", "region"]},
+                "transform": _TRANSFORM_SCHEMA,
                 "model": {
                     "type": "string",
                     "enum": ["auto", "A7", "A3", "mix"],
@@ -918,9 +1175,14 @@ TOOLS: tuple[Tool, ...] = (
 BY_NAME: dict[str, Tool] = {t.name.value: t for t in TOOLS}
 
 
-def tools_for(*, photo: bool) -> tuple[Tool, ...]:
-    """The tools a conversation offers: without a photo, no image search, no framing."""
-    return tuple(t for t in TOOLS if photo or not t.needs_photo)
+#: The tools that wait for the visitor: left out when nobody will answer (one-shot search).
+ASKING = frozenset({ToolName.ASK_VISITOR, ToolName.ASK_REGION})
+
+
+def tools_for(*, photo: bool, ask: bool = True) -> tuple[Tool, ...]:
+    """The tools a conversation offers: without a photo, no image search, no framing; without
+    `ask` (the page's one-shot "Approfondi" search), no question to the visitor."""
+    return tuple(t for t in TOOLS if (photo or not t.needs_photo) and (ask or t.name not in ASKING))
 
 
 async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:

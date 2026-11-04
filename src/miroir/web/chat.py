@@ -53,9 +53,11 @@ from miroir.config import Settings
 from miroir.images.fetch import to_jpeg
 from miroir.jobs.mistral import MistralClient, MistralError
 from miroir.jobs.openrouter import JSON, ChatAnswer, OpenRouterClient, OpenRouterError, ToolCall
-from miroir.web.catalog import Catalog, CatalogRecord
+from miroir.outlines import DETECT_SIDE, Box, Outlines
+from miroir.web.catalog import COLLECTION_LABELS, Catalog, CatalogRecord, Filters
 from miroir.web.chat_tools import (
     MAX_RESULTS,
+    OUTLINES_LISTED,
     SEARCHES,
     Signature,
     ToolName,
@@ -64,6 +66,7 @@ from miroir.web.chat_tools import (
     arguments_of,
     best_of,
     run_tool,
+    running_label,
     tools_for,
     why_of,
 )
@@ -82,23 +85,28 @@ logger = logging.getLogger(__name__)
 MODEL = "mistralai/mistral-large-4-0"
 MODEL_FIELDS: dict[str, JSON] = {"temperature": 0.0, "top_p": 1.0, "reasoning": {"effort": "low"}}
 MAX_TOKENS = 800
-#: Searches per visitor message; then the model must show results or ask.
-MAX_TOOL_CALLS = 8
+#: The step caps of one visitor message. Raised 2026-11-03 (from 8 searches, 3 without a
+#: sure match, 2 stale, 3 looks, 12 model calls) so a thorough "Approfondi" run, cropped and
+#: grey searches included, can go on; the spending caps (`Limits`) are the real limit.
+#: Searches per visitor message, transformed ones included; then results or a question.
+MAX_TOOL_CALLS = 20
 #: Searches per visitor message without a sure match (a first-look card rated "Très
 #: proche"); then only a question or the results.
-MAX_SEARCHES = 3
+MAX_SEARCHES = 10
 #: Searches in a row that bring nothing new into the best-so-far; then the same stop.
-MAX_STALE = 2
+MAX_STALE = 4
 #: First-look results the model must look at before it searches, and best-so-far's size.
 LOOK_FIRST = 4
 BEST = 5
 #: Looks at thumbnails per visitor message, apart from the searches (the smoke test with
 #: Mistral spent its 8 calls on searches and could not check its picks by eye).
-MAX_VIEWS = 3
+MAX_VIEWS = 6
 #: Model calls per visitor message, all told.
-MAX_MODEL_CALLS = 12
+MAX_MODEL_CALLS = 25
 #: Thumbnails kept in what the model is sent again each call; older ones become a note.
 KEEP_THUMBS = 12
+#: Transformed photos kept in what the model is sent again each call (the latest ones).
+KEEP_QUERY_IMAGES = 3
 #: Long side of the visitor's photo and framed region as the model sees them.
 PHOTO_SIDE = 768
 #: First-look results the model is told about.
@@ -234,6 +242,9 @@ class Backend(Protocol):
 
     async def search(self, request: SearchRequest) -> SearchResponse: ...
     async def tool_search(self, query: ToolQuery) -> ToolHits: ...
+    async def detect(self, jpeg: bytes) -> Outlines:
+        """The works in a photo (F4), as the photo view outlines them."""
+        ...
 
 
 class ThumbSource:
@@ -324,6 +335,8 @@ class Conversation:
         words: str,
         position: Position | None,
         now: float,
+        oneshot: bool = False,
+        filters: Filters | None = None,
     ) -> None:
         self.service = service
         self.id = secrets.token_urlsafe(16)
@@ -331,11 +344,19 @@ class Conversation:
         self.photo_bytes = photo
         self.words = words
         self.position_given = position
+        self.oneshot = oneshot
+        """The page's "Approfondi" search: one turn, no question to the visitor."""
+        self.filters = filters or Filters()
+        """The filters the visitor set on the page."""
         self.touched = now
         self.messages: list[dict[str, JSON]] = []
         self.events: list[Event] = []
         self.changed = asyncio.Event()
         self.first_look: asyncio.Future[SearchResponse] | None = None
+        self.detected: asyncio.Future[Outlines] | None = None
+        """The detector's outlines of the photo, started with the first look."""
+        self.query_images: dict[str, bytes] = {}
+        """Transformed photos the model searched, kept for it to look at, by key."""
         self.task: asyncio.Future[None] | None = None
         self.pending: _Pending | None = None
         self.started = False
@@ -404,6 +425,21 @@ class Conversation:
 
     def checked(self, entity_id: str) -> bool:
         return entity_id in self.viewed or entity_id in self.sure
+
+    async def outlines(self) -> Sequence[Box]:
+        if self.detected is None:
+            return ()
+        try:
+            found = await asyncio.wait_for(asyncio.shield(self.detected), FIRST_LOOK_WAIT_S)
+        except (TimeoutError, ValueError, RuntimeError, OSError) as err:
+            logger.warning("chat %s: outlines failed: %s", self.id[:8], err)
+            return ()
+        return found.boxes[:OUTLINES_LISTED]
+
+    def keep_query_image(self, jpeg: bytes) -> str:
+        key = f"query-{len(self.query_images) + 1}"
+        self.query_images[key] = jpeg
+        return key
 
     def title_of(self, entity_id: str) -> str:
         known = self.known.get(entity_id)
@@ -523,9 +559,18 @@ class ChatService:
     # --- conversations -------------------------------------------------------------------------
 
     def open(
-        self, session: str, *, photo: bytes | None, words: str, position: Position | None
+        self,
+        session: str,
+        *,
+        photo: bytes | None,
+        words: str,
+        position: Position | None,
+        oneshot: bool = False,
+        filters: Filters | None = None,
     ) -> Conversation:
-        """A new conversation. With a photo, the site's usual search starts at once."""
+        """A new conversation. With a photo, the site's usual search starts at once.
+        `oneshot`: the page's "Approfondi" search, which asks the visitor nothing; `filters`:
+        those the visitor set, which the first look applies and the model is told about."""
         self._forget_old()
         conversation = Conversation(
             self,
@@ -534,10 +579,20 @@ class ChatService:
             words=words.strip()[:MAX_WORDS],
             position=position,
             now=self._clock(),
+            oneshot=oneshot,
+            filters=filters,
         )
         if photo is not None:
-            request = SearchRequest(image=photo, text=conversation.words, position=position)
+            request = SearchRequest(
+                image=photo,
+                text=conversation.words,
+                position=position,
+                filters=conversation.filters,
+            )
             conversation.first_look = asyncio.ensure_future(self.backend.search(request))
+            conversation.detected = asyncio.ensure_future(
+                self.backend.detect(to_jpeg(photo, DETECT_SIDE))
+            )
         self._conversations[conversation.id] = conversation
         conversation.log(
             {
@@ -545,6 +600,8 @@ class ChatService:
                 "photo": photo is not None,
                 "words": conversation.words,
                 "position": position is not None,
+                "oneshot": oneshot,
+                "filters": not conversation.filters.empty,
                 "model": self.model.model,
             }
         )
@@ -676,6 +733,10 @@ class ChatService:
 
     async def _opening(self, c: Conversation, goal: str) -> dict[str, JSON]:
         parts: list[JSON] = [_text(f"The visitor's goal, in their own words: «{goal or '?'}»")]
+        if c.oneshot:
+            parts.append(_text(ONESHOT_NOTE))
+        if not c.filters.empty:
+            parts.append(_text(filters_note(c.filters)))
         if c.photo_bytes is None:
             parts.append(
                 _text(f"No photo: the visitor only typed words: «{c.words}». Search with them.")
@@ -689,6 +750,7 @@ class ChatService:
                 _text('The photo was taken at a known position: filters near "visitor" uses it.')
             )
         parts.append(_text(await self._first_look(c)))
+        parts.append(_text(outlines_note(await c.outlines())))
         return _user(*parts)
 
     async def _first_look(self, c: Conversation) -> str:
@@ -760,7 +822,7 @@ class ChatService:
 
     async def _loop(self, c: Conversation) -> str:
         """Model calls and their tools until the model shows results, asks, or stops."""
-        tools = tools_for(photo=c.photo_bytes is not None)
+        tools = tools_for(photo=c.photo_bytes is not None, ask=not c.oneshot)
         c.views = 0
         c.turn = _Turn()
         schemas = [t.schema() for t in tools]
@@ -830,11 +892,7 @@ class ChatService:
             ids = [_call_id(call, c.calls, n) for n, call in enumerate(answer.tool_calls)]
             c.messages.append(_assistant(answer.text, answer.tool_calls, ids))
             waiting, thumbs, used = await self._calls(c, answer.tool_calls, ids, offered, used)
-            if thumbs:
-                parts: list[JSON] = [_text("Thumbnails asked for with view_results:")]
-                for label, image_id in thumbs:
-                    parts += [_text(label), _image_ref("thumb", image_id)]
-                c.messages.append(_user(*parts))
+            _show_images(c, thumbs)
             if waiting is not None:
                 return waiting
         c.emit({"type": "say", "text": GAVE_UP})
@@ -874,7 +932,7 @@ class ChatService:
                     "type": "step",
                     "id": step,
                     "state": "running",
-                    "label": RUNNING[call.name],
+                    "label": running_label(call.name, args) or RUNNING[call.name],
                 }
                 if why:
                     running["why"] = why
@@ -938,7 +996,7 @@ class ChatService:
         if waiting is not None:
             return NOT_RUN_WAITING
         if name not in offered:
-            return f"error: {name} is not available here (no photo)."
+            return f"error: {name} is not available in this search."
         named = best_of(args)
         if named is not None:
             c.name_best(named)
@@ -1068,6 +1126,7 @@ class ChatService:
             if isinstance(p, dict) and p.get("type") == "image_ref" and p.get("ref") == "thumb"
         ]
         keep = set(thumb_parts[-KEEP_THUMBS:])
+        keep_queries = set(list(c.query_images)[-KEEP_QUERY_IMAGES:])
         out: list[JSON] = []
         for i, message in enumerate(c.messages):
             parts = _parts(message)
@@ -1087,6 +1146,12 @@ class ChatService:
                         continue
                     self.thumbs.publishable.check(image_id, "the model")
                     rendered.append(_data_url(c.thumbs[image_id]))
+                elif ref == "query":
+                    key = str(part.get("image_id"))
+                    if key in c.query_images and key in keep_queries:
+                        rendered.append(_data_url(c.query_images[key]))
+                    else:
+                        rendered.append(_text("(searched image shown earlier)"))
                 elif ref == "region" and c.region_bytes is not None:
                     rendered.append(_data_url(to_jpeg(c.region_bytes, PHOTO_SIDE)))
                 elif ref == "photo" and c.photo_bytes is not None:
@@ -1219,6 +1284,14 @@ name). This works very well on archive prints.
 - Filters favour matching records by default (boost). Use mode hard only when you are sure (the \
 visitor said so, or a caption names the commune): a hard filter on a wrong guess hides the \
 right answer.
+- Aim an image search with transform when the photo holds more than the thing sought: crop \
+to one part (a carved group of an altarpiece, one painting on a room's wall, one object on a \
+shelf, a detail of a façade) by its outline number from the detector's list, by a box, or by \
+a cell of a 3 by 3 grid; leave transform out to search the whole photo again. Use grayscale \
+(with stretch for a faded print) when you look for a black and white archive print \
+(Mémoire, Mérimée, Palissy) from a colour photo; turn or mirror a photo taken sideways or \
+reversed. You see each transformed image after its search: check the crop holds what you \
+meant. They count as searches.
 - Do not run a search again with reworded words: it will be refused.
 - At most {calls} searches and {views} looks at thumbnails per visitor message.
 - Do not say a pick looks like the photo unless you have seen its thumbnail.
@@ -1233,6 +1306,68 @@ and never in English. Never invent a name, a date or a place the records do not 
 
 
 # --- message helpers ---------------------------------------------------------------------------
+
+
+def _show_images(c: Conversation, images: Sequence[tuple[str, str]]) -> None:
+    """After a reply's tools: the thumbnails it asked for, then the transformed photos it
+    searched, each as one message the model reads next."""
+    searched = [(label, key) for label, key in images if key in c.query_images]
+    thumbs = [(label, key) for label, key in images if key not in c.query_images]
+    if thumbs:
+        parts: list[JSON] = [_text("Thumbnails asked for with view_results:")]
+        for label, image_id in thumbs:
+            parts += [_text(label), _image_ref("thumb", image_id)]
+        c.messages.append(_user(*parts))
+    if searched:
+        shown: list[JSON] = []
+        for label, key in searched:
+            shown += [_text(label), _image_ref("query", key)]
+        c.messages.append(_user(*shown))
+
+
+def outlines_note(boxes: Sequence[Box]) -> str:
+    """The detector's outlines, numbered as image_search's transform outline takes them."""
+    if not boxes:
+        return "Outlines: the detector found no separate work in the photo."
+    lines = [
+        f"{i}. {b.label or 'object'} [{b.x0:.2f}, {b.y0:.2f}, {b.x1:.2f}, {b.y1:.2f}]"
+        for i, b in enumerate(boxes, start=1)
+    ]
+    return (
+        "Outlines the detector found in the photo (number, its guess of what it is, often "
+        "wrong, and [left, top, right, bottom] in shares of the photo), biggest and surest "
+        "first; transform outline crops to one:\n" + "\n".join(lines)
+    )
+
+
+ONESHOT_NOTE = (
+    "This is a one-shot search: the visitor will not answer questions or frame anything. "
+    "Look, search and read records on your own, then finish with show_results: your best "
+    "picks, each with its reason, or found none."
+)
+
+
+def filters_note(filters: Filters) -> str:
+    """The page's filters, told to the model so its own searches keep them."""
+    parts: list[str] = []
+    if filters.collections:
+        names = ", ".join(COLLECTION_LABELS.get(c, c) for c in filters.collections)
+        parts.append(f"base {list(filters.collections)} ({names})")
+    if filters.region:
+        parts.append(f"région {filters.region} (no région key: name its départements)")
+    for key, value in (
+        ("departement", filters.departement),
+        ("domain", filters.domain),
+        ("period", filters.period),
+    ):
+        if value:
+            parts.append(f"{key} {value!r}")
+    return (
+        "The visitor set these filters on the page: "
+        + "; ".join(parts)
+        + '. Pass them in every search\'s filters with mode "hard", and show only records '
+        "that match them."
+    )
 
 
 def _text(text: str) -> JSON:

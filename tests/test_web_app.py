@@ -34,8 +34,19 @@ async def _fake_fetch(url: str) -> bytes:
     return h.photo(90)
 
 
+PAGE = "<!doctype html><title>Miroir</title><div id=root></div>"
+
+
+def built_page(folder: Path) -> Path:
+    """A stand-in for the page `make ui` builds (tests run without Node)."""
+    (folder / "assets").mkdir(parents=True)
+    (folder / "index.html").write_text(PAGE)
+    (folder / "assets" / "index.js").write_text("console.log('miroir')")
+    return folder
+
+
 @pytest.fixture
-def client() -> TestClient:
+def client(tmp_path: Path) -> TestClient:
     engine, _ = h.engine(building=False)
     app = create_app(
         catalog=engine.catalog,
@@ -44,6 +55,7 @@ def client() -> TestClient:
         session_key=b"k" * 32,
         secure_cookies=False,
         fetch=_fake_fetch,
+        ui_dir=built_page(tmp_path / "ui"),
     )
     return TestClient(app)
 
@@ -52,22 +64,29 @@ def login(client: TestClient) -> None:
     assert client.post("/api/login", json={"password": PASSWORD}).status_code == 200
 
 
-def test_the_page_loads_without_login(client: TestClient) -> None:
+def test_the_built_page_loads_without_login(client: TestClient) -> None:
     page = client.get("/")
     assert page.status_code == 200
-    assert "Miroir" in page.text
-    assert "@gouvfr/dsfr@1.15.4" in page.text
-    assert client.get("/static/app.js").status_code == 200
+    assert page.text == PAGE
+    assert page.headers["cache-control"] == "no-cache"
+    script = client.get("/static/assets/index.js")
+    assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-cache"
+    assert client.get("/static/assets/nothing.js").status_code == 404
 
 
-def test_how_it_works_reads_without_login(client: TestClient) -> None:
-    """The "Comment ça marche" view is in the page itself, linked from the header, the home
-    and login views, and its route comes before the login check."""
-    page = client.get("/").text
-    assert 'data-view="docs"' in page
-    assert page.count('href="#/comment-ca-marche"') >= 3
-    script = client.get("/static/app.js").text
-    assert script.index("hash === DOCS_HASH") < script.index("await loggedIn()")
+def test_a_page_not_built_says_how_to_build_it(tmp_path: Path) -> None:
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=LocalBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        ui_dir=tmp_path / "missing",
+    )
+    page = TestClient(app).get("/")
+    assert page.status_code == 503
+    assert "make ui" in page.text
 
 
 @pytest.mark.parametrize(

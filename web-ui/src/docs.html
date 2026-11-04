@@ -1,0 +1,320 @@
+      <div class="miroir-band">
+        <div class="fr-container">
+          <nav role="navigation" class="fr-breadcrumb fr-mt-0 fr-mb-3w" aria-label="vous êtes ici :">
+            <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="breadcrumb-docs">Voir le fil d’Ariane</button>
+            <div class="fr-collapse" id="breadcrumb-docs">
+              <ol class="fr-breadcrumb__list">
+                <li><a class="fr-breadcrumb__link" href="#/">Accueil</a></li>
+                <li><a class="fr-breadcrumb__link" aria-current="page">Comment ça marche</a></li>
+              </ol>
+            </div>
+          </nav>
+          <h1 class="miroir-band__title">Comment ça marche</h1>
+          <p class="fr-text--lead miroir-band__lead">Miroir retrouve la notice officielle d’une œuvre ou d’un monument dans la Plateforme ouverte du patrimoine (POP), à partir de ce que vous avez sous les yeux.</p>
+          <ul class="miroir-doc__ways">
+            <li class="miroir-doc__way">
+              <span class="fr-icon-camera-line miroir-doc__way-icon" aria-hidden="true"></span>
+              <p class="miroir-doc__way-title">Une photo</p>
+              <p class="fr-text--sm fr-mb-0">D’un tableau, d’un objet de musée, d’une façade, ou une vieille photo sur son carton.</p>
+            </li>
+            <li class="miroir-doc__way">
+              <span class="fr-icon-crop-line miroir-doc__way-icon" aria-hidden="true"></span>
+              <p class="miroir-doc__way-title">Une partie de photo</p>
+              <p class="fr-text--sm fr-mb-0">Un tableau sur un mur de salle, un détail&nbsp;: vous tracez un cadre, ou touchez un cadre bleu.</p>
+            </li>
+            <li class="miroir-doc__way">
+              <span class="fr-icon-chat-3-line miroir-doc__way-icon" aria-hidden="true"></span>
+              <p class="miroir-doc__way-title">Des mots</p>
+              <p class="fr-text--sm fr-mb-0">Un nom («&nbsp;Pont du Gard&nbsp;»), un lieu, ce que vous voyez, en français ou dans une autre langue.</p>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-container fr-py-6w">
+
+        <section class="miroir-doc__part" aria-labelledby="doc-path">
+          <h2 id="doc-path" class="fr-h3">Le chemin d’une recherche</h2>
+          <p class="miroir-doc__intro">De votre photo aux cartes de résultats, en six étapes. Une recherche rapide prend environ une seconde.</p>
+          <ol class="miroir-flow">
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-camera-line"></span></span>
+              <h3 class="miroir-flow__title">Votre photo</h3>
+              <p class="miroir-flow__text">Réduite dans votre navigateur, elle part vers le serveur de Miroir. Ou bien vos mots.</p>
+            </li>
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-focus-3-line"></span></span>
+              <h3 class="miroir-flow__title">Repérer les œuvres</h3>
+              <p class="miroir-flow__text">Un cadre bleu numéroté marque chaque œuvre trouvée dans la photo. Vous en touchez un, ou tracez le vôtre.</p>
+              <p class="miroir-flow__model">Grounding DINO</p>
+            </li>
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-building-line"></span></span>
+              <h3 class="miroir-flow__title">Bâtiment ou objet&nbsp;?</h3>
+              <p class="miroir-flow__text">Miroir devine le genre de photo. Le dosage de l’étape suivante en dépend (voir plus bas).</p>
+            </li>
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-fingerprint-line"></span></span>
+              <h3 class="miroir-flow__title">Une empreinte</h3>
+              <p class="miroir-flow__text">Deux modèles résument l’image en une suite de nombres. Les mots sont résumés de la même façon, et cherchés aussi dans le texte des notices.</p>
+              <p class="miroir-flow__model">EmbeddingGemma 2 · MegaLoc</p>
+            </li>
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-sort-desc"></span></span>
+              <h3 class="miroir-flow__title">Comparer et classer</h3>
+              <p class="miroir-flow__text">L’empreinte est comparée à celles des 2,26&nbsp;millions d’images de l’index. Chaque notice garde sa meilleure image. Vos filtres et votre position comptent.</p>
+            </li>
+            <li class="miroir-flow__step">
+              <span class="miroir-flow__dot" aria-hidden="true"><span class="fr-icon-file-text-line"></span></span>
+              <h3 class="miroir-flow__title">Les cartes</h3>
+              <p class="miroir-flow__text">Une carte par bâtiment ou par objet, de la plus proche à la moins proche, avec un lien vers POP.</p>
+            </li>
+          </ol>
+
+          <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w">
+            <div class="fr-col-12 fr-col-lg-6">
+              <div class="miroir-doc__box">
+                <h3 class="fr-h6"><span class="miroir-doc__tag">Étape 3</span> Trois dosages</h3>
+                <p class="fr-text--sm fr-mb-1w">Les deux modèles ne voient pas les mêmes choses. Miroir les dose selon la photo&nbsp;:</p>
+                <p class="miroir-mix-legend fr-text--xs" aria-hidden="true"><span class="miroir-mix-legend__a">EmbeddingGemma 2</span><span class="miroir-mix-legend__b">MegaLoc</span></p>
+                <ul class="miroir-routes">
+                  <li>
+                    <span class="miroir-routes__what">Vieille photo de bâtiment, en noir et blanc</span>
+                    <span class="miroir-mix" aria-hidden="true"><span class="miroir-mix__a" style="--w: 100%"></span></span>
+                    <span class="miroir-routes__how">EmbeddingGemma 2 seul</span>
+                  </li>
+                  <li>
+                    <span class="miroir-routes__what">Photo de bâtiment en couleur</span>
+                    <span class="miroir-mix" aria-hidden="true"><span class="miroir-mix__b" style="--w: 100%"></span></span>
+                    <span class="miroir-routes__how">MegaLoc seul</span>
+                  </li>
+                  <li>
+                    <span class="miroir-routes__what">Tableau, objet, œuvre</span>
+                    <span class="miroir-mix" aria-hidden="true"><span class="miroir-mix__a" style="--w: 20%"></span><span class="miroir-mix__b" style="--w: 80%"></span></span>
+                    <span class="miroir-routes__how">20&nbsp;% EmbeddingGemma 2, 80&nbsp;% MegaLoc</span>
+                  </li>
+                </ul>
+                <p class="fr-text--xs miroir-muted fr-mb-0">Une vieille photo collée sur son carton&nbsp;: un troisième modèle, Qwen3-VL, lit la légende, et ses mots (souvent un nom de lieu) rejoignent la recherche.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="miroir-doc__part" aria-labelledby="doc-modes">
+          <h2 id="doc-modes" class="fr-h3">Deux façons de chercher</h2>
+          <div class="miroir-modes">
+            <article class="miroir-mode">
+              <div class="miroir-mode__head">
+                <h3 class="fr-h5 fr-mb-0">Rapide</h3>
+                <p class="fr-badge fr-badge--sm fr-badge--success fr-mb-0">Stable</p>
+              </div>
+              <p>Miroir compare votre photo aux images des notices et vous montre les plus proches. Vous affinez avec des mots («&nbsp;à Toulouse&nbsp;») et des filtres.</p>
+              <ul class="miroir-mode__facts">
+                <li><span class="fr-icon-time-line" aria-hidden="true"></span>Environ une seconde</li>
+                <li><span class="fr-icon-server-line" aria-hidden="true"></span>Modèles ouverts, sur le serveur de Miroir</li>
+                <li><span class="fr-icon-lock-line" aria-hidden="true"></span>Votre photo ne part chez personne d’autre</li>
+              </ul>
+              <div class="miroir-route" role="img" aria-label="Chemin de la photo : de vous au serveur de Miroir, et pas plus loin.">
+                <span class="miroir-route__node"><span class="fr-icon-camera-line" aria-hidden="true"></span>Vous</span>
+                <span class="miroir-route__arrow" aria-hidden="true"></span>
+                <span class="miroir-route__node miroir-route__node--miroir"><span class="fr-icon-server-line" aria-hidden="true"></span>Serveur Miroir</span>
+              </div>
+            </article>
+            <article class="miroir-mode">
+              <div class="miroir-mode__head">
+                <h3 class="fr-h5 fr-mb-0">Approfondi</h3>
+                <p class="fr-badge fr-badge--sm fr-badge--new fr-mb-0">Expérimental</p>
+              </div>
+              <p>Un grand modèle de langage, Mistral Large 4, regarde les premières vignettes, relance des recherches (par l’image, «&nbsp;plus comme celle-ci&nbsp;», par les mots), lit les notices, puis montre ses choix, chacun avec sa raison. Il cherche seul&nbsp;: il ne vous pose pas de question.</p>
+              <ul class="miroir-mode__facts">
+                <li><span class="fr-icon-time-line" aria-hidden="true"></span>Environ une minute</li>
+                <li><span class="fr-icon-cloud-line" aria-hidden="true"></span>Mistral Large 4, par l’API de Mistral ou par OpenRouter</li>
+                <li><span class="fr-icon-eye-line" aria-hidden="true"></span>Votre photo et des vignettes de notices lui sont envoyées</li>
+              </ul>
+              <div class="miroir-route" role="img" aria-label="Chemin de la photo : de vous au serveur de Miroir, puis à OpenRouter et au modèle Mistral Large 4.">
+                <span class="miroir-route__node"><span class="fr-icon-camera-line" aria-hidden="true"></span>Vous</span>
+                <span class="miroir-route__arrow" aria-hidden="true"></span>
+                <span class="miroir-route__node miroir-route__node--miroir"><span class="fr-icon-server-line" aria-hidden="true"></span>Serveur Miroir</span>
+                <span class="miroir-route__arrow" aria-hidden="true"></span>
+                <span class="miroir-route__node miroir-route__node--out"><span class="fr-icon-cloud-line" aria-hidden="true"></span>OpenRouter · Mistral</span>
+              </div>
+            </article>
+          </div>
+          <div class="fr-callout fr-icon-information-line fr-mt-3w">
+            <p class="fr-callout__text">Votre photo ne quitte le serveur de Miroir que dans la recherche approfondie&nbsp;: elle est alors envoyée au modèle Mistral Large 4, le temps de la recherche. Seules des images de notices publiables partent avec elle.</p>
+          </div>
+        </section>
+
+        <section class="miroir-doc__part" aria-labelledby="doc-index">
+          <h2 id="doc-index" class="fr-h3">Où cherche Miroir</h2>
+          <p class="miroir-doc__intro">Dans tout POP&nbsp;: les notices avec image de six bases, téléchargées en novembre 2026. 2&nbsp;135&nbsp;437 notices, 2&nbsp;257&nbsp;225 images, regroupées en 885&nbsp;596 bâtiments et objets. 99,86&nbsp;% des notices avec image y sont&nbsp;; les autres ont une image que POP ne sert pas ou qui ne se lit pas.</p>
+          <ul class="miroir-stats">
+            <li class="miroir-stat">
+              <p class="miroir-stat__name">Mémoire</p>
+              <p class="miroir-stat__value">1&nbsp;285&nbsp;958 <span>notices</span></p>
+              <p class="fr-text--sm fr-mb-0">Photographies de monuments et d’objets, souvent anciennes.</p>
+            </li>
+            <li class="miroir-stat">
+              <p class="miroir-stat__name">Joconde</p>
+              <p class="miroir-stat__value">604&nbsp;881 <span>notices</span></p>
+              <p class="fr-text--sm fr-mb-0">Collections des musées de France, parfois plusieurs vues d’un objet.</p>
+            </li>
+            <li class="miroir-stat">
+              <p class="miroir-stat__name">Palissy et Mérimée</p>
+              <p class="miroir-stat__value">240&nbsp;990 <span>notices</span></p>
+              <p class="fr-text--sm fr-mb-0">Objets (201&nbsp;355) et édifices (39&nbsp;635) protégés ou inventoriés.</p>
+            </li>
+            <li class="miroir-stat">
+              <p class="miroir-stat__name">Rose Valland et Muséofile</p>
+              <p class="miroir-stat__value">3&nbsp;608 <span>notices</span></p>
+              <p class="fr-text--sm fr-mb-0">Œuvres spoliées revenues après la guerre (2&nbsp;395) et musées (1&nbsp;213).</p>
+            </li>
+            <li class="miroir-stat miroir-stat--quiet">
+              <p class="miroir-stat__name">Wikimedia Commons</p>
+              <p class="miroir-stat__value">10&nbsp;221 <span>photos</span></p>
+              <p class="fr-text--sm fr-mb-0">Photos récentes de 2&nbsp;726 bâtiments. Elles aident à les trouver mais ne s’affichent jamais.</p>
+            </li>
+          </ul>
+        </section>
+
+        <section class="miroir-doc__part" aria-labelledby="doc-scores">
+          <h2 id="doc-scores" class="fr-h3">Est-ce que ça marche&nbsp;?</h2>
+          <p class="miroir-doc__intro">Mesuré sur des centaines de photos dont on connaît la réponse, sans la position de la photo. Sur de nouvelles photos, attendez-vous à un peu moins.</p>
+          <div class="fr-table miroir-scores">
+            <div class="fr-table__wrapper">
+              <div class="fr-table__container">
+                <div class="fr-table__content">
+                  <table>
+                    <caption class="fr-sr-only">Part des recherches où la bonne notice arrive en tête, et dans les dix premières</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Ce que vous photographiez</th>
+                        <th scope="col">Bonne notice en tête</th>
+                        <th scope="col">Dans les 10 premières</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <th scope="row">Un tableau ou un objet au musée, photographié par un visiteur</th>
+                        <td><span class="miroir-meter" style="--v: 82%" aria-hidden="true"></span>82&nbsp;%</td>
+                        <td>95&nbsp;%</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Une vieille photo sur son carton, légende lue</th>
+                        <td><span class="miroir-meter" style="--v: 71%" aria-hidden="true"></span>71&nbsp;%</td>
+                        <td>89&nbsp;%</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Un tableau sur un mur de salle, encadré</th>
+                        <td><span class="miroir-meter" style="--v: 56%" aria-hidden="true"></span>56&nbsp;%</td>
+                        <td>87&nbsp;%</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Un objet de musée vu sous un autre angle</th>
+                        <td><span class="miroir-meter" style="--v: 27%" aria-hidden="true"></span>27&nbsp;%</td>
+                        <td>43&nbsp;%</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Un bâtiment photographié au téléphone</th>
+                        <td><span class="miroir-meter" style="--v: 26%" aria-hidden="true"></span>26&nbsp;%</td>
+                        <td>37&nbsp;%</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Quelques mots qui décrivent une image</th>
+                        <td><span class="miroir-meter" style="--v: 8%" aria-hidden="true"></span>8&nbsp;%</td>
+                        <td>18&nbsp;%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="fr-text--sm miroir-muted">Avec la position de la photo ou la vôtre, le bon bâtiment arrive dans les dix premiers pour la plupart des photos. Un nom («&nbsp;Pont du Gard&nbsp;») marche bien mieux qu’une description.</p>
+
+          <h3 class="fr-h5 fr-mt-5w">Ce que Miroir fait mal</h3>
+          <ul class="miroir-limits">
+            <li><strong>Allumé pour les démonstrations.</strong> Le serveur s’éteint seul après une heure sans visite. Juste après l’allumage, la première recherche peut attendre une minute&nbsp;; ensuite, environ une seconde.</li>
+            <li><strong>Les bâtiments au téléphone.</strong> Façades d’une même rue, intérieurs, détails&nbsp;: activez «&nbsp;Près de moi&nbsp;» dans les filtres ou ajoutez la commune avec des mots.</li>
+            <li><strong>Ce qui n’est pas dans l’index.</strong> Une œuvre absente de POP ne sera pas trouvée&nbsp;: Miroir montre alors des ressemblances.</li>
+            <li><strong>Les descriptions.</strong> «&nbsp;Une église&nbsp;», «&nbsp;une pièce de monnaie&nbsp;» répondent à trop de notices.</li>
+          </ul>
+        </section>
+
+        <section class="miroir-doc__part" aria-labelledby="doc-examples">
+          <h2 id="doc-examples" class="fr-h3">Deux essais sur le site</h2>
+          <p class="miroir-doc__intro">Le 19 octobre 2026, deux photos prises hors de l’index, envoyées par le bouton «&nbsp;Importer une image&nbsp;». Les deux recherches, rapide et approfondie, ont mis la bonne notice en tête.</p>
+          <div class="miroir-trials">
+            <article class="miroir-trial">
+              <div class="miroir-trial__pair">
+                <figure class="miroir-trial__fig">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/81/Poitiers_-_%C3%89glise_Notre-Dame_la_Grande_-_02.jpg/960px-Poitiers_-_%C3%89glise_Notre-Dame_la_Grande_-_02.jpg" alt="Façade ouest sculptée de l’église Notre-Dame-la-Grande à Poitiers, photo récente en couleur" loading="lazy" decoding="async">
+                  <figcaption>La photo envoyée</figcaption>
+                </figure>
+                <span class="miroir-trial__arrow fr-icon-arrow-right-line" aria-hidden="true"></span>
+                <figure class="miroir-trial__fig">
+                  <img src="https://popcorn-prd-perf-assets.s3.gra.io.cloud.ovh.net/memoire/APMH00284730/sap91_mh00284730_p.jpg" alt="Photographie ancienne de la façade de Notre-Dame-la-Grande, collée sur son carton, fonds Mémoire" style="object-position: 72% 15%" loading="lazy" decoding="async">
+                  <figcaption>Une image de la notice</figcaption>
+                </figure>
+              </div>
+              <div class="miroir-trial__body">
+                <h3 class="fr-h6 fr-mb-1w">Notre-Dame-la-Grande, Poitiers</h3>
+                <ul class="miroir-trial__runs">
+                  <li><span class="miroir-trial__mode">Rapide</span> La bonne notice en tête, puis 23 églises romanes de la région.</li>
+                  <li><span class="miroir-trial__mode">Approfondi</span> La même notice, seule, en une trentaine de secondes, après avoir regardé 4 vignettes. Il nomme l’église et le XII<sup>e</sup> siècle, mais prend la mandorle sculptée pour une rosace.</li>
+                </ul>
+                <p class="miroir-trial__credit">Photo&nbsp;: <a href="https://commons.wikimedia.org/wiki/File:Poitiers_-_%C3%89glise_Notre-Dame_la_Grande_-_02.jpg" target="_blank" rel="noopener" title="La photo sur Wikimedia Commons, nouvelle fenêtre">Benjism89, 2025</a>, CC BY-SA 4.0, Wikimedia Commons. Image de la notice&nbsp;: <a href="https://pop.culture.gouv.fr/notice/memoire/APMH00284730" target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">Mémoire, POP</a>.</p>
+              </div>
+            </article>
+            <article class="miroir-trial">
+              <div class="miroir-trial__pair">
+                <figure class="miroir-trial__fig">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Douai_%28Nord%29_-_Mus%C3%A9e_de_la_Chartreuse_-_%22Le_ch%C3%A2teau_de_Wagnonville%22_%28Jean-Baptiste_Camille_Corot%2C_1796-1875%29.jpg/960px-Douai_%28Nord%29_-_Mus%C3%A9e_de_la_Chartreuse_-_%22Le_ch%C3%A2teau_de_Wagnonville%22_%28Jean-Baptiste_Camille_Corot%2C_1796-1875%29.jpg" alt="Photo d’un visiteur : le Château de Wagnonville de Corot accroché au musée de la Chartreuse, à Douai" loading="lazy" decoding="async">
+                  <figcaption>La photo d’origine</figcaption>
+                </figure>
+                <span class="miroir-trial__arrow fr-icon-arrow-right-line" aria-hidden="true"></span>
+                <figure class="miroir-trial__fig">
+                  <img src="https://popcorn-prd-perf-assets.s3.gra.io.cloud.ovh.net/joconde/06190026809/088b6ae0755711452059.jpg" alt="Le Château de Wagnonville de Corot, image de la notice Joconde" loading="lazy" decoding="async">
+                  <figcaption>L’image de la notice</figcaption>
+                </figure>
+              </div>
+              <div class="miroir-trial__body">
+                <h3 class="fr-h6 fr-mb-1w">Corot, <i>Château de Wagnonville</i></h3>
+                <p class="fr-text--sm fr-mb-1w">Seul un détail est parti&nbsp;: le pavillon et le pont, un quart de la toile environ, sans le cadre.</p>
+                <ul class="miroir-trial__runs">
+                  <li><span class="miroir-trial__mode">Rapide</span> La bonne notice en tête, puis des paysages de Douai et de Saint-Omer.</li>
+                  <li><span class="miroir-trial__mode">Approfondi</span> La même notice, seule, après trois recherches (l’image, «&nbsp;plus comme celle-ci&nbsp;», des mots). Il répond Corot, troisième quart du XIX<sup>e</sup> siècle, musée de la Chartreuse.</li>
+                </ul>
+                <p class="miroir-trial__credit">Photo&nbsp;: <a href="https://commons.wikimedia.org/wiki/File:Douai_(Nord)_-_Mus%C3%A9e_de_la_Chartreuse_-_%22Le_ch%C3%A2teau_de_Wagnonville%22_(Jean-Baptiste_Camille_Corot,_1796-1875).jpg" target="_blank" rel="noopener" title="La photo sur Wikimedia Commons, nouvelle fenêtre">Edelseider</a>, CC BY-SA 2.0, Wikimedia Commons. Notice&nbsp;: <a href="https://pop.culture.gouv.fr/notice/joconde/06190026809" target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">Joconde, POP</a>.</p>
+              </div>
+            </article>
+          </div>
+          <p class="fr-text--sm miroir-muted fr-mt-2w">Les deux premières recherches ont trouvé le moteur endormi et ont pris plus d’une minute.</p>
+        </section>
+
+        <section class="miroir-doc__part" aria-labelledby="doc-privacy">
+          <h2 id="doc-privacy" class="fr-h3">Vie privée et coût</h2>
+          <div class="miroir-privacy">
+            <div>
+              <h3 class="fr-h6"><span class="fr-icon-lock-line fr-mr-1w" aria-hidden="true"></span>Vos données</h3>
+              <ul class="fr-text--sm">
+                <li>Votre photo sert à la recherche et n’est pas gardée. Le journal garde une empreinte de la photo (qui ne permet pas de la refaire), vos mots, vos filtres et les notices montrées.</li>
+                <li>Votre position sert à une recherche, si vous l’acceptez&nbsp;; elle n’est ni gardée ni notée.</li>
+                <li>Recherche approfondie&nbsp;: votre photo part chez le modèle Mistral Large 4. La recherche est notée sans aucune image.</li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="fr-h6"><span class="fr-icon-money-euro-circle-line fr-mr-1w" aria-hidden="true"></span>Ce que ça coûte</h3>
+              <ul class="fr-text--sm">
+                <li>Le serveur de calcul coûte environ 0,79&nbsp;€ de l’heure, seulement quand il est allumé.</li>
+                <li>Il s’éteint seul après une heure sans visite.</li>
+                <li>Recherche approfondie&nbsp;: au plus 0,10&nbsp;$ par recherche et 2&nbsp;$ par jour pour tout le site.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <ul class="fr-btns-group fr-btns-group--inline-md fr-btns-group--icon-left miroir-doc__cta">
+          <li><a class="fr-btn fr-icon-camera-line" href="#/">Essayer Miroir</a></li>
+        </ul>
+      </div>

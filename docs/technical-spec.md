@@ -39,7 +39,7 @@ Everything runs in Docker so the stack can move to the Ministry's cloud unchange
 | API | FastAPI | As planned (`miroir.web.app`) |
 | Models | PyTorch with Hugging Face `transformers` | As planned, only on a Scaleway GPU machine (`src/miroir/remote/`) |
 | Search | OpenSearch with the k-NN plugin (Faiss HNSW) and a hybrid search pipeline | Dropped: exact cosine search over the vectors on the GPU, ranking and BM25 in NumPy (`miroir.web.engine`, `miroir.eval.bm25`) |
-| Website | SvelteKit with Tailwind, phone-first | Dropped: one static page in plain JavaScript with the State design system (DSFR 1.15.4), served by FastAPI (`src/miroir/web/static/`) |
+| Website | SvelteKit with Tailwind, phone-first | Dropped: one page, React with the State design system (`@codegouvfr/react-dsfr`, since 2026-11-03; before, plain JavaScript), built from `web-ui/` into `src/miroir/web/ui/` and served by FastAPI |
 | Captions | A vision model through OpenRouter, picked in week 1 on cost and French quality | Dropped for collection images (option B3 never ran). Qwen3-VL 4B on the site's GPU reads archive print captions at search time |
 | Deployment | Docker Compose: `opensearch`, `api`, `web`, `worker`. A GPU machine runs the indexing jobs | Dropped: until 2026-11-03 the site ran on Modal and so did the indexing jobs. Since then jobs run on Scaleway GPU machines that live one command, and the site on one Scaleway machine powered on for demos (prototype.md, section Hosting) |
 
@@ -529,7 +529,7 @@ miroir/
     remote/        model code run only on a Scaleway GPU machine; the one place torch may be imported
     index/         the type guess, PCA test, the pop-all bundle (no OpenSearch)
     eval/          test set builders, scoring, every step's experiment code
-    web/           the website: FastAPI app, ranking, card levels, agentic search, static/ page
+    web/           the website: FastAPI app, ranking, card levels, agentic search, built page in ui/
   tests/           unit tests; fixtures/ holds real export lines
   eval/            results/ (committed). Test sets live in MIROIR_DATA_DIR
 ``` Data and images live outside the repository, in `MIROIR_DATA_DIR` (default `~/miroir-data`). The exports are read from `MIROIR_EXPORTS_DIR` and never written to.
