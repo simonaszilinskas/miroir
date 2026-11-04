@@ -2,6 +2,8 @@
 
 Read a half only with `load_queries`. Its sealed half needs `allow_sealed=True`, which only
 round-R4 code may pass (CODING_STANDARDS 19). `write_set` writes both halves; it never reads.
+It also writes the set's entities, both halves mixed and no query (`entities_in_sets`), so
+what learns from the gallery can leave every test entity out without opening a sealed half.
 """
 
 from __future__ import annotations
@@ -59,6 +61,8 @@ def write_set(
             raise ValueError(msg)
         path = settings.testset_path(set_id, half, allow_sealed=True)  # writing, not reading
         _write_lines(path, (json.dumps(_fields(q), ensure_ascii=False) for q in queries))
+    used = {e for q in (*tune, *sealed) for e in (q.entity_id, *q.expected_entity_ids)}
+    _write_lines(settings.testset_entities_path(set_id), sorted(used))
 
 
 #: Fields only some sets fill: written only when set, so other sets' files stay as they were.
@@ -80,6 +84,21 @@ def load_queries(
     path = settings.testset_path(set_id, half, allow_sealed=allow_sealed)
     with path.open(encoding="utf-8") as lines:
         return [_QUERY.validate_json(line) for line in lines if line.strip()]
+
+
+def entities_in_sets(settings: Settings) -> frozenset[str]:
+    """Every building or object any test set uses, tune and sealed: a query's own entity and
+    its answers. Read from the lists `write_set` keeps beside the tune halves; no sealed file
+    is opened. Fails for a set written before the lists existed."""
+    out: set[str] = set()
+    for tune in sorted(settings.testsets_dir.glob("*.tune.jsonl")):
+        set_id = tune.name.removesuffix(".tune.jsonl")
+        path = settings.testset_entities_path(set_id)
+        if not path.exists():
+            msg = f"{set_id} has no entity list ({path}): rebuild it (`miroir testsets build`)"
+            raise FileNotFoundError(msg)
+        out.update(line for line in path.read_text(encoding="utf-8").splitlines() if line)
+    return frozenset(out)
 
 
 def tune_query_images(settings: Settings, set_ids: Sequence[str]) -> tuple[list[str], str]:

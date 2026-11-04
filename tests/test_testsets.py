@@ -17,7 +17,7 @@ from miroir.eval.build_sets import (
     t3_queries,
     t5_queries,
 )
-from miroir.eval.sets import Query, load_queries, read_gallery, write_set
+from miroir.eval.sets import Query, entities_in_sets, load_queries, read_gallery, write_set
 from miroir.records.build import build as build_records
 from miroir.records.images import make_image_id
 from miroir.records.model import Collection, Image, ImageType, Record
@@ -243,6 +243,20 @@ def test_sealed_half_loads_only_with_allow_sealed(settings: Settings) -> None:
     with pytest.raises(PermissionError):
         load_queries(settings, "T1", "sealed")
     assert load_queries(settings, "T1", "sealed", allow_sealed=True) == [s]
+
+
+def test_every_entity_of_both_halves_is_listed_apart_from_the_queries(settings: Settings) -> None:
+    write_set(settings, "T1", [Query("T1-a", "T1", "PA1", "a", ("PA1",), ("a",))], [])
+    write_set(settings, "T2", [], [Query("T2-b", "T2", "PA2", "b", ("PA2", "PM9"), ())])
+    settings.testset_path("T2", "sealed", allow_sealed=True).unlink()  # never read
+    assert entities_in_sets(settings) == {"PA1", "PA2", "PM9"}
+
+
+def test_a_set_without_its_entity_list_must_be_rebuilt(settings: Settings) -> None:
+    write_set(settings, "T1", [Query("T1-a", "T1", "PA1", "a", ("PA1",), ("a",))], [])
+    settings.testset_entities_path("T1").unlink()
+    with pytest.raises(FileNotFoundError, match="testsets build"):
+        entities_in_sets(settings)
 
 
 def test_build_writes_sets_and_galleries(settings: Settings) -> None:

@@ -31,7 +31,6 @@ from numpy.typing import NDArray
 from miroir.config import Settings
 from miroir.eval import router
 from miroir.eval.bm25 import DESCRIPTION_CHARS
-from miroir.eval.sets import load_queries
 from miroir.eval.vectors import VectorSet, read_vectors
 from miroir.jobs.privacy import PublishableImages
 from miroir.records.extra import read_site_records
@@ -418,22 +417,19 @@ def _train_guess(
     entity_of: Mapping[str, str],
     ids: Sequence[str],
 ) -> Guess:
-    """G4's guess, trained as `miroir eval route` trains it: tune-query entities left out."""
+    """G4's guess, trained as every guess is (`router.guess_report`): every entity of every
+    test set left out."""
     kinds: dict[str, router.PhotoType] = {}
     for record in records:
         kind = router.photo_type(record)
         if kind is not None:
             kinds.update((i.image_id, kind) for i in record.images)
-    left_out = {
-        e
-        for s in router.QUERY_SETS
-        for q in load_queries(settings, s, "tune")
-        for e in (q.entity_id, *q.expected_entity_ids)
-    }
-    labels = {i: kinds[i] for i in ids if i in kinds and entity_of[i] not in left_out}
-    fitted, held_out = router.train_guess([a7], labels, dict(entity_of))
+    report = router.guess_report(settings, [a7], ids, entity_of, kinds)
+    fitted = report.guess
     logger.info(
-        "type guess: %d training images, held-out balanced accuracy %.3f", len(labels), held_out
+        "type guess: %d training images, held-out balanced accuracy %.3f",
+        report.trained_on,
+        report.held_out_accuracy,
     )
     return Guess(mean=fitted.mean, scale=fitted.scale, coef=fitted.coef, bias=fitted.bias)
 
