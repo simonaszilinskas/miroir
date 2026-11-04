@@ -444,7 +444,7 @@ class RunSpend:
         self.limit_usd = limit_usd
         self._key_usage = key_usage_usd
         self._per_item = per_item_usd
-        self._kind = kind
+        self.kind = kind
         self._option = option
         self.run = run
         self._model = model
@@ -473,7 +473,7 @@ class RunSpend:
                 self._key_usage,
                 worst_usd=expected * CALL_SLACK if worst_usd is None else worst_usd,
                 expected_usd=expected,
-                kind=self._kind,
+                kind=self.kind,
                 option=self._option,
                 run=self.run,
                 model=model or self._model,
