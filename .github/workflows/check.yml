@@ -23,5 +23,9 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
+      - uses: gitleaks/gitleaks-action@v2
+        with:
+          # .gitleaksignore is read automatically.
+          redact: true
       - run: uv sync --locked
       - run: make check

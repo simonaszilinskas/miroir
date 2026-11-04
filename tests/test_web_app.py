@@ -91,6 +91,8 @@ def test_every_answer_carries_the_security_headers(client: TestClient) -> None:
         assert "https://iiif.prd.cloud.culture.fr " in policy  # an origin, not the IIIF path
         assert answer.headers["x-frame-options"] == "DENY"
         assert answer.headers["x-content-type-options"] == "nosniff"
+        assert answer.headers["strict-transport-security"] == "max-age=31536000"
+        assert "geolocation=(self)" in answer.headers["permissions-policy"]
 
 
 def test_a_page_not_built_says_how_to_build_it(tmp_path: Path) -> None:
