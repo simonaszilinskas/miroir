@@ -133,8 +133,9 @@ class Gazetteer:
 
         Every run of words that spells a known commune is a candidate. One whose département
         the caption also names wins; else a name written in capitals, as the cards write the
-        commune, of at least `MIN_BARE_NAME` letters. Ties go to the longer name, then the
-        earlier one.
+        commune, of at least `MIN_BARE_NAME` letters, that only one commune bears (several
+        Saint-Martin with no département named: none is picked). Ties go to the longer name,
+        then the earlier one.
         """
         words = normalise(caption).split()
         if not words:
@@ -145,10 +146,13 @@ class Gazetteer:
         for start in range(len(words)):
             for size in range(1, min(MAX_NAME_WORDS, len(words) - start) + 1):
                 name = " ".join(words[start : start + size])
-                for c in self._by_name.get(name, ()):
+                found = self._by_name.get(name, ())
+                several = len({(c.commune, c.departement) for c in found}) > 1
+                for c in found:
                     with_dept = bool(c.departement) and f" {normalise(c.departement)} " in text
                     in_capitals = all(w in capitals for w in words[start : start + size])
-                    if not with_dept and not (in_capitals and len(name) >= MIN_BARE_NAME):
+                    bare = in_capitals and len(name) >= MIN_BARE_NAME and not several
+                    if not with_dept and not bare:
                         continue
                     key = (int(with_dept), len(name), -start)
                     if best is None or key > best[0]:
