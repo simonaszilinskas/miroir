@@ -148,7 +148,8 @@ export function Results({ query, deepEnabled, onEdit, onDeeper, onRefine }: Prop
       const send = (body: Record<string, unknown>) => api<{ after: number }>("chat/send", { method: "POST", body: { conversation_id: id, ...body } });
       let from = (await send({ kind: "goal", text: query.photo ? DEEP_GOAL.photo : DEEP_GOAL.words })).after;
       for (;;) {
-        let next: number | null = null;
+        // A reply goes once the turn has ended: sent while it runs, it is refused (409).
+        let reply: Record<string, unknown> | null = null;
         for await (const event of chatEvents(id, from, isAlive) as AsyncGenerator<ChatEvent>) {
           switch (event.type) {
             case "status":
@@ -175,17 +176,17 @@ export function Results({ query, deepEnabled, onEdit, onDeeper, onRefine }: Prop
               break;
             case "question":
               // One-shot: nobody answers. The model was told so; if it asks anyway, say so.
-              next = (await send({ kind: "answer", text: "je ne sais pas" })).after;
+              reply = { kind: "answer", text: "je ne sais pas" };
               break;
             case "region":
-              next = (await send({ kind: "region" })).after;
+              reply = { kind: "region" };
               break;
             default:
               break;
           }
         }
-        if (next === null || !alive) break;
-        from = next;
+        if (reply === null || !alive) break;
+        from = (await send(reply)).after;
       }
       if (alive) {
         setStatus("");
