@@ -119,7 +119,7 @@ ban-relative-imports = "all"
 known-first-party = ["miroir", "tests"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 strict = ["src"]
 pythonVersion = "3.12"
 venvPath = "."
