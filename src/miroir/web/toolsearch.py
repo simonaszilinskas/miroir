@@ -1,12 +1,13 @@
 """The searches the conversation page's model calls (step H5), run where the engine runs.
 
-Step H4 gave a vision model tools over saved vectors. Here the same tools search the live
-index with a visitor's new photo, so they run beside the models: on the GPU machine
-(`miroir.remote.search`), with fake models on the Mac.
+They search the live index with a visitor's new photo, so they run beside the models: on
+the GPU machine (`miroir.remote.search`), with fake models on the Mac. The offline
+evaluation runs them over a bundle with each test photo's stored vectors
+(`ToolQuery.vectors`, `ToolQuery.exclude_images`; `miroir.eval.offline`).
 
 - image search: the photo's cosines from both models (`Engine.photo_cosines`), mixed per
   entity as the site mixes them (`ranking.fuse`), at G5's routed weight or the one asked for;
-- text search: BM25 over record text, as H4's `text_search`;
+- text search: BM25 over record text;
 - view: each entity's images, closest to the photo first, so the page can show the model
   thumbnails (it checks which may go out, `miroir.web.publishable`);
 - like: the records that look like one the model has already seen, by that record's own
