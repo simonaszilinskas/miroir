@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -176,3 +177,35 @@ def test_a_read_is_retried_on_a_dropped_answer() -> None:
     client, sent = _counting(httpx.ReadTimeout("slow"), httpx.Response(502), httpx.Response(200))
     response = send(client, client.build_request("GET", "https://x.test/"), NO_WAIT)
     assert (response.status_code, sent) == (200, ["GET"] * 3)
+
+
+def test_a_stopped_map_cancels_what_has_not_started_and_saves_what_ran() -> None:
+    started: list[int] = []
+    saved: list[int] = []
+    lock = threading.Lock()
+    gate = threading.Event()
+
+    def paid(n: int) -> int:
+        with lock:
+            started.append(n)
+        if n == 0:
+            raise RuntimeError("call 0 failed")
+        gate.wait(5)
+        return n
+
+    out = bounded_map(paid, range(100), workers=3, window=6, salvage=saved.append)
+    threading.Timer(0.2, gate.set).start()  # calls 1 and 2 finish after call 0 failed
+    with pytest.raises(RuntimeError, match="call 0"):
+        next(out)
+    # Every call that ran beside call 0 was paid: each one is kept. Calls still queued when
+    # the map stopped were never sent (before, the pool ran all six it held).
+    assert sorted(saved) == sorted(n for n in started if n)
+    assert len(started) <= 6
+
+
+def test_a_consumer_that_stops_still_gets_the_calls_in_flight() -> None:
+    saved: list[int] = []
+    out = bounded_map(lambda n: n, range(100), workers=2, window=4, salvage=saved.append)
+    assert next(out) == 0
+    out.close()  # as when the consumer raises BudgetError
+    assert all(n in {1, 2, 3} for n in saved)
