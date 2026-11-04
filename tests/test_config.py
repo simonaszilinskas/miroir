@@ -53,3 +53,10 @@ def test_path_parts_are_checked(bad: str) -> None:
 def test_round_ids_are_checked() -> None:
     with pytest.raises(ValueError, match="round"):
         eval_result_path("round1", "A", "x")
+
+
+def test_tests_never_see_the_developers_settings() -> None:
+    # conftest clears MIROIR_* and the keys, and stops `.env` from being read.
+    settings = Settings()
+    assert settings.data_dir == Path("~/miroir-data")
+    assert settings.openrouter_api_key is None
