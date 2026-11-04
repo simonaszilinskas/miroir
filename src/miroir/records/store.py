@@ -1,7 +1,11 @@
-"""Read and write `records.parquet` and `images.parquet`.
+"""Read and write `records.parquet` and `images.parquet`, and the other tables of the data dir.
 
 Downstream code loads records with `read_records()` / `read_images()` rather than
 opening the Parquet files itself, so the schema lives in one place.
+
+Every table is written to a temporary file and renamed when complete, so a failed build leaves
+the last good table. Each carries `SCHEMA_VERSION` in its metadata; a reader refuses a table of
+another version or with other columns.
 """
 
 from __future__ import annotations
@@ -10,7 +14,8 @@ from collections import defaultdict
 from collections.abc import Collection as Many
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from types import TracebackType
+from typing import Self, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -22,115 +27,155 @@ from miroir.records.model import Collection, Image, ImageType, Record
 
 _STRINGS = pa.list_(pa.string())
 
-RECORDS_SCHEMA = pa.schema(
-    [
-        pa.field("ref", pa.string(), nullable=False),
-        pa.field("collection", pa.string(), nullable=False),
-        pa.field("entity_id", pa.string(), nullable=False),
-        pa.field("title", pa.string(), nullable=False),
-        pa.field("description", pa.string(), nullable=False),
-        pa.field("denomination", _STRINGS, nullable=False),
-        pa.field("domain", _STRINGS, nullable=False),
-        pa.field("authors", _STRINGS, nullable=False),
-        pa.field("period", _STRINGS, nullable=False),
-        pa.field("region", pa.string()),
-        pa.field("departement", pa.string()),
-        pa.field("commune", pa.string()),
-        pa.field("publishable", pa.bool_(), nullable=False),
-        pa.field("pop_url", pa.string(), nullable=False),
-        pa.field("linked_refs", _STRINGS, nullable=False),
-        pa.field("image_count", pa.int32(), nullable=False),
-        pa.field("cover_image_id", pa.string(), nullable=False),
-        pa.field("photographers", _STRINGS, nullable=False),
-        pa.field("photo_date", pa.string(), nullable=False),
-    ]
+#: Parquet metadata key holding the version of this module's schemas.
+SCHEMA_VERSION_KEY = b"miroir.schema_version"
+#: Bump on any change of columns or of what a value means. 1: image ids hash the bucket key
+#: (`records.images.make_image_id`). Tables written before versions existed carry none; they
+#: read if their columns match, and their image ids hash the URL (the July scheme).
+SCHEMA_VERSION = b"1"
+
+
+def _versioned(schema: pa.Schema) -> pa.Schema:
+    return schema.with_metadata({SCHEMA_VERSION_KEY: SCHEMA_VERSION})  # pyright: ignore[reportUnknownMemberType]
+
+
+RECORDS_SCHEMA = _versioned(
+    pa.schema(
+        [
+            pa.field("ref", pa.string(), nullable=False),
+            pa.field("collection", pa.string(), nullable=False),
+            pa.field("entity_id", pa.string(), nullable=False),
+            pa.field("title", pa.string(), nullable=False),
+            pa.field("description", pa.string(), nullable=False),
+            pa.field("denomination", _STRINGS, nullable=False),
+            pa.field("domain", _STRINGS, nullable=False),
+            pa.field("authors", _STRINGS, nullable=False),
+            pa.field("period", _STRINGS, nullable=False),
+            pa.field("region", pa.string()),
+            pa.field("departement", pa.string()),
+            pa.field("commune", pa.string()),
+            pa.field("publishable", pa.bool_(), nullable=False),
+            pa.field("pop_url", pa.string(), nullable=False),
+            pa.field("linked_refs", _STRINGS, nullable=False),
+            pa.field("image_count", pa.int32(), nullable=False),
+            pa.field("cover_image_id", pa.string(), nullable=False),
+            pa.field("photographers", _STRINGS, nullable=False),
+            pa.field("photo_date", pa.string(), nullable=False),
+        ]
+    )
 )
 
-IMAGES_SCHEMA = pa.schema(
-    [
-        pa.field("image_id", pa.string(), nullable=False),
-        pa.field("ref", pa.string(), nullable=False),
-        pa.field("entity_id", pa.string(), nullable=False),
-        pa.field("collection", pa.string(), nullable=False),
-        pa.field("url", pa.string(), nullable=False),
-        pa.field("image_type", pa.string(), nullable=False),
-        pa.field("position", pa.int32(), nullable=False),
-        pa.field("is_cover", pa.bool_(), nullable=False),
-    ]
+IMAGES_SCHEMA = _versioned(
+    pa.schema(
+        [
+            pa.field("image_id", pa.string(), nullable=False),
+            pa.field("ref", pa.string(), nullable=False),
+            pa.field("entity_id", pa.string(), nullable=False),
+            pa.field("collection", pa.string(), nullable=False),
+            pa.field("url", pa.string(), nullable=False),
+            pa.field("image_type", pa.string(), nullable=False),
+            pa.field("position", pa.int32(), nullable=False),
+            pa.field("is_cover", pa.bool_(), nullable=False),
+        ]
+    )
 )
 
 
-COMMONS_SCHEMA = pa.schema(
-    [
-        pa.field("image_id", pa.string(), nullable=False),
-        pa.field("set_id", pa.string(), nullable=False),
-        pa.field("entity_id", pa.string(), nullable=False),
-        pa.field("wikidata_id", pa.string(), nullable=False),
-        pa.field("file_title", pa.string(), nullable=False),
-        pa.field("page_url", pa.string(), nullable=False),
-        pa.field("url", pa.string(), nullable=False),
-        pa.field("thumb_url", pa.string(), nullable=False),
-        pa.field("width", pa.int32(), nullable=False),
-        pa.field("height", pa.int32(), nullable=False),
-        pa.field("licence", pa.string(), nullable=False),
-        pa.field("licence_url", pa.string(), nullable=False),
-        pa.field("author", pa.string(), nullable=False),
-        pa.field("credit", pa.string(), nullable=False),
-        pa.field("taken", pa.string(), nullable=False),
-        pa.field("latitude", pa.float64()),
-        pa.field("longitude", pa.float64()),
-        pa.field("camera", pa.string(), nullable=False),
-        pa.field("source", pa.string(), nullable=False),
-        pa.field("category", pa.string(), nullable=False),
-        pa.field("view", pa.string(), nullable=False),
-        pa.field("phash_distance", pa.int32()),
-    ]
+COMMONS_SCHEMA = _versioned(
+    pa.schema(
+        [
+            pa.field("image_id", pa.string(), nullable=False),
+            pa.field("set_id", pa.string(), nullable=False),
+            pa.field("entity_id", pa.string(), nullable=False),
+            pa.field("wikidata_id", pa.string(), nullable=False),
+            pa.field("file_title", pa.string(), nullable=False),
+            pa.field("page_url", pa.string(), nullable=False),
+            pa.field("url", pa.string(), nullable=False),
+            pa.field("thumb_url", pa.string(), nullable=False),
+            pa.field("width", pa.int32(), nullable=False),
+            pa.field("height", pa.int32(), nullable=False),
+            pa.field("licence", pa.string(), nullable=False),
+            pa.field("licence_url", pa.string(), nullable=False),
+            pa.field("author", pa.string(), nullable=False),
+            pa.field("credit", pa.string(), nullable=False),
+            pa.field("taken", pa.string(), nullable=False),
+            pa.field("latitude", pa.float64()),
+            pa.field("longitude", pa.float64()),
+            pa.field("camera", pa.string(), nullable=False),
+            pa.field("source", pa.string(), nullable=False),
+            pa.field("category", pa.string(), nullable=False),
+            pa.field("view", pa.string(), nullable=False),
+            pa.field("phash_distance", pa.int32()),
+        ]
+    )
 )
 
-PLACES_SCHEMA = pa.schema(
-    [
-        pa.field("entity_id", pa.string(), nullable=False),
-        pa.field("latitude", pa.float64(), nullable=False),
-        pa.field("longitude", pa.float64(), nullable=False),
-        pa.field("source", pa.string(), nullable=False),
-    ]
+PLACES_SCHEMA = _versioned(
+    pa.schema(
+        [
+            pa.field("entity_id", pa.string(), nullable=False),
+            pa.field("latitude", pa.float64(), nullable=False),
+            pa.field("longitude", pa.float64(), nullable=False),
+            pa.field("source", pa.string(), nullable=False),
+        ]
+    )
 )
 
-POSITIONS_SCHEMA = pa.schema(
-    [
-        pa.field("image_id", pa.string(), nullable=False),
-        pa.field("latitude", pa.float64(), nullable=False),
-        pa.field("longitude", pa.float64(), nullable=False),
-        pa.field("source", pa.string(), nullable=False),
-    ]
+POSITIONS_SCHEMA = _versioned(
+    pa.schema(
+        [
+            pa.field("image_id", pa.string(), nullable=False),
+            pa.field("latitude", pa.float64(), nullable=False),
+            pa.field("longitude", pa.float64(), nullable=False),
+            pa.field("source", pa.string(), nullable=False),
+        ]
+    )
 )
 
 
 def write_records(records: Sequence[Record], records_path: Path, images_path: Path) -> None:
     """Write both files. Rows keep the order given."""
-    records_path.parent.mkdir(parents=True, exist_ok=True)
-    images_path.parent.mkdir(parents=True, exist_ok=True)
-    _write(_records_table(records), records_path)
-    _write(_images_table(records), images_path)
+    with RecordsWriter(records_path, images_path) as writer:
+        writer.write(records)
 
 
 class RecordsWriter:
-    """Write both files batch by batch, for exports too big to hold in memory (spec §3.4)."""
+    """Write both files batch by batch, for exports too big to hold in memory (spec §3.4).
+
+    Use it as a context manager: both files appear when the block ends without error; on an
+    error neither changes.
+    """
 
     def __init__(self, records_path: Path, images_path: Path) -> None:
-        records_path.parent.mkdir(parents=True, exist_ok=True)
-        images_path.parent.mkdir(parents=True, exist_ok=True)
-        self._records = pq.ParquetWriter(records_path, RECORDS_SCHEMA)
-        self._images = pq.ParquetWriter(images_path, IMAGES_SCHEMA)
+        self._paths = (records_path, images_path)
+        self._temps = (_temp(records_path), _temp(images_path))
+        for path in self._temps:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        self._records = pq.ParquetWriter(self._temps[0], RECORDS_SCHEMA)
+        self._images = pq.ParquetWriter(self._temps[1], IMAGES_SCHEMA)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        trace: TracebackType | None,
+    ) -> None:
+        self._records.close()
+        self._images.close()
+        if error is not None:
+            for temp in self._temps:
+                temp.unlink(missing_ok=True)
+            return
+        for temp, path in zip(self._temps, self._paths, strict=True):
+            temp.replace(path)
 
     def write(self, records: Sequence[Record]) -> None:
         if records:
             self._records.write_table(_records_table(records))
             self._images.write_table(_images_table(records))
-
-    def close(self) -> None:
-        self._records.close()
-        self._images.close()
 
 
 def _records_table(records: Sequence[Record]) -> pa.Table:
@@ -181,6 +226,8 @@ def _images_table(records: Sequence[Record]) -> pa.Table:
 
 def read_column(path: Path, name: str) -> list[object]:
     """One column of a records or images file, as Python values (for counts over big tables)."""
+    schema = _file_schema(path)
+    _check(path, schema, RECORDS_SCHEMA if "publishable" in schema.names else IMAGES_SCHEMA)
     table = pq.read_table(path, columns=[name])  # pyright: ignore[reportUnknownMemberType]
     values: list[object] = list(table.column(name).to_pylist())
     return values
@@ -354,12 +401,47 @@ def read_positions(path: Path) -> list[QueryPosition]:
     ]
 
 
-# pyarrow-stubs leave a few parameter types unknown; keep the ignores to these two lines.
+def write_table(table: pa.Table, path: Path) -> None:
+    """Write a table whole or not at all: to a temporary file, renamed when complete."""
+    temp = _temp(path)
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pq.write_table(table, temp)  # pyright: ignore[reportUnknownMemberType]
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    temp.replace(path)
+
+
+def _temp(path: Path) -> Path:
+    return path.with_name(f".{path.name}.tmp")
+
+
 def _write(table: pa.Table, path: Path) -> None:
-    pq.write_table(table, path)  # pyright: ignore[reportUnknownMemberType]
+    write_table(table, path)
+
+
+def _check(path: Path, found: pa.Schema, schema: pa.Schema) -> None:
+    """Refuse a table of another schema version, or whose columns differ from `schema`."""
+    version = (found.metadata or {}).get(SCHEMA_VERSION_KEY)
+    if version is not None and version != SCHEMA_VERSION:
+        msg = (
+            f"{path}: schema version {version.decode()}, this miroir reads "
+            f"{SCHEMA_VERSION.decode()}; rebuild it"
+        )
+        raise ValueError(msg)
+    if not found.remove_metadata().equals(schema.remove_metadata()):
+        msg = f"{path}: columns differ from this miroir's schema; rebuild it"
+        raise ValueError(msg)
+
+
+# pyarrow-stubs leave a few parameter types unknown; keep the ignores to these lines.
+def _file_schema(path: Path) -> pa.Schema:
+    return pq.read_schema(path)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _read(path: Path, schema: pa.Schema, entity_ids: Many[str] | None = None) -> pa.Table:
+    _check(path, _file_schema(path), schema)
     if entity_ids is None:
         return pq.read_table(path, schema=schema)  # pyright: ignore[reportUnknownMemberType]
     wanted = pc.field("entity_id").isin(sorted(entity_ids))  # pyright: ignore[reportUnknownMemberType]

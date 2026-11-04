@@ -6,7 +6,9 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 
 1. One package, `src/miroir/`. No scripts outside it; no `if __name__ == "__main__"`. The one
    exception is `scripts/pop_full_export.py`, a standalone, standard-library tool that downloads
-   the full POP export from public sources.
+   the full POP export from public sources. It cannot import `miroir.config`, so rule 5 does not
+   bind it: it reads `MIROIR_DATA_DIR` and `MIROIR_EXPORTS_DIR` itself, from the environment or
+   `.env`, with the same defaults. `make check` lints, types and tests it like the package.
 2. Every entry point is a subcommand of the one `miroir` CLI (`src/miroir/cli.py`, Typer).
    Group by area: `miroir records build`, `miroir embed scw`, `miroir eval run`.
 3. No ML model is ever loaded or run on the development machine, not even for a test: ruff bans importing torch,
@@ -14,8 +16,11 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
    The one exception is `src/miroir/remote/`, code that runs only on a Scaleway GPU machine,
    and is imported only there (by the hidden `miroir scw serve` and `miroir demo serve`);
    `tests/test_no_models_on_the_mac.py` checks that.
-4. New dependencies: base only if every command needs them. Otherwise an extra
-   (`jobs` for remote-job code, `api`) in `pyproject.toml`. Dev tools go in the `dev` group.
+4. New dependencies: base only if every command needs them. Otherwise an extra in
+   `pyproject.toml`: `fetch` (httpx, Pillow) for code that reads the web or decodes images
+   (Commons, geography, image fetches, OpenRouter, Mistral), `api` for the website, `scaleway`
+   for its machines and buckets, `jobs` for remote-job code. A command imports only base
+   packages and the extras that cover it. Dev tools go in the `dev` group.
 
 ## Paths and settings
 
@@ -56,4 +61,5 @@ Each rule is checkable. Most are enforced by `make check`; the rest by review.
 18. Results are written with `config.eval_result_path(round, step, option)` and committed.
 19. Test sets are read only with `miroir.eval.sets.load_queries`. Its sealed half needs
     `allow_sealed=True`, and only R4 code may pass it. `tests/test_conventions.py` fails on any
-    other caller; the one exception is `write_set`, which writes the sealed half and never reads it.
+    other caller; the exceptions are `write_set`, which writes the sealed half and never reads it,
+    and the CLI's `allow_sealed=round_id == "R4"`.

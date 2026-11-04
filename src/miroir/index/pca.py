@@ -75,13 +75,20 @@ def fit_pca_rows(vectors: NDArray[np.floating], dims: int, name: str) -> Pca:
 
 
 def project(pca: Pca, vectors: NDArray[np.floating]) -> NDArray[np.float32]:
-    """Centre, project and L2-normalise rows, in blocks."""
+    """Centre, project and L2-normalise rows, in blocks.
+
+    A row that projects to zero (it sits at the mean) has no direction: refused, not NaN.
+    """
     out = np.empty((vectors.shape[0], pca.dims), dtype=np.float32)
     mean = pca.mean.astype(np.float32)
     for start in range(0, vectors.shape[0], BLOCK_ROWS):
         block = np.asarray(vectors[start : start + BLOCK_ROWS], dtype=np.float32)
         reduced = (block - mean) @ pca.components
-        out[start : start + BLOCK_ROWS] = reduced / np.linalg.norm(reduced, axis=1, keepdims=True)
+        norms = np.linalg.norm(reduced, axis=1, keepdims=True)
+        if (zero := int((norms == 0).sum())) > 0:
+            msg = f"{zero} row(s) project to zero (at the PCA mean): cannot normalise"
+            raise ValueError(msg)
+        out[start : start + BLOCK_ROWS] = reduced / norms
     return out
 
 

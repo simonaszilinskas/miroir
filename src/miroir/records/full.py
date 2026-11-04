@@ -27,6 +27,7 @@ from miroir.records.mappers import (
     full_field_maps,
     joconde_open,
     map_record,
+    memoire_rights_known,
     record_ref,
 )
 from miroir.records.model import Collection, Record
@@ -71,18 +72,18 @@ def build_full(settings: Settings) -> FullBuild:
     logger.info("July Joconde: %d records publishable", len(joconde))
     memoire_open: set[str] = set()
     fmaps: dict[Collection, FieldMap] = {Collection.MEMOIRE: FIELD_MAPS[Collection.MEMOIRE]}
-    writer = RecordsWriter(settings.full_records_parquet, settings.full_images_parquet)
-    try:
+    paths = settings.full_records_parquet, settings.full_images_parquet
+    with RecordsWriter(*paths) as writer:
         for collection in FULL_ORDER:
             if collection not in fmaps:
                 rights = Rights(joconde_open=joconde, memoire_open=frozenset(memoire_open))
                 fmaps = full_field_maps(rights)
             counts = _map_base(settings, collection, fmaps[collection], writer, memoire_open)
+            if collection is Collection.MEMOIRE:
+                _check_memoire_rights(counts)
             report.counts[collection] = counts
             for counter, value in sorted(counts.items()):
                 logger.info("%s %s=%d", collection, counter, value)
-    finally:
-        writer.close()
     return report
 
 
@@ -99,6 +100,8 @@ def _map_base(
     batch: list[Record] = []
     for raw in iter_raw(path):
         counts["records_read"] += 1
+        if collection is Collection.MEMOIRE and not memoire_rights_known(raw):
+            counts["rights_missing"] += 1
         result = map_record(collection, raw, fmap)
         for skip in result.image_skips:
             counts[f"skip_image:{skip}"] += 1
@@ -117,6 +120,19 @@ def _map_base(
             batch = []
     writer.write(batch)
     return counts
+
+
+def _check_memoire_rights(counts: Counter[str]) -> None:
+    """Stop when the Mémoire rights look unread: Mérimée and Palissy rights hang on them."""
+    if counts["rights_missing"]:
+        msg = (
+            f"{counts['rights_missing']} Mémoire records have no DIFF field: the export did not "
+            "map the rights column (scripts/pop_full_export.py fieldmap); fix it and rebuild"
+        )
+        raise ValueError(msg)
+    if counts["records_kept"] and counts["publishable"] == counts["records_kept"]:
+        msg = "every Mémoire record came out publishable: DIFF looks unread; check the export"
+        raise ValueError(msg)
 
 
 def count_full(settings: Settings, build: FullBuild | None = None) -> dict[str, object]:

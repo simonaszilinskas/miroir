@@ -40,6 +40,7 @@ from miroir.eval.vectors import VectorSet, read_vectors, write_vectors
 from miroir.jobs.bulk import PIECES, JobState, JobStatus, piece_key, piece_prefix, status_key
 from miroir.jobs.objects import Bucket, bucket_name, listing
 from miroir.parallel import bounded_map
+from miroir.records.store import write_table
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -80,8 +81,8 @@ def merged_tables(settings: Settings, out: Path) -> tuple[int, int]:
     july_images = pq.read_table(settings.images_parquet)  # pyright: ignore[reportUnknownMemberType]
     extra_images = july_images.filter(pc.is_in(july_images.column("ref"), extra.column("ref")))  # pyright: ignore[reportUnknownMemberType]
     images = pa.concat_tables([full_images, extra_images.cast(full_images.schema)])
-    pq.write_table(records, out / "records.parquet")  # pyright: ignore[reportUnknownMemberType]
-    pq.write_table(images, out / "images.parquet")  # pyright: ignore[reportUnknownMemberType]
+    write_table(records, out / "records.parquet")
+    write_table(images, out / "images.parquet")
     logger.info(
         "merged: %d records (%d from July alone), %d image rows",
         records.num_rows,
