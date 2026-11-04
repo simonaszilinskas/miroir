@@ -548,12 +548,9 @@ class ChatService:
             c.messages = [{"role": "system", "content": self._brief()}, opening]
             c.started = True  # only now: a failed opening is built again with the next message
             return
-        shared = ""
-        if given.position is not None:
-            shared = (
-                f" They shared their position (lat {given.position.latitude:.5f}, lon "
-                f'{given.position.longitude:.5f}): filters near "visitor" uses it.'
-            )
+        # Never the coordinates: near "visitor" is resolved here, and the model could repeat
+        # them in words the visitor reads and the log keeps.
+        shared = "" if given.position is None else chat_prompts.POSITION_SHARED
         pending, c.pending = c.pending, None
         if pending is None:
             c.messages.append(

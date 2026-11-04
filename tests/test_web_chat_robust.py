@@ -385,3 +385,27 @@ def test_calls_in_flight_hold_their_cost_against_the_days_cap() -> None:
     assert [e["text"] for e in of(second, "limit")] == [chat_prompts.DAY_CAP]
     assert gate.calls == 2  # the first conversation's call and its reminder; none for b
     assert asyncio.run(spend.spent("2026-10-16")) == pytest.approx(0.002)
+
+
+# --- 7. the visitor's position -----------------------------------------------------------------
+
+
+def test_the_model_is_told_a_position_was_shared_never_where() -> None:
+    """near "visitor" is resolved on the server: the model needs no coordinates, and could
+    repeat them in words that are shown and logged."""
+    script = [
+        shown("PA1", found="none"),
+        calls([("text_search", {"query": "église", "why": WHY, "filters": {"near": "visitor"}})]),
+        shown("PA1"),
+    ]
+    with Rig(script) as rig:
+        cid = rig.start(photo=False, words="église")
+        rig.send(cid, "goal", EXACT)
+        position = {"latitude": 43.60441, "longitude": 1.44295}
+        events = rig.send(cid, "message", "Près d’ici", position=position)
+    sent = body_text(rig.model.bodies[1])
+    assert "shared their position" in sent
+    assert "43.6" not in sent
+    assert "1.44" not in sent
+    assert rig.backend.queries[-1].filters.near is not None
+    assert card_ids(events) == ["PA1"]
