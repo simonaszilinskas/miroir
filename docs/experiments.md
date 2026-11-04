@@ -136,6 +136,8 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 
 [technical-spec.md §7](technical-spec.md#7-evaluation) defines sets T1–T9. Every set except T9 is split 50/50 into a tuning half and a sealed half, **by building or object**, so no entity appears in both halves.
 
+Every number reported so far is on a tuning half, where the options were picked: in-sample, so optimistic until R4. Two sets measure less than their names say: T3's answers are other crops of the same room photo, so it measures finding the outline and matching a crop to its record, not finding a work in a visitor's photo; T2b is mostly one museum's Roman objects, many uploaded by the museum or a few regulars, with a few same-photo copies left.
+
 Two more sets test finding the whole from a part (the plan in `docs/search-levels.md`). Their targets come from the whole POP download (`full-pop/`), so most are not in today's index.
 
 - **VET** (`miroir testsets vet <3 images>`): three photos of the Vétheuil Passion altarpiece (PM95000723) from outside POP: two sale catalogue pages, each one stolen carved group with text, and the altarpiece today in colour. Target: APMH047981, a Mémoire photo from before 1896; any record of the altarpiece is right. Tune half only. The photos are kept in `testsets/outside/`.
