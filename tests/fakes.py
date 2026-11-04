@@ -79,6 +79,10 @@ class FakeOpenRouter:
     chat_answer: str = CHAT_ANSWER
     unseen_polls: int = 0
     """Answer this many batch polls with 404, as a batch just submitted can."""
+    priced: bool = True
+    """Whether /embeddings and /chat/completions answers carry their cost."""
+    batch_fails: frozenset[str] | set[str] = frozenset()
+    """custom_ids a batch answers with an error."""
 
     def handler(self, request: httpx.Request) -> httpx.Response:  # noqa: PLR0911 (one per route)
         if self.fail_first > 0:
@@ -91,12 +95,13 @@ class FakeOpenRouter:
             body = json.loads(request.content)
             self.embedding_bodies.append(body)
             self.request_sizes.append(len(body["input"]))
-            return httpx.Response(200, json=_embedding_answer(len(body["input"]), cost=True))
+            answer = _embedding_answer(len(body["input"]), cost=self.priced)
+            return httpx.Response(200, json=answer)
         if path == "/chat/completions":
             if self.refuse_after is not None and len(self.chat_bodies) >= self.refuse_after:
                 return httpx.Response(402, json={"error": {"message": "out of credit"}})
             self.chat_bodies.append(json.loads(request.content))
-            return httpx.Response(200, json=_chat_answer(self.chat_answer, cost=True))
+            return httpx.Response(200, json=_chat_answer(self.chat_answer, cost=self.priced))
         if path == "/key":
             return httpx.Response(200, json={"data": {"usage": self.key_usage, "limit": 50}})
         if path in ("/models", "/embeddings/models"):
@@ -128,6 +133,8 @@ class FakeOpenRouter:
                         else _embedding_answer(1, cost=False),
                     },
                 }
+                if r["custom_id"] not in self.batch_fails
+                else {"custom_id": r["custom_id"], "error": {"message": "could not fetch"}}
                 for r in requests
             ]
             cost = COST_PER_INPUT / 2 * len(results)
