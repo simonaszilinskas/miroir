@@ -304,8 +304,8 @@ class Conversation:
             return ()
         try:
             found = await asyncio.wait_for(asyncio.shield(self.detected), FIRST_LOOK_WAIT_S)
-        except (TimeoutError, ValueError, RuntimeError, OSError) as err:
-            logger.warning("chat %s: outlines failed: %s", self.id[:8], err)
+        except Exception as err:  # no outlines: the model crops by box or cell
+            logger.warning("chat %s: outlines failed: %r", self.id[:8], err)
             return ()
         return found.boxes[:OUTLINES_LISTED]
 
@@ -524,9 +524,9 @@ class ChatService:
             c.position_given = given.position
         text = given.text.strip()[:MAX_WORDS]
         if not c.started:
-            c.started = True
-            c.messages = [{"role": "system", "content": self._brief()}]
-            c.messages.append(await self._opening(c, text))
+            opening = await self._opening(c, text)
+            c.messages = [{"role": "system", "content": self._brief()}, opening]
+            c.started = True  # only now: a failed opening is built again with the next message
             return
         shared = ""
         if given.position is not None:
@@ -587,8 +587,8 @@ class ChatService:
         start = time.monotonic()
         try:
             found = await asyncio.wait_for(asyncio.shield(c.first_look), FIRST_LOOK_WAIT_S)
-        except (TimeoutError, ValueError, RuntimeError) as err:
-            logger.warning("chat %s: first look failed: %s", c.id[:8], err)
+        except Exception as err:  # the model can search on its own: the turn goes on
+            logger.warning("chat %s: first look failed: %r", c.id[:8], err)
             c.emit(step_event(step, label, "pas de résultat", (), error=True))
             c.log({"type": "first_look", "error": True, "ms": _ms(start)})
             return chat_prompts.FIRST_LOOK_FAILED

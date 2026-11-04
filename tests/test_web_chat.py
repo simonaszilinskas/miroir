@@ -89,10 +89,14 @@ class CountingBackend:
         self.requests: list[SearchRequest] = []
         self.failures: list[Exception] = []
         """Raised by the next tool searches, one each, before any runs."""
+        self.search_failure: Exception | None = None
+        """Raised by the usual search (the first look)."""
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
         self.requests.append(request)
+        if self.search_failure is not None:
+            raise self.search_failure
         return await self.local.search(request)
 
     async def tool_search(self, query: ToolQuery) -> ToolHits:
