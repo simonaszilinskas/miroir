@@ -127,7 +127,9 @@ def rerank(shortlist: Shortlist, matched: QueryMatches, how: Rerank) -> QuerySco
     order = np.argsort(-keys, kind="stable")  # ties keep the vector order
     new_rank = {shortlist.entity_ids[int(i)]: r + 1 for r, i in enumerate(order)}
     ranks = [new_rank.get(entity, rank) for entity, rank in shortlist.right_ranks]
-    return QueryScore(shortlist.query_id, rank=min(ranks), ap=average_precision(ranks))
+    return QueryScore(
+        shortlist.query_id, min(ranks), average_precision(ranks), cluster=shortlist.cluster
+    )
 
 
 def search_times(matched: Iterable[QueryMatches]) -> tuple[float, float]:

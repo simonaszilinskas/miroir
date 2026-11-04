@@ -29,17 +29,25 @@ import numpy as np
 from numpy.typing import NDArray
 
 from miroir.config import WEB_INDEX, Settings, eval_result_path
-from miroir.eval.bm25 import Bm25
+from miroir.eval.bm25 import Bm25, record_text
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
-from miroir.eval.scoring import QueryScore, ScoreResult
+from miroir.eval.scoring import QueryScore, ScoreResult, first_rank
 from miroir.eval.sets import Query, load_queries
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors
 from miroir.eval.words import EN_SET_ID, SET_ID, WRITER
 from miroir.web import ranking
-from miroir.web.bundle import INDEXES, entity_cosines
+from miroir.web.bundle import INDEXES
 from miroir.web.catalog import CATALOG_FILE, Catalog, read_catalog
-from miroir.web.engine import A3_FILE, A7_FILE, record_text, word_signals
-from miroir.web.routing import GUESS_FILE, ROUTING_FILE, TextWeights, read_guess, read_routing
+from miroir.web.engine import A3_FILE, A7_FILE, word_signals
+from miroir.web.measure import entity_cosines
+from miroir.web.routing import (
+    GUESS_FILE,
+    ROUTING_FILE,
+    TextWeights,
+    read_guess,
+    read_routing,
+    route,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,19 +163,10 @@ def weighted(a7_weight: float) -> Mixer:
     return mix
 
 
-def rank_of(scores: Floats, row: int) -> int:
-    """Where entity `row` lands in `ranking.top_entities` order (1 = first)."""
-    value = scores[row]
-    if not np.isfinite(value):
-        return int(np.isfinite(scores).sum()) + 1
-    ahead = int((scores > value).sum()) + int((scores[:row] == value).sum())
-    return ahead + 1
-
-
 def ranks(signals: Signals, mixer: Mixer) -> NDArray[np.int64]:
     return np.asarray(
         [
-            rank_of(mixer(signals.a7[j], signals.bm25[j]), int(signals.right[j]))
+            first_rank(mixer(signals.a7[j], signals.bm25[j]), [int(signals.right[j])])
             for j in range(len(signals.query_ids))
         ],
         dtype=np.int64,
@@ -317,8 +316,8 @@ def _set_score(index: WebIndex, part: Subset, mixer: Mixer) -> SetScore:
     ranked = ranks(part.signals, mixer)
     result = ScoreResult(
         per_query=tuple(
-            QueryScore(q, int(r), 1.0 / int(r))
-            for q, r in zip(part.signals.query_ids, ranked, strict=True)
+            QueryScore(q, int(r), 1.0 / int(r), cluster=index.catalog.entity_ids[int(e)])
+            for q, r, e in zip(part.signals.query_ids, ranked, part.signals.right, strict=True)
         ),
         skipped_no_answer=0,
         gallery_images=len(index.catalog.images),
@@ -420,18 +419,15 @@ def score_refine(
         text_cos = _cosines(text, index.a7)
         per_weight: dict[float, list[bool]] = {w: [] for w in REFINE_GRID}
         for j, q in enumerate(queries):
-            photo_type, _ = guess.photo_type(q7[j])
-            w = routing.choose(photo_type, chroma.get(q.query_image_id)).a7_weight
-            photo = [
-                s for s in (ranking.Signal(e7[j], w), ranking.Signal(e3[j], 1 - w)) if s.weight
-            ]
+            _, bucket = route(routing, guess, q7[j], chroma[q.query_image_id])
+            photo = list(ranking.rank_photo(e7[j], e3[j], bucket.a7_weight).signals)
             mask = index.hidden_mask(q)
             said = word_signals(index.catalog, text_cos[j], index.bm25.scores(q.text), mask, words)
             right = index.catalog.entity_row[q.expected_entity_ids[0]]
             for refine in REFINE_GRID:
                 signals = photo + [ranking.Signal(s.per_entity, s.weight * refine) for s in said]
                 fused = ranking.fuse([s for s in signals if s.weight > 0])
-                per_weight[refine].append(rank_of(fused, right) <= 10)
+                per_weight[refine].append(first_rank(fused, [right]) <= 10)
         hits[set_id] = {w: float(np.mean(v)) for w, v in per_weight.items()}
         counts[set_id] = len(queries)
         logger.info("refine %s (%d queries): %s", set_id, len(queries), hits[set_id])

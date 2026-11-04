@@ -12,7 +12,6 @@ cut-off (`routing.json`).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,15 +33,6 @@ class SureRule:
     photo_type: PhotoType = PhotoType.OBJECT
     note: str = ""
     """Where the margin comes from, and what it gives on the tune halves."""
-
-
-def margin_of(confidences: Sequence[float]) -> float:
-    """Top confidence minus the best of the others; the whole confidence when alone."""
-    if not confidences:
-        msg = "no confidences"
-        raise ValueError(msg)
-    rest = confidences[1:]
-    return confidences[0] - (max(rest) if rest else 0.0)
 
 
 _SURE = TypeAdapter(SureRule)

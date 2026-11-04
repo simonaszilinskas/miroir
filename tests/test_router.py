@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from miroir.config import SEED
+from miroir.config import SEED, Settings
 from miroir.eval.fusion import Method, fuse, fuse_per_query, min_max
 from miroir.eval.router import (
     PhotoType,
@@ -14,8 +14,10 @@ from miroir.eval.router import (
     pick_route,
     rank_routed,
     routed,
+    training_labels,
 )
 from miroir.eval.scoring import EntityScores, SearchQuery, rank_entities
+from miroir.eval.sets import Query, entities_in_sets, write_set
 from miroir.records.model import Collection, Record
 
 
@@ -113,3 +115,14 @@ def test_grid_picks_split_weights_when_one_weight_cannot_serve_both() -> None:
 def test_per_query_weights_refuse_a_wrong_shape() -> None:
     with pytest.raises(ValueError, match="per-query weights"):
         fuse_per_query([A_SCORES, B_SCORES], np.ones((3, 2), dtype=np.float32))
+
+
+def test_the_guess_never_learns_from_a_sealed_query_entity(settings: Settings) -> None:
+    # T1's tune query shows PA1, T1b's sealed one PA2; the T2 answer PA3 is in no tune file.
+    write_set(settings, "T1", [Query("T1-a", "T1", "PA1", "a", ("PA1",), ())], [])
+    write_set(settings, "T1b", [], [Query("T1b-b", "T1b", "PA2", "b", ("PA2",), ())])
+    write_set(settings, "T2", [], [Query("T2-c", "T2", "PA3", "commons-c", ("PA3",), ())])
+    entity_of = {"a": "PA1", "b": "PA2", "c": "PA3", "d": "PA4", "e": "OBJ"}
+    kinds = dict.fromkeys("abcd", PhotoType.BUILDING) | {"e": PhotoType.OBJECT}
+    labels = training_labels(list(entity_of), entity_of, kinds, entities_in_sets(settings))
+    assert set(labels) == {"d", "e"}

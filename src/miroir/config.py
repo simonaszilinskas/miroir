@@ -473,6 +473,12 @@ class Settings(BaseSettings):
             raise PermissionError(msg)
         return self.data_root / "testsets-sealed" / f"{set_id}.sealed.jsonl"
 
+    def testset_entities_path(self, set_id: str) -> Path:
+        """Every building or object a set uses, both halves mixed, written with the set: what
+        a model trained on the gallery (the type guess) leaves out. Holds no query."""
+        _check_name(set_id)
+        return self.testsets_dir / "entities" / f"{set_id}.txt"
+
     def outside_image_path(self, image_id: str) -> Path:
         """A query image that is in no POP record, kept as given (e.g. the VET set's photos)."""
         _check_name(image_id)

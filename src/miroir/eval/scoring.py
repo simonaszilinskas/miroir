@@ -4,8 +4,9 @@ Search is flat: every query is compared with every gallery image (NumPy, no appr
 Images are grouped by entity: an entity scores the best of its images, and the ranking is a
 ranking of entities. A query is right at rank r when one of its right entities is r-th.
 
-Ties between entities with the same score are broken by entity id order, so results never
-depend on row order and never flatter an option by counting a tie as a win.
+A right entity tied with a wrong one ranks after it (`tie_ranks`), so results never depend
+on row order and a tie never counts as a win: records that share an image both score 1.0,
+and the site's display order (lower entity id first) would otherwise pick a side.
 """
 
 from __future__ import annotations
@@ -45,6 +46,10 @@ class SearchQuery:
     image_id: str
     entity_ids: tuple[str, ...]
     excluded_image_ids: tuple[str, ...] = ()
+    cluster: str = ""
+    """What the query's score is resampled with (`QueryScore.cluster`)."""
+    hidden_entity: str = ""
+    """As `NotFoundQuery.hidden_entity`; a query with a right answer hides none."""
 
     def __post_init__(self) -> None:
         if not self.entity_ids:
@@ -61,6 +66,8 @@ class Asked(Protocol):
     def image_id(self) -> str: ...
     @property
     def excluded_image_ids(self) -> tuple[str, ...]: ...
+    @property
+    def hidden_entity(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +77,9 @@ class NotFoundQuery:
     query_id: str
     image_id: str
     excluded_image_ids: tuple[str, ...] = ()
+    hidden_entity: str = ""
+    """Every gallery image of this entity is hidden too, also images added to it after the
+    set was built (Commons photos, step F2), which `excluded_image_ids` cannot name."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +136,9 @@ class QueryScore:
     """Rank of the best-placed right entity, from 1."""
     ap: float
     """Average precision over the right entities present in the gallery."""
+    cluster: str = ""
+    """Queries that share a cluster (one building, one room photo) are resampled together
+    (`bootstrap`); empty: the query is a cluster of its own."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,13 +241,17 @@ def entity_scores(
 
 
 def hide(sims: Floats, gallery: Gallery, queries: Sequence[Asked]) -> Floats:
-    """Set to -inf, in place, each query's own image and its excluded images. Returns `sims`."""
+    """Set to -inf, in place, each query's own image, its excluded images and every image of
+    its hidden entity. Returns `sims`."""
     gallery_row = {image_id: i for i, image_id in enumerate(gallery.image_ids)}
+    entities = np.asarray(gallery.entity_ids)
     for j, query in enumerate(queries):
         hidden = [
             gallery_row[i] for i in (query.image_id, *query.excluded_image_ids) if i in gallery_row
         ]
         sims[j, hidden] = -np.inf
+        if query.hidden_entity:
+            sims[j, entities == query.hidden_entity] = -np.inf
     return sims
 
 
@@ -248,15 +265,18 @@ def rank_entities(
         raise ValueError(msg)
     code_of = {name: i for i, name in enumerate(scores.entity_ids)}
     results: list[QueryScore] = []
-    skipped = 0
+    skipped = tied = 0
     for j, query in enumerate(queries):
         scored = _score_one(query, scores.values[j], code_of, ap_max_rank)
         if scored is None:
             skipped += 1
         else:
-            results.append(scored)
+            results.append(scored[0])
+            tied += scored[1]
     if skipped:
         logger.warning("skipped %d of %d queries: no answer in gallery", skipped, len(queries))
+    if tied:
+        logger.info("%d of %d queries: right entity tied with a wrong one", tied, len(queries))
     return ScoreResult(
         per_query=tuple(results),
         skipped_no_answer=skipped,
@@ -273,13 +293,14 @@ class Shortlist:
     query_id: str
     image_id: str
     entity_ids: tuple[str, ...]
-    """The top entities, best first, ties broken as in `score`."""
+    """The top entities, best first, in the site's display order (lower id first on a tie)."""
     image_ids: tuple[str, ...]
     """Each entity's best-scoring image the query may see."""
     scores: tuple[float, ...]
     """Each entity's cosine."""
     right_ranks: tuple[tuple[str, int], ...]
     """Every right entity in the gallery with its rank from 1, in and beyond the shortlist."""
+    cluster: str = ""
 
 
 def shortlists(
@@ -303,7 +324,7 @@ def shortlists(
         right = [c for c in coded if np.isfinite(values[c])]
         if not right:
             continue
-        ranked = np.argsort(-values, kind="stable")  # ties: lower entity id first
+        ranked = np.argsort(-values, kind="stable")  # display order: lower entity id first
         best = [int(c) for c in ranked[:top] if np.isfinite(values[c])]
         asked: Floats = np.asarray(query_vectors.vectors[query_row[query.image_id]], np.float32)
         hidden = {query.image_id, *query.excluded_image_ids}
@@ -319,7 +340,8 @@ def shortlists(
                 entity_ids=tuple(scores.entity_ids[c] for c in best),
                 image_ids=tuple(images),
                 scores=tuple(float(values[c]) for c in best),
-                right_ranks=tuple((scores.entity_ids[c], _rank(values, c)) for c in right),
+                right_ranks=tuple((scores.entity_ids[c], first_rank(values, [c])) for c in right),
+                cluster=query.cluster,
             )
         )
     return tuple(lists), plain
@@ -331,8 +353,27 @@ def average_precision(ranks: Sequence[int]) -> float:
     return sum((i + 1) / r for i, r in enumerate(ordered)) / len(ordered)
 
 
-def _rank(scores: Floats, c: int) -> int:
-    return int((scores > scores[c]).sum() + (scores[:c] == scores[c]).sum()) + 1
+def tie_ranks(scores: NDArray[np.floating], right: Sequence[int]) -> list[int]:
+    """Ranks from 1 of the right entities `right` (finite scores), best first. A wrong entity
+    tied with a right one ranks before it; right entities tied together keep their places."""
+    others = np.delete(scores, list(right))
+    values = sorted((float(scores[c]) for c in right), reverse=True)
+    return [i + 1 + int((others >= v).sum()) for i, v in enumerate(values)]
+
+
+def first_rank(scores: NDArray[np.floating], right: Sequence[int]) -> int:
+    """Rank of the best right entity, ties counted against it (`tie_ranks`); past every entity
+    when none is left in the ranking (-inf); 0 when there is no right entity to find."""
+    if not right:
+        return 0
+    alive = [c for c in right if np.isfinite(scores[c])]
+    return tie_ranks(scores, alive)[0] if alive else len(scores) + 1
+
+
+def tied_with_wrong(scores: NDArray[np.floating], right: Sequence[int]) -> bool:
+    """The best right entity shares its score with a wrong one."""
+    best = max(float(scores[c]) for c in right)
+    return bool((np.delete(scores, list(right)) == best).any())
 
 
 def _check_queries(queries: Sequence[Asked]) -> None:
@@ -346,17 +387,17 @@ def _check_queries(queries: Sequence[Asked]) -> None:
 
 def _score_one(
     query: SearchQuery, scores: Floats, code_of: Mapping[str, int], ap_max_rank: int | None
-) -> QueryScore | None:
+) -> tuple[QueryScore, bool] | None:
+    """The query's score, and whether its best right entity ties a wrong one."""
     right = [code_of[e] for e in dict.fromkeys(query.entity_ids) if e in code_of]
     right = [c for c in right if np.isfinite(scores[c])]
     if not right:
         return None
-    ranks = sorted(
-        int((scores > scores[c]).sum() + (scores[:c] == scores[c]).sum()) + 1 for c in right
-    )
+    ranks = tie_ranks(scores, right)
     cut = ap_max_rank if ap_max_rank is not None else len(scores)
     ap = sum((i + 1) / r for i, r in enumerate(ranks) if r <= cut) / len(ranks)
-    return QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap)
+    scored = QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap, cluster=query.cluster)
+    return scored, tied_with_wrong(scores, right)
 
 
 def hits(result_ranks: Sequence[int], k: int) -> NDArray[np.float64]:
@@ -371,9 +412,16 @@ def per_query_values(per_query: Sequence[QueryScore]) -> dict[str, NDArray[np.fl
     return values
 
 
-def bootstrap(values: NDArray[np.float64], *, seed: int = SEED) -> Interval:
-    """Mean and 95% percentile interval over RESAMPLES resamples of the queries."""
-    means = _resampled_means(values, seed)
+def bootstrap(
+    values: NDArray[np.float64], *, clusters: Sequence[str] | None = None, seed: int = SEED
+) -> Interval:
+    """Mean and 95% percentile interval over RESAMPLES resamples of the queries' clusters.
+
+    Photos of one building, or crops of one room photo, are not independent draws: their
+    clusters are resampled whole, so the interval is as wide as the number of buildings
+    makes it. Without `clusters` (or with an empty one) each query is its own cluster.
+    """
+    means = _resampled_means(values, seed, clusters)
     low, high = np.percentile(means, [2.5, 97.5])
     return Interval(value=float(values.mean()), low=float(low), high=float(high))
 
@@ -381,7 +429,7 @@ def bootstrap(values: NDArray[np.float64], *, seed: int = SEED) -> Interval:
 def paired_bootstrap(
     a: Sequence[QueryScore], b: Sequence[QueryScore], *, seed: int = SEED
 ) -> tuple[Difference, ...]:
-    """Difference a - b for every metric, resampling the same queries for both runs."""
+    """Difference a - b for every metric, resampling the same clusters for both runs."""
     a_by_id = {q.query_id: q for q in a}
     b_by_id = {q.query_id: q for q in b}
     if a_by_id.keys() != b_by_id.keys():
@@ -390,12 +438,13 @@ def paired_bootstrap(
         msg = f"runs answer different queries: {only_a} only in a, {only_b} only in b"
         raise ValueError(msg)
     ids = sorted(a_by_id)
+    clusters = [a_by_id[i].cluster or b_by_id[i].cluster for i in ids]
     a_values = per_query_values([a_by_id[i] for i in ids])
     b_values = per_query_values([b_by_id[i] for i in ids])
     out: list[Difference] = []
     for metric, a_metric in a_values.items():
         diff = a_metric - b_values[metric]
-        means = _resampled_means(diff, seed)
+        means = _resampled_means(diff, seed, clusters)
         low, high = np.percentile(means, [2.5, 97.5])
         out.append(
             Difference(
@@ -409,10 +458,28 @@ def paired_bootstrap(
     return tuple(out)
 
 
-def _resampled_means(values: NDArray[np.float64], seed: int) -> NDArray[np.float64]:
+def _resampled_means(
+    values: NDArray[np.float64], seed: int, clusters: Sequence[str] | None = None
+) -> NDArray[np.float64]:
+    """Means of RESAMPLES draws of whole clusters, with replacement, as many as there are."""
     if values.size == 0:
         msg = "cannot bootstrap zero queries"
         raise ValueError(msg)
+    if clusters is not None and len(clusters) != values.size:
+        msg = f"{len(clusters)} clusters for {values.size} values"
+        raise ValueError(msg)
+    # Clusters in order of first appearance; an empty name is a cluster of its own.
+    code: dict[str, int] = {}
+    names = clusters if clusters is not None else [""] * values.size
+    codes = np.fromiter(
+        (code.setdefault(c or f"\0{i}", len(code)) for i, c in enumerate(names)),
+        dtype=np.int64,
+        count=values.size,
+    )
+    sums = np.bincount(codes, weights=values)
+    sizes = np.bincount(codes).astype(np.float64)
     rng = np.random.default_rng(seed)
-    picks = rng.integers(0, values.size, size=(RESAMPLES, values.size))
-    return values[picks].mean(axis=1)
+    picks = rng.integers(0, len(sums), size=(RESAMPLES, len(sums)))
+    if len(sums) == values.size:  # one query per cluster: the plain query bootstrap
+        return values[picks].mean(axis=1)
+    return sums[picks].sum(axis=1) / sizes[picks].sum(axis=1)

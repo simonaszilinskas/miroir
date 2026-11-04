@@ -10,7 +10,7 @@ from miroir.eval.detect import TOP, Detections, RoomBoxes, T3Item, score_outline
 from miroir.eval.site_rerank import MIX_INLIERS, rerank_hit
 from miroir.eval.wire import SiteMatches
 from miroir.outlines import Box, OutlineRule
-from miroir.web.bundle import SiteHit
+from miroir.web.measure import SiteHit
 from miroir.web.routing import PhotoType
 
 RULE = OutlineRule(min_score=0.2)

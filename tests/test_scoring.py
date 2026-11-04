@@ -17,11 +17,15 @@ from miroir.eval.results import (
 )
 from miroir.eval.scoring import (
     Gallery,
+    NotFoundQuery,
     QueryScore,
     SearchQuery,
     bootstrap,
+    entity_scores,
+    first_rank,
     paired_bootstrap,
     score,
+    tie_ranks,
 )
 from miroir.eval.vectors import Route, RunInfo, VectorSet
 
@@ -75,6 +79,15 @@ def test_excluded_images_leave_the_gallery() -> None:
     assert hit.rank == 3
 
 
+def test_a_not_found_query_hides_every_image_of_its_entity() -> None:
+    # g4 stands for a Commons photo added to X after the set was built (step F2): the
+    # query's exclusions do not name it, its entity does.
+    asked = NotFoundQuery("t8", "q", excluded_image_ids=("g1",), hidden_entity="X")
+    found = entity_scores(GALLERY_RUN, GALLERY, [asked])
+    assert found.values[0][found.entity_ids.index("X")] == -np.inf
+    assert np.isfinite(found.values[0]).sum() == 2  # Y and Z are still searched
+
+
 def test_query_image_never_finds_itself() -> None:
     run = vector_set({"a": [1, 0], "b": [0.9, 0.1], "c": [0, 1]})
     gallery = Gallery.from_vectors(run, {"a": "A", "b": "B", "c": "C"})
@@ -93,11 +106,27 @@ def test_ap_cut_at_max_rank() -> None:
     assert (hit.rank, hit.ap) == (2, 0.0)
 
 
-def test_ties_break_by_entity_id() -> None:
+def test_a_tie_with_a_wrong_entity_counts_against_the_query() -> None:
     run = vector_set({"a": [1, 0], "b": [1, 0], "q": [1, 0.01]})
     gallery = Gallery.from_vectors(run, {"a": "A", "b": "B"}, ["a", "b"])
     ranks = [score(run, gallery, [SearchQuery("q", "q", (e,))]).per_query[0].rank for e in "AB"]
-    assert ranks == [1, 2]
+    assert ranks == [2, 2]  # whichever is right, the tied wrong one goes first
+
+
+def test_right_entities_tied_together_do_not_push_each_other_down() -> None:
+    run = vector_set({"a": [1, 0], "b": [1, 0], "c": [0, 1], "q": [1, 0.01]})
+    gallery = Gallery.from_vectors(run, {"a": "A", "b": "B", "c": "C"}, ["a", "b", "c"])
+    hit = score(run, gallery, [SearchQuery("q", "q", ("A", "B"))]).per_query[0]
+    assert (hit.rank, hit.ap) == (1, 1.0)
+
+
+def test_tie_ranks_put_every_tied_wrong_entity_first() -> None:
+    scores = np.asarray([0.5, 0.9, 0.9, 0.9, -np.inf], dtype=np.float32)
+    assert tie_ranks(scores, [2]) == [3]
+    assert tie_ranks(scores, [2, 0]) == [3, 4]
+    assert tie_ranks(scores, [2, 1]) == [2, 3]
+    assert first_rank(scores, [4]) == 6  # off the ranking: past every entity
+    assert first_rank(scores, []) == 0
 
 
 def test_rejects_query_without_vector() -> None:
@@ -127,6 +156,45 @@ def test_bootstrap_interval_has_the_expected_width() -> None:
 def test_bootstrap_is_seeded() -> None:
     values = np.random.default_rng(1).random(200)
     assert bootstrap(values) == bootstrap(values)
+
+
+def test_bootstrap_resamples_clusters_not_queries() -> None:
+    # 20 buildings, 10 photos each, all right or all wrong: 20 draws, not 200.
+    values = np.repeat((np.arange(20) % 2).astype(np.float64), 10)
+    clusters = [f"PA{i // 10}" for i in range(200)]
+    iid = bootstrap(values)
+    clustered = bootstrap(values, clusters=clusters)
+    assert clustered.value == iid.value == 0.5
+    half_width = 1.96 * 0.5 / np.sqrt(20)  # about 0.22, against 0.07 query by query
+    assert clustered.high - clustered.value == pytest.approx(half_width, abs=0.05)
+    assert iid.high - iid.value < 0.1
+
+
+def test_one_query_per_cluster_bootstraps_as_before() -> None:
+    values = np.random.default_rng(3).random(100)
+    assert bootstrap(values, clusters=[f"e{i}" for i in range(100)]) == bootstrap(values)
+
+
+def test_paired_bootstrap_resamples_the_clusters_of_the_scores() -> None:
+    # Two buildings: on one, a wins all ten photos; on the other, it ties.
+    better = [QueryScore(f"q{i}", 1, 1.0, cluster=f"PA{i // 10}") for i in range(20)]
+    worse = [
+        QueryScore(f"q{i}", 1 if i >= 10 else 20, 1.0, cluster=f"PA{i // 10}") for i in range(20)
+    ]
+    by_query = {d.metric: d for d in paired_bootstrap(_scores_of(better), _scores_of(worse))}
+    by_building = {d.metric: d for d in paired_bootstrap(better, worse)}
+    assert by_building["hit@1"].diff.value == by_query["hit@1"].diff.value == 0.5
+    assert by_building["hit@1"].share_not_better > by_query["hit@1"].share_not_better
+
+
+def _scores_of(scores: list[QueryScore]) -> list[QueryScore]:
+    """The same scores with no cluster: each query its own."""
+    return [QueryScore(q.query_id, q.rank, q.ap) for q in scores]
+
+
+def test_a_query_score_reads_its_cluster_from_the_query() -> None:
+    hit = one(SearchQuery("q1", "q", ("X",), cluster="PA1"))
+    assert hit.cluster == "PA1"
 
 
 def _scores(ranks: list[int]) -> list[QueryScore]:

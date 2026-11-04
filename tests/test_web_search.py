@@ -13,8 +13,10 @@ from miroir.config import Settings
 from miroir.geo.model import Place, PlaceSource
 from miroir.images.upload import UnreadablePhotoError
 from miroir.records.store import write_places as write_places_parquet
+from miroir.web import engine as engine_module
 from miroir.web import facets, ranking
-from miroir.web.bundle import add_places, cutoff_for
+from miroir.web.bundle import add_places
+from miroir.web.calibrate import cutoff_for
 from miroir.web.catalog import CATALOG_FILE, Catalog, CatalogData, Filters, write_catalog
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
 from miroir.web.levels import WORDS_ROUTE, Level, Levels, RouteLevels
@@ -224,8 +226,9 @@ def test_routing_picks_the_first_bucket_that_fits() -> None:
     )
     assert routing.choose(PhotoType.BUILDING, 0.5).name == "archive"
     assert routing.choose(PhotoType.BUILDING, 40.0).name == "colour-building"
-    assert routing.choose(PhotoType.BUILDING, None).name == "archive"
     assert routing.choose(PhotoType.OBJECT, 0.5).name == "object"
+    with pytest.raises(ValueError, match="chroma"):  # it would send every building to archive
+        routing.choose(PhotoType.BUILDING, None)
 
 
 def test_a_building_guess_routes_to_embeddinggemma_alone() -> None:
@@ -252,6 +255,7 @@ def test_cutoff_keeps_at_most_the_target_share_confident() -> None:
     assert 0.8 < cutoff < 0.8 + 1e-9  # one of ten may stay confident: just above the second
     assert (wrong >= cutoff).mean() == pytest.approx(0.1)
     assert (wrong >= cutoff_for(wrong, 0.05)).mean() == 0.0
+    assert (wrong >= cutoff_for(wrong, 1.0)).all()  # every one may be confident
 
 
 def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness() -> None:
@@ -264,6 +268,26 @@ def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness()
     engine.levels = Levels(routes=(RouteLevels("building", 1.5, 0.0, 0.5, 0.0),))
     cards = engine.search(SearchRequest(image=h.photo(10))).cards
     assert [c.level for c in cards][:2] == [Level.CLOSE, Level.LIKENESS]
+
+
+def test_words_do_not_move_the_gap_a_photo_level_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Levels were set on photo-only rankings: the gap must be read over the photo's own top
+    # cards, not over the cards words (or a position) bring up. Photo 90 ranks OBJ1, PA1,
+    # OBJ2; "lièvre" lifts OBJ2 (the hare) to second.
+    monkeypatch.setattr(engine_module, "GAP_OVER", 2)
+    engine, encoders = h.engine(building=True)
+    mask = np.ones(len(engine.catalog.images), dtype=bool)
+    query = encoders.matrix[2]
+    photo = engine.photo_of(engine.vector_cosines(query, query, 30.0, mask, {}))
+    row = engine.catalog.entity_row
+    first, second, third = (photo.confidence(row[e]) for e in ("OBJ1", "PA1", "OBJ2"))
+    assert first > second > third
+    gap = (first - second + first - third) / 2  # between the photo's gap and the words' one
+    engine.levels = Levels(routes=(RouteLevels("building", 0.0, gap, None, None),))
+    plain = engine.search(SearchRequest(image=h.photo(90)))
+    refined = engine.search(SearchRequest(image=h.photo(90), text="lièvre"))
+    assert [c.entity_id for c in refined.cards] == ["OBJ1", "OBJ2", "PA1"]
+    assert plain.cards[0].level is refined.cards[0].level is Level.LIKENESS
 
 
 def test_without_levels_below_the_cutoff_every_card_is_a_likeness() -> None:

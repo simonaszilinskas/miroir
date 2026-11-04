@@ -5,9 +5,11 @@
 Sur 680 photos de test, cherchées parmi 147 000 images, la bonne notice arrive dans les 10 premières réponses :
 
 - **97 %** des fois pour un bâtiment photographié au téléphone, avec la position du téléphone (Google Lens s'en sert aussi) ;
-- **94 %** pour une œuvre de musée photographiée ;
-- **89 %** pour un vieux tirage sur carton, dont le site lit la légende ;
-- **78 %** (dans les 5 premières) pour une œuvre repérée sur une photo de salle de musée.
+- **94 %** pour une œuvre de musée photographiée (surtout des objets romains d'un seul musée, souvent versés sur Commons par le musée lui-même ou par quelques habitués) ;
+- **89 %** pour un vieux tirage sur carton, dont le site lit la légende (réglage choisi sur ces mêmes photos) ;
+- **78 %** (dans les 5 premières) pour une œuvre repérée sur une photo de salle du Jeu de Paume (ordre des contours choisi sur ces mêmes photos).
+
+Ces chiffres sont ceux de la moitié « réglage » des photos de test : les réglages ont été choisis dessus, ils sont donc optimistes. L'autre moitié, scellée, sera mesurée une seule fois, après l'indexation de tout POP.
 
 Pour l'instant, un grand point faible : sans la position du téléphone, un bâtiment n'est dans les 10 premières réponses qu'une fois sur trois (37 % ; 43 % dans les 50 premières). Le site ne couvre encore que 5 % de POP (101 000 notices sur 2,1 millions). La prochaine étape est d'indexer tout POP, pour environ 140 € de calcul, puis de le tester avec de vrais visiteurs.
 
@@ -54,7 +56,7 @@ Dans la recherche simple :
 3. **Vieux tirage sur carton.** Le site repère le carton, lit la légende manuscrite (par exemple « Beaune (Côte-d'Or), église Notre-Dame ») et s'en sert pour chercher. Le visiteur peut corriger ou retirer la légende.
 4. **Recherche par mots**, en français ou dans une autre langue : « Pont du Gard », « nature morte au lièvre ».
 
-Les résultats sont classés par ressemblance, du plus proche au plus lointain. Chacun porte un niveau : « Très proche », « Proche » ou « Ressemblance ». Sur les photos de test, un résultat « Très proche » est la bonne notice environ 8 fois sur 10. Des filtres (collection, région, département, domaine, période) restreignent la recherche.
+Les résultats sont classés par ressemblance, du plus proche au plus lointain. Chacun porte un niveau : « Très proche », « Proche » ou « Ressemblance ». Sur les photos de test, un résultat « Très proche » est la bonne notice environ 8 fois sur 10 : c'est l'objectif à partir duquel les seuils ont été fixés, sur ces mêmes photos ; il reste à le vérifier sur la moitié scellée. Des filtres (collection, région, département, domaine, période) restreignent la recherche.
 
 Captures du site en ligne, sur ordinateur et sur téléphone :
 
@@ -110,7 +112,7 @@ Même quand la notice exacte n'est pas dans les 10 premières réponses, ces ré
 
 Je pars du constat que trouver la notice exacte n'est pas le seul usage de MIROIR. C'est le choix de Google Lens ou de Pl@ntNet : plusieurs réponses classées, et la personne choisit. Des tests avec de vrais utilisateurs indiqueraient si ces voisines les intéressent autant que la réponse exacte.
 
-*Chiffres mesurés sur la moitié des photos de test qui sert aux réglages. Trois lignes (bâtiment avec position, salle, mots) viennent de l'index sans les photos Commons.*
+*Chiffres mesurés sur la moitié des photos de test qui sert aux réglages, donc optimistes : la moitié scellée sera mesurée une fois, en fin de projet. Trois lignes (bâtiment avec position, salle, mots) viennent de l'index sans les photos Commons. Ce que mesurent deux lignes : « salle de musée », c'est repérer le contour de l'œuvre puis retrouver sa notice, dont les images sont des découpes de la même photo de salle (pas une œuvre reconnue sur la photo d'un visiteur) ; « œuvre photographiée par un visiteur », ce sont surtout des objets du musée Saint-Raymond à Toulouse, souvent versés sur Commons par le musée ou par quelques habitués, et quelques photos y restent des copies de l'image du musée.*
 
 ## Comment ça marche
 

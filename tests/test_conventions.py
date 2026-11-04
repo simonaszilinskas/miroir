@@ -84,9 +84,9 @@ def test_dataclasses_are_frozen(module: Path) -> None:
 
 
 # Modules that may open the sealed half, and how many times. Only R4 code reads it
-# (CODING_STANDARDS 19): eval/sets.py's write_set writes it; cli.py passes
-# `allow_sealed=round_id == "R4"`. Passing on a parameter of the same name is plumbing.
-SEALED_ALLOWED = {"eval/sets.py": 1, "cli.py": 1}
+# (CODING_STANDARDS 19), in eval/r4.py; eval/sets.py's write_set writes it. Passing on a
+# parameter of the same name is plumbing.
+SEALED_ALLOWED = {"eval/sets.py": 1, "eval/r4.py": 1}
 
 
 def _sealed_functions() -> set[str]:
