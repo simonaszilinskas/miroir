@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image as PILImage
 
 from miroir.config import Settings
 from miroir.geo.model import Place, PlaceSource
+from miroir.images.upload import UnreadablePhotoError
 from miroir.records.store import write_places as write_places_parquet
+from miroir.web import engine as engine_module
 from miroir.web import facets, ranking
-from miroir.web.bundle import add_places, cutoff_for
-from miroir.web.catalog import CATALOG_FILE, CatalogData, Filters, write_catalog
+from miroir.web.bundle import add_places
+from miroir.web.calibrate import cutoff_for
+from miroir.web.catalog import CATALOG_FILE, Catalog, CatalogData, Filters, write_catalog
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
 from miroir.web.levels import WORDS_ROUTE, Level, Levels, RouteLevels
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, Position, read_places, write_places
@@ -82,6 +87,57 @@ def test_filters_apply_before_ranking() -> None:
     request = SearchRequest(image=h.photo(130), filters=Filters(collections=("memoire",)))
     response = engine.search(request)
     assert [c.entity_id for c in response.cards] == ["PA1"]
+
+
+def _random_catalog(count: int) -> Catalog:
+    rng = np.random.default_rng(7)
+
+    def pick(values: tuple[str | None, ...]) -> str | None:
+        return values[int(rng.integers(len(values)))]
+
+    records = tuple(
+        h.record(
+            f"R{n}",
+            f"E{int(rng.integers(count // 3))}",
+            str(pick(("memoire", "joconde", "merimee"))),
+            region=pick(("Occitanie", "Bretagne", "Midi-Pyrénées", None)),
+            departement=pick(("Gard", "Finistère", None)),
+            domain=tuple(
+                d for d in ("peinture", "architecture", "céramique") if rng.random() < 0.4
+            ),
+            period=tuple(p for p in ("18e siècle", "1880", "Moyen Age") if rng.random() < 0.4),
+        )
+        for n in range(count)
+    )
+    images = tuple(h.image(f"i{n}", r.entity_id, r.ref) for n, r in enumerate(records))
+    return Catalog(CatalogData(images=images, records=records))
+
+
+def test_filters_and_record_lists_match_a_plain_scan_of_every_record() -> None:
+    catalog = _random_catalog(300)
+    every = [
+        Filters(collections=("memoire", "merimee")),
+        Filters(collections=("nothing",)),
+        Filters(region="Occitanie"),
+        Filters(region="Nowhere"),
+        Filters(departement="Gard"),
+        Filters(domain="Peinture", period="18e siècle"),
+        Filters(collections=("joconde",), region="Bretagne", domain="Architecture"),
+    ]
+    for f in every:
+        plain = [
+            (not f.collections or r.collection in f.collections)
+            and (not f.region or facets.region(r.region) == f.region)
+            and (not f.departement or r.departement == f.departement)
+            and (not f.domain or f.domain in {facets.domain(d) for d in r.domain})
+            and (not f.period or f.period in set(facets.periods(r.period)))
+            for r in catalog.records
+        ]
+        assert catalog.record_mask(f).tolist() == plain, f
+    assert any(catalog.record_mask(every[5]))  # the tidied values do match something
+    for row, entity in enumerate(catalog.entity_ids):
+        plain_records = [r for r in catalog.records if r.entity_id == entity]
+        assert catalog.entity_records(row) == plain_records
 
 
 def test_a_commons_photo_follows_its_entity_records_through_filters() -> None:
@@ -170,8 +226,9 @@ def test_routing_picks_the_first_bucket_that_fits() -> None:
     )
     assert routing.choose(PhotoType.BUILDING, 0.5).name == "archive"
     assert routing.choose(PhotoType.BUILDING, 40.0).name == "colour-building"
-    assert routing.choose(PhotoType.BUILDING, None).name == "archive"
     assert routing.choose(PhotoType.OBJECT, 0.5).name == "object"
+    with pytest.raises(ValueError, match="chroma"):  # it would send every building to archive
+        routing.choose(PhotoType.BUILDING, None)
 
 
 def test_a_building_guess_routes_to_embeddinggemma_alone() -> None:
@@ -198,6 +255,7 @@ def test_cutoff_keeps_at_most_the_target_share_confident() -> None:
     assert 0.8 < cutoff < 0.8 + 1e-9  # one of ten may stay confident: just above the second
     assert (wrong >= cutoff).mean() == pytest.approx(0.1)
     assert (wrong >= cutoff_for(wrong, 0.05)).mean() == 0.0
+    assert (wrong >= cutoff_for(wrong, 1.0)).all()  # every one may be confident
 
 
 def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness() -> None:
@@ -210,6 +268,26 @@ def test_every_card_has_a_level_and_only_the_first_can_be_more_than_a_likeness()
     engine.levels = Levels(routes=(RouteLevels("building", 1.5, 0.0, 0.5, 0.0),))
     cards = engine.search(SearchRequest(image=h.photo(10))).cards
     assert [c.level for c in cards][:2] == [Level.CLOSE, Level.LIKENESS]
+
+
+def test_words_do_not_move_the_gap_a_photo_level_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Levels were set on photo-only rankings: the gap must be read over the photo's own top
+    # cards, not over the cards words (or a position) bring up. Photo 90 ranks OBJ1, PA1,
+    # OBJ2; "lièvre" lifts OBJ2 (the hare) to second.
+    monkeypatch.setattr(engine_module, "GAP_OVER", 2)
+    engine, encoders = h.engine(building=True)
+    mask = np.ones(len(engine.catalog.images), dtype=bool)
+    query = encoders.matrix[2]
+    photo = engine.photo_of(engine.vector_cosines(query, query, 30.0, mask, {}))
+    row = engine.catalog.entity_row
+    first, second, third = (photo.confidence(row[e]) for e in ("OBJ1", "PA1", "OBJ2"))
+    assert first > second > third
+    gap = (first - second + first - third) / 2  # between the photo's gap and the words' one
+    engine.levels = Levels(routes=(RouteLevels("building", 0.0, gap, None, None),))
+    plain = engine.search(SearchRequest(image=h.photo(90)))
+    refined = engine.search(SearchRequest(image=h.photo(90), text="lièvre"))
+    assert [c.entity_id for c in refined.cards] == ["OBJ1", "OBJ2", "PA1"]
+    assert plain.cards[0].level is refined.cards[0].level is Level.LIKENESS
 
 
 def test_without_levels_below_the_cutoff_every_card_is_a_likeness() -> None:
@@ -265,6 +343,35 @@ def test_query_photos_are_shrunk_like_gallery_images() -> None:
     with PILImage.open(io.BytesIO(jpeg)) as opened:
         assert opened.format == "JPEG"
         assert opened.size == (512, 256)
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+def test_a_photo_search_decodes_the_upload_once(
+    mounted: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_archive import card  # noqa: PLC0415
+
+    upload = card() if mounted else h.photo(130, size=(400, 300))
+    opened: list[bytes] = []
+    real_open = PILImage.open
+
+    def counting_open(fp: io.BytesIO, *args: object, **kwargs: object) -> PILImage.Image:
+        opened.append(fp.getvalue())
+        return real_open(fp, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(PILImage, "open", counting_open)
+    engine, _ = h.engine(building=False)
+    response = engine.search(SearchRequest(image=upload))
+    assert response.mount is mounted
+    assert opened.count(upload) == 1
+
+
+def test_an_unreadable_photo_raises_its_own_error() -> None:
+    engine, _ = h.engine()
+    with pytest.raises(UnreadablePhotoError):
+        engine.search(SearchRequest(image=b"not an image"))
+    with pytest.raises(UnreadablePhotoError):
+        prepare_photo(b"not an image")
 
 
 def test_a_guess_saved_by_index_guess_reads_too(tmp_path: Path) -> None:

@@ -23,9 +23,10 @@ import numpy as np
 
 from miroir.config import WEB_INDEX, Settings, eval_result_path
 from miroir.eval.site_rerank import Searched
-from miroir.web.bundle import WRONG_TARGET
+from miroir.web.calibrate import WRONG_TARGET
+from miroir.web.levels import gap_of
 from miroir.web.routing import PhotoType
-from miroir.web.sure import SURE_FILE, SureRule, margin_of, write_sure
+from miroir.web.sure import SURE_FILE, SureRule, write_sure
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class SureRow:
 
 def _object_rows(s: Searched, *, answered: bool) -> list[tuple[float, bool]]:
     return [
-        (margin_of(h.confidences), h.right_rank == 1)
+        (gap_of(h.confidences), h.right_rank == 1)
         for h in s.hits
         if h.photo_type is PhotoType.OBJECT and (h.right_rank > 0 or not answered)
     ]

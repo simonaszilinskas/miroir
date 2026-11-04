@@ -20,7 +20,7 @@ class ImageSkip(StrEnum):
     ON_REQUEST = "on_request"
     """`sur_demande.jpg`: POP shows the image on request only."""
     DUPLICATE = "duplicate"
-    """Same path listed twice in one record."""
+    """Same file listed twice in one record (same `bucket_key`)."""
     NOT_AN_IMAGE = "not_an_image"
     """A web address, a bare file name or a file that is no picture (PDF, web page). The full
     export's lists hold a few, from the bucket listing or old Mérimée links."""
@@ -95,9 +95,16 @@ def asset_url(path: str) -> str:
     return f"{POP_ASSET_HOST}/{quote(path.lstrip('/'), safe='/')}"
 
 
-def make_image_id(ref: str, url: str) -> str:
-    """Stable id: the same record and URL always give the same id, whatever the row order."""
-    return hashlib.sha1(f"{ref}\n{url}".encode(), usedforsecurity=False).hexdigest()[:16]
+def bucket_key(path: str) -> str:
+    """The file's key in the POP asset bucket, in one canonical form: no host, not
+    percent-encoded, Unicode NFC (the exports spell some accented names decomposed)."""
+    return unicodedata.normalize("NFC", path.strip().lstrip("/"))
+
+
+def make_image_id(ref: str, key: str) -> str:
+    """Stable id from the record and the file's `bucket_key`, whatever the row order, the
+    asset host or how the URL is encoded."""
+    return hashlib.sha1(f"{ref}\n{key}".encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 def _fold(text: str) -> str:

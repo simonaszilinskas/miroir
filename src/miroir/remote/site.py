@@ -120,6 +120,11 @@ def serve_site(settings: Settings, *, index: Path, state: Path, port: int) -> No
         on_visit=VisitMark(state / LAST_VISIT).touch,
         notice=CPU_NOTICE if service.degraded else None,
     )
+    if settings.mcp_tokens is not None:
+        from miroir.web.mcp import mount_mcp, parse_tokens  # noqa: PLC0415
+
+        tokens = parse_tokens(settings.mcp_tokens.get_secret_value())
+        mount_mcp(site, tokens=tokens, publishable=publishable)
     logger.info("conversation page: %s", "off (no key)" if model is None else model.model)
     # Caddy, on the same machine, is the only client: it sets X-Forwarded-For.
     uvicorn.run(

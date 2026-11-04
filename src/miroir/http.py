@@ -1,4 +1,10 @@
-"""HTTP with retries: back off when a server is busy or limits us, give up after a few tries."""
+"""HTTP with retries: back off when a server is busy or limits us, give up after a few tries.
+
+A POST may be paid work (a model call, a batch): it is sent again only when it provably did
+not run, so a retry never pays twice nor leaves a second batch behind. That is a connection
+that never opened, or an answer that says the request was not taken (`NOT_RUN_STATUS`).
+Reads (GET and the like) are retried on any dropped connection and busy answer.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 #: Answers that mean "try again later": timeout, too many requests, server trouble.
 RETRY_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+#: Answers that say the request was not taken at all: safe to send a POST again.
+NOT_RUN_STATUS = frozenset({408, 425, 429})
+#: Methods that change nothing when sent twice.
+IDEMPOTENT = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+#: Errors raised before the request left: the connection never opened.
+NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,19 +40,22 @@ def send(client: httpx.Client, request: httpx.Request, retry: Retry) -> httpx.Re
     """Send `request`, retrying busy and limit answers and dropped connections.
 
     Returns the last response, whatever its status, so callers decide what a 404 means.
-    Raises the transport error if the connection fails on every try.
+    Raises the transport error if the connection fails on every try, or at once for a POST
+    whose request may have reached the server.
     """
+    safe = request.method in IDEMPOTENT
+    statuses = RETRY_STATUS if safe else NOT_RUN_STATUS
     for attempt in range(1, retry.attempts + 1):
         last = attempt == retry.attempts
         try:
             response = client.send(request)
         except httpx.TransportError as err:
-            if last:
+            if last or not (safe or isinstance(err, NOT_SENT)):
                 raise
             wait = _wait(retry, attempt, None)
             logger.debug("%s %s: %s; retry in %.1f s", request.method, request.url, err, wait)
         else:
-            if response.status_code not in RETRY_STATUS or last:
+            if response.status_code not in statuses or last:
                 return response
             wait = _wait(retry, attempt, response.headers.get("retry-after"))
             logger.debug(

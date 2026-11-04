@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from miroir.config import REPO_ROOT, WEB_UI_BUILD, WEB_UI_SOURCE, Settings
+from miroir.jobs.privacy import ImageGate, PrivacyError, PublishableImages
 from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     LIGHTGLUE,
@@ -71,6 +72,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: The worker's calls the website makes: they carry a visitor's photo or words.
+SITE_CALLS = frozenset({"search", "detect", "tool_search"})
 #: The worker's port, on the machine's loopback only.
 WORKER_PORT = 8700
 #: Folders on the machine: the build context, and the bucket mirrors mounted into the worker.
@@ -85,6 +88,7 @@ WORKER_LIBRARIES = (
     "fastapi==0.143.0",
     "starlette==1.7.0",
     "uvicorn==0.54.0",
+    "mcp==2.3.0",
 )
 SSH_TIMEOUT_S = 10 * 60
 BUILD_TIMEOUT_S = 40 * 60
@@ -282,11 +286,23 @@ def build_image(
 
 
 class ScalewayCalls:
-    """The remote calls of a job, sent to the worker through the tunnel."""
+    """The remote calls of a job, sent to the worker through the tunnel.
 
-    def __init__(self, url: str, machine: GpuMachine) -> None:
-        self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S)
+    Every call that sends an image, or names one for the machine to read, first passes the
+    privacy gate (`ImageGate`): this is the one way images reach the machine.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        machine: GpuMachine,
+        gate: ImageGate,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S, transport=transport)
         self.gpu = machine
+        self.gate = gate
         self.busy_s = 0.0
         """Seconds spent in calls."""
 
@@ -316,7 +332,7 @@ class ScalewayCalls:
         msg = f"the worker was not ready after {READY_TIMEOUT_S} s"
         raise TimeoutError(msg)
 
-    def call(self, name: str, *args: object) -> object:
+    def _call(self, name: str, *args: object) -> object:
         start = time.monotonic()
         try:
             response = self._http.post("/call", content=pickle.dumps((name, args)))
@@ -327,33 +343,43 @@ class ScalewayCalls:
             raise RuntimeError(msg)
         return pickle.loads(response.content)  # noqa: S301 (our own worker, through SSH)
 
+    def site_call(self, name: str, *args: object) -> object:
+        """The website's calls (`ScalewayBackend`): a visitor's photo, never a POP image."""
+        if name not in SITE_CALLS:
+            msg = f"{name} is not a website call"
+            raise ValueError(msg)
+        return self._call(name, *args)
+
     def persist(self) -> dict[str, int]:
         """Send new weights and images back to their buckets."""
-        return cast("dict[str, int]", self.call("persist"))
+        return cast("dict[str, int]", self._call("persist"))
 
     # --- `RemoteCalls` (miroir.jobs.gpu_run) and the calls of steps C, E1 and the archive ------
 
     def embed(
         self, option: ModelOption, images: Sequence[Image], supplied: Sequence[SuppliedImage] = ()
     ) -> ChunkResult:
-        return cast("ChunkResult", self.call("embed", option, list(images), list(supplied)))
+        self.gate.check([*(i.image_id for i in images), *(s.image_id for s in supplied)])
+        return cast("ChunkResult", self._call("embed", option, list(images), list(supplied)))
 
     def embed_texts(
         self, option: ModelOption, ids: Sequence[str], texts: Sequence[str]
     ) -> ChunkResult:
-        return cast("ChunkResult", self.call("embed_texts", option, list(ids), list(texts)))
+        return cast("ChunkResult", self._call("embed_texts", option, list(ids), list(texts)))
 
     def fill_images(self, chunks: Sequence[Sequence[Image]]) -> dict[str, int]:
-        return cast("dict[str, int]", self.call("fill_images", [list(c) for c in chunks]))
+        self.gate.check([i.image_id for c in chunks for i in c])
+        return cast("dict[str, int]", self._call("fill_images", [list(c) for c in chunks]))
 
     def amstertime_download(self) -> int:
-        return cast("int", self.call("amstertime_download"))
+        return cast("int", self._call("amstertime_download"))
 
     def amstertime_embed(self, option: ModelOption) -> ChunkResult:
-        return cast("ChunkResult", self.call("amstertime_embed", option))
+        return cast("ChunkResult", self._call("amstertime_embed", option))
 
     def match(self, tasks: Sequence[MatchTask]) -> MatchChunk:
-        return cast("MatchChunk", self.call("match", list(tasks)))
+        self.gate.check([i for t in tasks for i in (t.image_id, *t.candidates)])
+        return cast("MatchChunk", self._call("match", list(tasks)))
 
     def detect_rooms(
         self,
@@ -361,19 +387,31 @@ class ScalewayCalls:
         photos: Sequence[RoomPhoto],
         given: Mapping[str, tuple[Box, ...]] | None = None,
     ) -> DetectChunk:
-        result = self.call("detect_rooms", option, list(photos), dict(given or {}))
+        self.gate.check([p.image_id for p in photos])
+        result = self._call("detect_rooms", option, list(photos), dict(given or {}))
         return cast("DetectChunk", result)
 
     def locate_artworks(
         self, scenes: Sequence[RoomPhoto], tasks: Sequence[LocateTask]
     ) -> list[Located]:
-        return cast("list[Located]", self.call("locate_artworks", list(scenes), list(tasks)))
+        self.gate.check([*(p.image_id for p in scenes), *(i for t in tasks for i in t.image_ids)])
+        return cast("list[Located]", self._call("locate_artworks", list(scenes), list(tasks)))
 
     def match_site(self, tasks: Sequence[SiteMatchTask]) -> list[SiteMatches]:
-        return cast("list[SiteMatches]", self.call("match_site", list(tasks)))
+        """Each query photo is checked by its `image_id`, also when it goes as bytes. The
+        candidates are images of the site's index, which the machine reads from its own images
+        bucket (`ImageGate.check_held`)."""
+        unnamed = [t.query_id for t in tasks if t.image_id is None]
+        if unnamed:
+            msg = f"{len(unnamed)} query photo(s) without an image id, e.g. {unnamed[0]}"
+            raise PrivacyError(msg)
+        self.gate.check([t.image_id for t in tasks if t.image_id is not None])
+        self.gate.check_held([c for t in tasks for c in t.candidates])
+        return cast("list[SiteMatches]", self._call("match_site", list(tasks)))
 
     def read_captions(self, model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
-        return cast("CaptionChunk", self.call("read_captions", model, list(photos)))
+        self.gate.check([p.image_id for p in photos])
+        return cast("CaptionChunk", self._call("read_captions", model, list(photos)))
 
 
 class ScalewayBackend:
@@ -388,7 +426,7 @@ class ScalewayBackend:
     async def _run(self, name: str, *args: object) -> object:
         import asyncio  # noqa: PLC0415
 
-        return await asyncio.to_thread(self._calls.call, name, self._index, *args)
+        return await asyncio.to_thread(self._calls.site_call, name, self._index, *args)
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         return cast("SearchResponse", await self._run("search", request))
@@ -414,10 +452,14 @@ def open_scaleway(
     purpose: str,
     offers: Sequence[Offer] = OFFERS,
     match: bool = False,
+    all_images: bool = False,
 ) -> Generator[ScalewayCalls]:
     """Start a GPU machine with the worker on it, yield its calls, then delete the machine.
 
-    `match` builds the image with the keypoint-matching libraries (`start_worker`)."""
+    `match` builds the image with the keypoint-matching libraries (`start_worker`).
+    `all_images` lets images of records that are not publishable go to the machine: the
+    full-sample index only (technical spec §9)."""
+    gate = ImageGate(lambda: PublishableImages.load(settings), all_images=all_images)
     keys = settings.scaleway_dir / "keys" / f"{time.time_ns()}"
     keys.mkdir(parents=True, mode=0o700)
     key = keys / "id_ed25519"
@@ -435,7 +477,7 @@ def open_scaleway(
             shell.wait()
             start_worker(shell, settings, machine, match=match)
             with shell.tunnel(WORKER_PORT) as port:
-                calls = ScalewayCalls(f"http://127.0.0.1:{port}", machine)
+                calls = ScalewayCalls(f"http://127.0.0.1:{port}", machine, gate)
                 try:
                     calls.wait_ready(shell)
                     yield calls

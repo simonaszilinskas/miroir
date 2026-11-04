@@ -10,6 +10,12 @@ export type Filters = {
   period: string;
 };
 
+const POP_NOTICES = "https://pop.culture.gouv.fr/";
+
+/** A link to a POP notice as the server gives it; nothing when it points anywhere else. */
+export const popLink = (url: string | null | undefined): string | undefined =>
+  url && url.startsWith(POP_NOTICES) ? url : undefined;
+
 export const NO_FILTERS: Filters = { collections: [], region: "", departement: "", domain: "", period: "" };
 
 export const filterCount = (f: Filters) =>
@@ -75,20 +81,39 @@ export type EntityPage = {
   photo_count: number;
 };
 
-/** One thing the agent did or said (`miroir.web.chat`, `/api/chat/events`). */
-export type ChatEvent =
+/** A record as a step or the shortlist shows it: a small image and a title. */
+export type Thumb = { entity_id: string; title: string; image_url: string | null };
+
+/** One thing the agent did or said (`miroir.web.chat`, `/api/chat/events`), with its number
+ * in the conversation (`n`, on what the turn wrote). */
+export type ChatEvent = (
   | { type: "status"; text: string }
-  | { type: "step"; id: number; state?: string; label: string; summary?: string; why?: string; error?: boolean; thumbs?: { entity_id: string; title: string; image_url: string }[] }
+  | {
+      type: "step";
+      id: number;
+      /** The tool's name, or "first_look". */
+      tool?: string;
+      state?: string;
+      label: string;
+      summary?: string;
+      why?: string;
+      error?: boolean;
+      thumbs?: Thumb[];
+      /** The model's best-so-far after this step. */
+      shortlist?: Thumb[];
+    }
   | { type: "say"; text: string }
-  | { type: "question"; text: string; choices: string[] }
+  | { type: "question"; text: string; choices: string[]; about?: string; position?: boolean; region?: boolean }
   | { type: "region"; text: string }
   | { type: "results"; cards: Card[]; found: string | null }
   | { type: "limit"; text: string }
   | { type: "error"; text: string }
   | { type: "end"; waiting: string }
   | { type: "continue"; after: number }
+  | { type: "replaced" }
   | { type: "ping" }
-  | { type: "visitor" };
+  | { type: "visitor" }
+) & { n?: number };
 
 export class ApiError extends Error {
   status: number;
@@ -145,30 +170,50 @@ export async function apiPatient<T>(path: string, options: { method?: string; bo
   }
 }
 
+/** Tries to read the stream again after a dropped connection, and the longest wait between. */
+const RECONNECTS = 5;
+const MAX_WAIT_MS = 8000;
+
 /** The agent's events from number `after` on, until its turn ends. The server closes each
- * stream after a while and says where to pick up. */
+ * stream after a while and says where to pick up; a stream that drops before the turn's end
+ * is read again from the event after the last one seen, after a growing wait. A stream that
+ * another one (another tab) replaced stops. */
 export async function* chatEvents(conversationId: string, after: number, alive: () => boolean): AsyncGenerator<ChatEvent> {
   let from = after;
+  let drops = 0;
   while (alive()) {
-    const response = await fetch("/api/chat/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, after: from }),
-      credentials: "same-origin",
-    });
-    if (response.status === 401) {
-      onLoggedOut();
-      return;
+    let resume = false;
+    try {
+      const response = await fetch("/api/chat/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conversationId, after: from }),
+        credentials: "same-origin",
+      });
+      if (response.status === 401) {
+        onLoggedOut();
+        return;
+      }
+      if (!response.ok || !response.body) throw await failure(response);
+      for await (const event of lines(response.body)) {
+        if (!alive() || event.type === "replaced") return;
+        if (event.type === "continue") {
+          from = event.after;
+          resume = true;
+          continue;
+        }
+        if (event.n !== undefined) from = event.n + 1;
+        drops = 0;
+        yield event;
+        if (event.type === "end") return;
+      }
+    } catch (err) {
+      if (err instanceof ApiError) throw err; // the server answered: no use asking again
     }
-    if (!response.ok || !response.body) throw await failure(response);
-    let last: ChatEvent | null = null;
-    for await (const event of lines(response.body)) {
-      if (!alive()) return;
-      last = event;
-      yield event;
-    }
-    if (last?.type !== "continue") return;
-    from = last.after;
+    if (resume) continue;
+    drops += 1;
+    if (drops > RECONNECTS) throw new Error("La connexion au serveur a été perdue. Relancez la recherche.");
+    await sleep(Math.min(500 * 2 ** drops, MAX_WAIT_MS));
   }
 }
 

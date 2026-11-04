@@ -6,17 +6,19 @@ yields the calls (`RemoteCalls`) and the machine's price (`RemoteCalls.machine`)
 Money (experiments.md §1 rule 5). Each remote call is timed on the Mac, from the call to its
 answer, and costs that many seconds at the machine's price: a little more than the machine's
 share of the bill, since the clock also runs while the call travels. The cost goes into the one
-project ledger, tagged with the service (`scaleway`), even when the call fails. Before every
-call, total spend plus the call's worst case (its timeout at full price) must stay inside the
-usable budget. A gallery run needs a 100-image probe of the same model and size on file, and
-stops once it costs `OVERRUN_FACTOR` times its projection. Each answer is saved to a checkpoint
-as it arrives, so a stopped run resumes without paying twice.
+project ledger, tagged with the service (`scaleway`), even when the call fails. While a call
+runs, its worst case (its timeout at full price) is held against the usable budget
+(`SpendLedger.hold`). A gallery run needs a 100-image probe of the same model and size on file,
+and stops once it costs `OVERRUN_FACTOR` times its projection (`run_limit`). Each answer is
+checked against the ids sent and saved to a checkpoint as it arrives, so a stopped run resumes
+without paying twice (`miroir.jobs.resumable`).
 
-Privacy (technical spec §9): only images of `publishable` records go to the GPU machine; a
-gallery with any other image is refused. Commons query photos are openly licensed: the Mac
-fetches them from Wikimedia (`CommonsImages`) and sends their bytes. The full-sample index is
-an exception (`all_images=True`): open models on our own machines may see every image,
-publishable or not (decided 2026-10-12 for the prototype). It never applies to OpenRouter.
+Privacy (technical spec §9): only images of `publishable` records go to the GPU machine. The
+calls check every image themselves (`RemoteCalls.gate`, an `ImageGate`), and runs check whole
+galleries before paying. Commons query photos are openly licensed: the Mac fetches them from
+Wikimedia (`CommonsImages`) and sends their bytes. The full-sample index is an exception
+(`all_images` on the gate): open models on our own machines may see every image, publishable or
+not (decided 2026-10-12 for the prototype). It never applies to OpenRouter.
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ import logging
 import random
 import re
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Sequence, Sized
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from itertools import batched
@@ -44,8 +48,7 @@ from miroir.eval.rerank import MatchChunk, MatchTask, append_matches, read_match
 from miroir.eval.sets import read_gallery, tune_query_images
 from miroir.eval.vectors import Route, RunInfo, VectorSet, read_vectors, write_vectors
 from miroir.images.fetch import Fetched
-from miroir.jobs.checkpoint import Checkpoint
-from miroir.jobs.privacy import PublishableImages
+from miroir.jobs.privacy import ImageGate
 from miroir.jobs.remote_spec import (
     CHUNK_IMAGES,
     CHUNK_TEXTS,
@@ -65,16 +68,19 @@ from miroir.jobs.remote_spec import (
     SuppliedImage,
     option,
 )
+from miroir.jobs.resumable import Resumable, check_answer, kept, refuse_existing
 from miroir.jobs.spend import (
     PROBE_IMAGES,
+    Bill,
     Budget,
     BudgetError,
+    RunSpend,
     Service,
     SpendKind,
     SpendLedger,
     check_probe,
     check_run,
-    spent_usd,
+    run_limit,
 )
 from miroir.records.model import Image
 
@@ -84,7 +90,6 @@ logger = logging.getLogger(__name__)
 OVERRUN_FACTOR = 1.5
 #: Start-up varies more than per-image time; small runs get this much slack on top.
 OVERRUN_MARGIN_USD = 0.25
-SERVICE_NAME = "the GPU machine"
 
 
 class SuppliesImages(Protocol):
@@ -99,6 +104,11 @@ class RemoteCalls(Protocol):
     @property
     def machine(self) -> Machine:
         """The machine every call runs on, at its price."""
+        ...
+
+    @property
+    def gate(self) -> ImageGate:
+        """The privacy check each call that sends an image runs before sending."""
         ...
 
     def embed(
@@ -197,30 +207,55 @@ def paid_call[T](
     model: str,
     items: int,
 ) -> Paid[T]:
-    """Make one remote call if its worst case fits the budget; log its cost, even on failure."""
+    """Make one remote call with its worst case held against the budget; log its cost, even
+    when it fails."""
     worst = machine.usd_per_s * timeout_s
-    spent = spent_usd(paid.ledger, paid.key_usage_usd)
-    if spent + worst > paid.budget.usable_usd:
-        msg = (
-            f"{run}: a call may cost up to ${worst:.2f} and ${spent:.2f} is spent; together "
-            f"that passes the ${paid.budget.usable_usd:.2f} usable budget"
-        )
-        raise BudgetError(msg)
-    start = paid.clock()
-    try:
-        result = call()
-    finally:
-        wall = paid.clock() - start
-        paid.ledger.record(
-            kind,
-            option=option,
-            run=run,
-            model=model,
-            cost_usd=wall * machine.usd_per_s,
-            items=items,
-            service=paid.service,
-        )
+    hold = paid.ledger.hold(
+        paid.budget,
+        paid.key_usage_usd,
+        worst_usd=worst,
+        expected_usd=worst,
+        kind=kind,
+        option=option,
+        run=run,
+        model=model,
+        items=items,
+        service=paid.service,
+    )
+    return timed(hold, call, machine, paid.clock)
+
+
+def timed[T](
+    hold: AbstractContextManager[Bill],
+    call: Callable[[], T],
+    machine: Machine,
+    clock: Callable[[], float] = time.monotonic,
+) -> Paid[T]:
+    """Run `call` inside a hold. It costs its wall time at the machine's price."""
+    with hold as bill:
+        start = clock()
+        try:
+            result = call()
+        finally:
+            wall = clock() - start
+            bill.cost_usd = wall * machine.usd_per_s
     return Paid(result, wall * machine.usd_per_s, wall)
+
+
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    """One call's images: POP images the machine reads itself, and images sent as bytes."""
+
+    images: Sequence[Image] = ()
+    supplied: Sequence[SuppliedImage] = ()
+
+    @property
+    def ids(self) -> list[str]:
+        return [*(i.image_id for i in self.images), *(s.image_id for s in self.supplied)]
+
+
+#: Turns the ids still to embed into the calls' chunks, counting images it could not fetch.
+type Chunker = Callable[[Sequence[str], Counter[str]], Iterator[Chunk]]
 
 
 class GpuRunner:
@@ -234,13 +269,10 @@ class GpuRunner:
         key_usage_usd: float | None = None,
         commons: CommonsImages | None = None,
         clock: Callable[[], float] = time.monotonic,
-        all_images: bool = False,
         service: Service = Service.SCALEWAY,
     ) -> None:
         self.settings = settings
         self._service = service
-        self._all_images = all_images
-        """Send images of records that are not publishable too (full-sample index only)."""
         self._calls = calls
         self._commons = commons
         """Fetches Commons query photos on the Mac; needed only to embed them."""
@@ -249,9 +281,8 @@ class GpuRunner:
         self._clock = clock
         self.ledger = SpendLedger(settings.spend_ledger)
         self.budget = Budget.from_settings(settings)
-        self._loaded: PublishableImages | None = None
 
-    # --- the three entry points -------------------------------------------------------------
+    # --- the entry points -------------------------------------------------------------------
 
     def probe(self, option_id: str, gallery: str) -> tuple[GpuProbe, int]:
         """Embed 100 images of `gallery`, store time and cost. Returns it and the gallery size."""
@@ -264,20 +295,13 @@ class GpuRunner:
             raise BudgetError(msg)
         sample = random.Random(SEED).sample(ids, min(PROBE_IMAGES, len(ids)))
         run = f"probe-{run_name(opt, gallery)}"
-        paid = self._paid(
-            lambda: self._calls.embed(opt, self._images(sample)),
-            timeout_s=CHUNK_TIMEOUT_S,
-            kind=SpendKind.PROBE,
-            option=opt.id,
-            run=run,
-            model=opt.model,
-            items=len(sample),
-        )
+        spend = self._spend(SpendKind.PROBE, opt.id, run, opt.model, limit_usd=left)
+        paid = self._timed(spend, lambda: self._calls.embed(opt, self._images(sample)), sample)
         done = paid.result
         if not done.ids:
             msg = f"probe for {opt.id}: no image could be embedded ({done.skips})"
             raise RuntimeError(msg)
-        _check_chunk(done, opt)
+        check_answer(run, sample, done.ids, done.vectors)
         result = GpuProbe(
             option=opt.id,
             model=opt.model,
@@ -317,77 +341,16 @@ class GpuRunner:
         vectors are taken as they are instead of being paid for again.
         """
         opt = option(option_id)
-        run = run_name(opt, gallery)
-        outputs = output_runs(opt, gallery)
-        for name in outputs:
-            _refuse_existing(self.settings.vectors_path(name))
         ids = self._gallery(gallery)
-        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
-        held = set(checkpoint.ids)
-        reused = {name: self._reuse(opt, name, set(ids), held, checkpoint) for name in reuse}
-        todo = [i for i in ids if i not in held]
-        probe = self.probe_for(opt)
-        projected = check_run(
-            self.budget,
-            self.ledger,
-            self._key_usage,
-            probe,
-            option=opt.id,
-            model=opt.model,
-            resolution=opt.resolution,
-            count=len(todo),
+
+        def chunks(todo: Sequence[str], _skips: Counter[str]) -> Iterator[Chunk]:
+            for chunk in _chunks(todo):
+                yield Chunk(images=self._images(chunk))
+
+        outputs = output_runs(opt, gallery)
+        return self._embed_run(
+            opt, gallery, ids, chunks, outputs=outputs, max_usd=max_usd, reuse=reuse
         )
-        if max_usd is not None and projected > max_usd:
-            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
-            raise BudgetError(msg)
-        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
-        logger.info(
-            "%s: %d images to send (%d saved before), about $%.2f (stops past $%.2f)",
-            run,
-            len(todo),
-            len(held),
-            projected,
-            limit,
-        )
-        start = self._clock()
-        skips: dict[str, int] = {}
-        cost = 0.0
-        for paid in self._embed_chunks(opt, run, todo):
-            cost += paid.cost_usd
-            _check_chunk(paid.result, opt)
-            if paid.result.ids:
-                checkpoint.append(list(paid.result.ids), _unit_float16(paid.result.vectors))
-            for reason, n in paid.result.skips.items():
-                skips[reason] = skips.get(reason, 0) + n
-            logger.info("%s: %d/%d images, $%.4f", run, len(checkpoint.ids), len(ids), cost)
-            if cost > limit:
-                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
-                raise BudgetError(msg)
-        # Cost of the whole run, including the sessions before a resume.
-        total = self.ledger.total(SpendKind.RUN, run=run)
-        info = self._info(
-            opt,
-            gallery=gallery,
-            cost=total,
-            wall=self._clock() - start,
-            skips=skips,
-        )
-        if reused:
-            kept = ", ".join(f"{n} ({c})" for n, c in reused.items())
-            info = replace(info, notes=f"{info.notes}; vectors reused from {kept}, not counted")
-        vectors = checkpoint.vectors()
-        parts = np.split(vectors, len(outputs), axis=1)
-        written = tuple(
-            write_vectors(
-                self.settings.vectors_path(name),
-                checkpoint.ids,
-                part,
-                _one_pooling(info, pooling, shared=len(outputs) > 1),
-            )
-            for (name, pooling), part in zip(outputs.items(), parts, strict=True)
-        )
-        checkpoint.remove()
-        return written
 
     def embed_queries(
         self, option_id: str, set_ids: Sequence[str], *, max_usd: float | None = None
@@ -398,128 +361,29 @@ class GpuRunner:
         photos, fetched here and sent as bytes. POP query images that are not publishable are
         left out. Needs a probe of the option, like a gallery run.
         """
-        opt = option(option_id)
         ids, label = tune_query_images(self.settings, set_ids)
-        ids = self._store().only_publishable(ids)
-        run = run_name(opt, label)
-        out = self.settings.vectors_path(run)
-        _refuse_existing(out)
-        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
-        held = set(checkpoint.ids)
-        pop, commons = split_commons(i for i in ids if i not in held)
-        projected = check_run(
-            self.budget,
-            self.ledger,
-            self._key_usage,
-            self.probe_for(opt),
-            option=opt.id,
-            model=opt.model,
-            resolution=opt.resolution,
-            count=len(pop) + len(commons),
-        )
-        if max_usd is not None and projected > max_usd:
-            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
-            raise BudgetError(msg)
-        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
-        logger.info(
-            "%s: %d POP and %d Commons images to send (%d saved before), about $%.2f",
-            run,
-            len(pop),
-            len(commons),
-            len(held),
-            projected,
-        )
-        start = self._clock()
-        skips: dict[str, int] = {}
-        cost = 0.0
-        for images, supplied in self._query_chunks(pop, commons, skips):
-            paid = self._paid(
-                lambda images=images, supplied=supplied: self._calls.embed(opt, images, supplied),
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option=opt.id,
-                run=run,
-                model=opt.model,
-                items=len(images) + len(supplied),
-            )
-            cost += paid.cost_usd
-            _keep_chunk(paid.result, opt, checkpoint, skips)
-            if cost > limit:
-                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
-                raise BudgetError(msg)
-        info = self._info(
-            opt,
-            gallery=label,
-            cost=self.ledger.total(SpendKind.RUN, run=run),
-            wall=self._clock() - start,
-            skips=skips,
-        )
-        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
-        checkpoint.remove()
-        return written
+        return self.embed_query_images(option_id, ids, label, max_usd=max_usd)
 
-    def embed_texts(
-        self,
-        option_id: str,
-        label: str,
-        ids: Sequence[str],
-        texts: Sequence[str],
-        *,
-        max_usd: float,
+    def embed_query_images(
+        self, option_id: str, ids: Sequence[str], label: str, *, max_usd: float | None = None
     ) -> VectorSet:
-        """Embed search words (no image leaves the Mac) into the run `<option>-<label>`.
-
-        Words are tiny next to images, so no probe: each call's worst case is checked against
-        the budget, and the run stops before a call once it has cost `max_usd`.
-        """
+        """`embed_queries` on given query image ids, into the run named for `label` (round
+        R4 embeds the sealed Commons photos this way, `miroir.eval.r4`)."""
         opt = option(option_id)
-        if opt.family is not Family.EMBEDDINGGEMMA:
-            msg = f"{opt.id}: only EmbeddingGemma 2 embeds words here"
+        ids = self._calls.gate.store.only_publishable(ids)
+        if split_commons(ids)[1] and self._commons is None:
+            msg = "Commons photo(s) to embed, but no Commons fetcher was given"
             raise ValueError(msg)
-        if len(ids) != len(texts) or len(set(ids)) != len(ids) or not all(texts):
-            msg = "embed_texts needs one non-empty text per id, and distinct ids"
-            raise ValueError(msg)
-        run = run_name(opt, label)
-        out = self.settings.vectors_path(run)
-        _refuse_existing(out)
-        start = self._clock()
-        cost = 0.0
-        done_ids: list[str] = []
-        rows: list[NDArray[np.float32]] = []
-        for chunk in batched(range(len(ids)), CHUNK_TEXTS):
-            if cost >= max_usd:
-                msg = f"{run}: cost ${cost:.4f}, at its ${max_usd:.2f} limit; stopped"
-                raise BudgetError(msg)
-            chunk_ids = [ids[i] for i in chunk]
-            chunk_texts = [texts[i] for i in chunk]
-            paid = self._paid(
-                lambda a=chunk_ids, b=chunk_texts: self._calls.embed_texts(opt, a, b),
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option=opt.id,
-                run=run,
-                model=opt.model,
-                items=len(chunk_ids),
-            )
-            cost += paid.cost_usd
-            _check_chunk(paid.result, opt)
-            if list(paid.result.ids) != chunk_ids:
-                msg = f"{run}: the answer's ids do not match the words sent"
-                raise ValueError(msg)
-            done_ids.extend(chunk_ids)
-            rows.append(paid.result.vectors)
-        info = replace(
-            self._info(
-                opt,
-                gallery=label,
-                cost=cost,
-                wall=self._clock() - start,
-                skips={},
-            ),
-            pooling="text",
-        )
-        info = replace(info, notes=f"{info.notes}; words with the {TEXT_PROMPT!r} prompt")
-        return write_vectors(out, done_ids, np.concatenate(rows), info)
+
+        def chunks(todo: Sequence[str], skips: Counter[str]) -> Iterator[Chunk]:
+            pop, commons = split_commons(todo)
+            for chunk in _chunks(pop):
+                yield Chunk(images=self._images(chunk))
+            if commons and self._commons is not None:
+                yield from _supplied_chunks(self._commons, commons, skips)
+
+        (written,) = self._embed_run(opt, label, ids, chunks, max_usd=max_usd)
+        return written
 
     def embed_supplied(
         self,
@@ -537,137 +401,71 @@ class GpuRunner:
         the option, like a gallery run; resumes from its checkpoint.
         """
         opt = option(option_id)
-        pop, _ = split_commons(ids)
-        self._store().check(pop, SERVICE_NAME)
-        run = run_name(opt, label)
-        out = self.settings.vectors_path(run)
-        _refuse_existing(out)
-        checkpoint = Checkpoint(self.settings.checkpoint_path(run))
-        held = set(checkpoint.ids)
-        todo = [i for i in dict.fromkeys(ids) if i not in held]
-        projected = check_run(
-            self.budget,
-            self.ledger,
-            self._key_usage,
-            self.probe_for(opt),
-            option=opt.id,
-            model=opt.model,
-            resolution=opt.resolution,
-            count=len(todo),
-        )
-        if max_usd is not None and projected > max_usd:
-            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
-            raise BudgetError(msg)
-        limit = projected * OVERRUN_FACTOR + OVERRUN_MARGIN_USD
-        logger.info(
-            "%s: %d images to send as bytes (%d saved before), about $%.2f (stops past $%.2f)",
-            run,
-            len(todo),
-            len(held),
-            projected,
-            limit,
-        )
-        start = self._clock()
-        skips: dict[str, int] = {}
-        cost = 0.0
-        for chunk in _chunks(todo):
-            supplied: list[SuppliedImage] = []
-            for fetched in source.fetch_all(chunk):
-                if fetched.jpeg is None:
-                    reason = f"fetch_{fetched.skip.value if fetched.skip else 'unknown'}"
-                    skips[reason] = skips.get(reason, 0) + 1
-                else:
-                    supplied.append(SuppliedImage(fetched.image_id, fetched.jpeg))
-            if not supplied:
-                continue
-            paid = self._paid(
-                lambda supplied=supplied: self._calls.embed(opt, [], supplied),
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option=opt.id,
-                run=run,
-                model=opt.model,
-                items=len(supplied),
-            )
-            cost += paid.cost_usd
-            _keep_chunk(paid.result, opt, checkpoint, skips)
-            logger.info("%s: %d/%d images, $%.4f", run, len(checkpoint.ids), len(ids), cost)
-            if cost > limit:
-                msg = f"{run}: cost ${cost:.4f}, over its ${limit:.4f} limit; stopped"
-                raise BudgetError(msg)
-        info = self._info(
-            opt,
-            gallery=label,
-            cost=self.ledger.total(SpendKind.RUN, run=run),
-            wall=self._clock() - start,
-            skips=skips,
-        )
-        written = write_vectors(out, checkpoint.ids, checkpoint.vectors(), info)
-        checkpoint.remove()
+        self._calls.gate.check(ids)
+
+        def chunks(todo: Sequence[str], skips: Counter[str]) -> Iterator[Chunk]:
+            return _supplied_chunks(source, todo, skips)
+
+        (written,) = self._embed_run(opt, label, ids, chunks, max_usd=max_usd)
         return written
 
-    def _query_chunks(
-        self, pop: Sequence[str], commons: Sequence[str], skips: dict[str, int]
-    ) -> Iterator[tuple[list[Image], list[SuppliedImage]]]:
-        """POP images to fetch remotely, then Commons photos fetched here and sent as bytes."""
-        for chunk in _chunks(pop):
-            yield self._images(chunk), []
-        if not commons:
-            return
-        fetcher = self._commons
-        if fetcher is None:
-            msg = f"{len(commons)} Commons photo(s) to embed, but no Commons fetcher was given"
-            raise ValueError(msg)
-        for chunk in _chunks(commons):
-            supplied: list[SuppliedImage] = []
-            for fetched in fetcher.fetch_all(chunk):
-                if fetched.jpeg is None:
-                    reason = f"fetch_{fetched.skip.value if fetched.skip else 'unknown'}"
-                    skips[reason] = skips.get(reason, 0) + 1
-                else:
-                    supplied.append(SuppliedImage(fetched.image_id, fetched.jpeg))
-            yield [], supplied
+    def embed_texts(
+        self,
+        option_id: str,
+        label: str,
+        ids: Sequence[str],
+        texts: Sequence[str],
+        *,
+        max_usd: float,
+    ) -> VectorSet:
+        """Embed search words (no image leaves the Mac) into the run `<option>-<label>`.
 
-    def _embed_chunks(
-        self, opt: ModelOption, run: str, todo: Sequence[str]
-    ) -> Iterator[Paid[ChunkResult]]:
-        """Send `todo` in chunks, one after another; yield each answer as it arrives."""
-        for chunk in _chunks(todo):
-            yield self._paid(
-                lambda chunk=chunk: self._calls.embed(opt, self._images(chunk)),
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option=opt.id,
-                run=run,
-                model=opt.model,
-                items=len(chunk),
-            )
-
-    def _reuse(
-        self, opt: ModelOption, name: str, wanted: set[str], held: set[str], checkpoint: Checkpoint
-    ) -> int:
-        """Copy the vectors of an earlier run into the checkpoint. Returns how many were taken.
-
-        Refused unless the run used the same model, size, pooling and number type on a GPU:
-        on Modal before 2026-11-03 (notes "Modal L4, float32") or on Scaleway since.
+        Words are tiny next to images, so no probe: each call's worst case is held against
+        the budget, and the run stops before a call once it has cost `max_usd`.
         """
-        done = read_vectors(self.settings.vectors_path(name))
-        info = done.info
-        same = (info.model, info.resolution, info.pooling) == (
-            opt.model,
-            opt.resolution,
-            opt.pooling.value,
-        ) and _made_on_a_gpu(info.notes, opt)
-        if not same:
-            msg = f"{name} was not embedded with the settings of {opt.id}; not reused"
+        opt = option(option_id)
+        if opt.family is not Family.EMBEDDINGGEMMA:
+            msg = f"{opt.id}: only EmbeddingGemma 2 embeds words here"
             raise ValueError(msg)
-        rows = [n for n, i in enumerate(done.ids) if i in wanted and i not in held]
-        for block in batched(rows, CHUNK_IMAGES * 10):
-            picked = [done.ids[n] for n in block]
-            checkpoint.append(picked, np.asarray(done.vectors[list(block)], dtype=np.float16))
-            held.update(picked)
-        logger.info("%s: reused %d vectors from %s", opt.id, len(rows), name)
-        return len(rows)
+        if len(ids) != len(texts) or len(set(ids)) != len(ids) or not all(texts):
+            msg = "embed_texts needs one non-empty text per id, and distinct ids"
+            raise ValueError(msg)
+        run = run_name(opt, label)
+        out = self.settings.vectors_path(run)
+        refuse_existing(out)
+        start = self._clock()
+        spend = self._spend(SpendKind.RUN, opt.id, run, opt.model, limit_usd=max_usd)
+        done_ids: list[str] = []
+        rows: list[NDArray[np.float32]] = []
+        for chunk in batched(range(len(ids)), CHUNK_TEXTS):
+            chunk_ids = [ids[i] for i in chunk]
+            chunk_texts = [texts[i] for i in chunk]
+            if spend.spent_usd >= max_usd:
+                msg = f"{run}: cost ${spend.spent_usd:.4f}, at its ${max_usd:.2f} limit; stopped"
+                raise BudgetError(msg)
+            paid = self._timed(
+                spend,
+                lambda a=chunk_ids, b=chunk_texts: self._calls.embed_texts(opt, a, b),
+                chunk_ids,
+            )
+            check_answer(run, chunk_ids, paid.result.ids, paid.result.vectors)
+            if list(paid.result.ids) != chunk_ids:
+                msg = f"{run}: the answer's ids do not match the words sent"
+                raise ValueError(msg)
+            done_ids.extend(chunk_ids)
+            rows.append(paid.result.vectors)
+        info = replace(
+            self._info(
+                opt,
+                gallery=label,
+                cost=spend.spent_usd,
+                wall=self._clock() - start,
+                skips={},
+            ),
+            pooling="text",
+        )
+        info = replace(info, notes=f"{info.notes}; words with the {TEXT_PROMPT!r} prompt")
+        return write_vectors(out, done_ids, np.concatenate(rows), info)
 
     def probe_for(self, opt: ModelOption) -> GpuProbe | None:
         """The option's probe, else one of an option with the same model, size and resize.
@@ -694,10 +492,9 @@ class GpuRunner:
         """
         ids = self._gallery(gallery)
         chunks = list(_chunks(ids))
-        paid = self._paid(
+        paid = self._hold_call(
             lambda: self._calls.fill_images([self._images(c) for c in chunks]),
             timeout_s=FILL_TIMEOUT_S * len(chunks),
-            kind=SpendKind.RUN,
             option="images",
             run=f"images-{gallery}",
             model="none",
@@ -715,28 +512,24 @@ class GpuRunner:
         path = self.settings.matches_path(name)
         held = read_matches(path)
         todo = [t for t in tasks if t.query_id not in held]
-        self._images(sorted({i for t in todo for i in (t.image_id, *t.candidates)}))  # privacy
+        self._calls.gate.check(sorted({i for t in todo for i in (t.image_id, *t.candidates)}))
         logger.info("%s: %d queries to match (%d saved before)", name, len(todo), len(held))
-        cost = 0.0
+        spend = self._spend(SpendKind.RUN, "E1", name, "aliked+lightglue", limit_usd=max_usd)
         missing: set[str] = set()
         for chunk in batched(todo, MATCH_QUERIES):
-            if cost >= max_usd:
-                msg = f"{name}: cost ${cost:.4f}, at its ${max_usd:.2f} limit; stopped"
+            if spend.spent_usd >= max_usd:
+                msg = f"{name}: cost ${spend.spent_usd:.4f}, at its ${max_usd:.2f} limit; stopped"
                 raise BudgetError(msg)
-            paid = self._paid(
-                lambda chunk=chunk: self._calls.match(chunk),
-                timeout_s=CHUNK_TIMEOUT_S,
-                kind=SpendKind.RUN,
-                option="E1",
-                run=name,
-                model="aliked+lightglue",
-                items=len(chunk),
-            )
-            cost += paid.cost_usd
+            asked = {t.query_id for t in chunk}
+            paid = self._timed(spend, lambda chunk=chunk: self._calls.match(chunk), chunk)
+            answered = [q.query_id for q in paid.result.queries]
+            if len(set(answered)) != len(answered) or not set(answered) <= asked:
+                msg = f"{name}: the answer holds queries that were not asked, or twice"
+                raise ValueError(msg)
             append_matches(path, paid.result.queries)
             missing.update(paid.result.missing)
             held.update({q.query_id: q for q in paid.result.queries})
-            logger.info("%s: %d/%d queries, $%.4f", name, len(held), len(tasks), cost)
+            logger.info("%s: %d/%d queries, $%.4f", name, len(held), len(tasks), spend.spent_usd)
         if missing:
             logger.warning("%s: %d image(s) could not be read on the machine", name, len(missing))
         return len(held)
@@ -749,29 +542,27 @@ class GpuRunner:
         opt = R0_OPTIONS[name]
         run = run_name(opt, amstertime.GALLERY)
         out = self.settings.vectors_path(run)
-        _refuse_existing(out)
+        refuse_existing(out)
         start = self._clock()
-        downloaded = self._paid(
+        downloaded = self._hold_call(
             self._calls.amstertime_download,
             timeout_s=DOWNLOAD_TIMEOUT_S,
-            kind=SpendKind.RUN,
             option="R0",
             run=f"{run}-download",
             model="none",
             items=0,
         )
         logger.info("AmsterTime on the machine: %d images", downloaded.result)
-        paid = self._paid(
+        paid = self._hold_call(
             lambda: self._calls.amstertime_embed(opt),
             timeout_s=R0_TIMEOUT_S,
-            kind=SpendKind.RUN,
             option="R0",
             run=run,
             model=opt.model,
             items=downloaded.result,
         )
         done = paid.result
-        _check_chunk(done, opt)
+        check_answer(run, done.ids, done.ids, done.vectors)
         amstertime.check_ids(done.ids)
         cost = downloaded.cost_usd + paid.cost_usd
         info = self._info(
@@ -786,14 +577,153 @@ class GpuRunner:
         )
         return write_vectors(out, done.ids, done.vectors, info)
 
+    # --- the one resumable run --------------------------------------------------------------
+
+    def _embed_run(
+        self,
+        opt: ModelOption,
+        label: str,
+        wanted: Sequence[str],
+        chunks: Chunker,
+        *,
+        outputs: dict[str, Pooling] | None = None,
+        max_usd: float | None = None,
+        reuse: Sequence[str] = (),
+    ) -> tuple[VectorSet, ...]:
+        """Probe check, limit, one paid call per chunk saved as it arrives, vectors written.
+
+        `outputs` names the vector runs (several when one row holds several poolings); by
+        default, the one run `<option>-<label>`.
+        """
+        run = run_name(opt, label)
+        outputs = outputs or {run: opt.pooling}
+        job = Resumable(
+            run,
+            self.settings.checkpoint_path(run),
+            [self.settings.vectors_path(n) for n in outputs],
+        )
+        reused = {name: self._reuse(opt, name, set(wanted), job) for name in reuse}
+        todo = job.todo(wanted)
+        projected = check_run(
+            self.budget,
+            self.ledger,
+            self._key_usage,
+            self.probe_for(opt),
+            option=opt.id,
+            model=opt.model,
+            resolution=opt.resolution,
+            count=len(todo),
+        )
+        if max_usd is not None and projected > max_usd:
+            msg = f"{run}: projected ${projected:.2f}, over the ${max_usd:.2f} asked for; not run"
+            raise BudgetError(msg)
+        limit = run_limit(
+            self.budget,
+            self.ledger,
+            self._key_usage,
+            projected,
+            factor=OVERRUN_FACTOR,
+            margin_usd=OVERRUN_MARGIN_USD,
+        )
+        logger.info(
+            "%s: %d images to send (%d saved before), about $%.2f (stops past $%.2f)",
+            run,
+            len(todo),
+            len(job.checkpoint.ids),
+            projected,
+            limit,
+        )
+        start = self._clock()
+        spend = self._spend(SpendKind.RUN, opt.id, run, opt.model, limit_usd=limit)
+        for chunk in chunks(todo, job.skips):
+            asked = chunk.ids
+            if not asked:
+                continue
+            paid = self._timed(
+                spend, lambda c=chunk: self._calls.embed(opt, c.images, c.supplied), asked
+            )
+            job.keep(asked, paid.result.ids, paid.result.vectors, paid.result.skips)
+            held = len(job.checkpoint.ids)
+            logger.info("%s: %d/%d images, $%.4f", run, held, len(wanted), spend.spent_usd)
+        # Cost of the whole run, including the sessions before a resume.
+        info = self._info(
+            opt,
+            gallery=label,
+            cost=self.ledger.total(SpendKind.RUN, run=run),
+            wall=self._clock() - start,
+            skips=dict(job.skips),
+        )
+        if reused:
+            kept_from = ", ".join(f"{n} ({c})" for n, c in reused.items())
+            info = replace(
+                info, notes=f"{info.notes}; vectors reused from {kept_from}, not counted"
+            )
+        ids, vectors = job.finish(wanted)
+        parts = np.split(vectors, len(outputs), axis=1)
+        written = tuple(
+            write_vectors(
+                self.settings.vectors_path(name),
+                ids,
+                part,
+                _one_pooling(info, pooling, shared=len(outputs) > 1),
+            )
+            for (name, pooling), part in zip(outputs.items(), parts, strict=True)
+        )
+        job.checkpoint.remove()
+        return written
+
+    def _reuse(self, opt: ModelOption, name: str, wanted: set[str], job: Resumable) -> int:
+        """Copy the vectors of an earlier run into the checkpoint. Returns how many were taken.
+
+        Refused unless the run used the same model, size, pooling and number type on a GPU:
+        on Modal before 2026-11-03 (notes "Modal L4, float32") or on Scaleway since.
+        """
+        done = read_vectors(self.settings.vectors_path(name))
+        info = done.info
+        same = (info.model, info.resolution, info.pooling) == (
+            opt.model,
+            opt.resolution,
+            opt.pooling.value,
+        ) and _made_on_a_gpu(info.notes, opt)
+        if not same:
+            msg = f"{name} was not embedded with the settings of {opt.id}; not reused"
+            raise ValueError(msg)
+        held = set(job.checkpoint.ids)
+        rows = [n for n, i in enumerate(done.ids) if i in wanted and i not in held]
+        for block in batched(rows, CHUNK_IMAGES * 10):
+            picked = [done.ids[n] for n in block]
+            job.checkpoint.append(picked, np.asarray(done.vectors[list(block)], dtype=np.float16))
+        logger.info("%s: reused %d vectors from %s", opt.id, len(rows), name)
+        return len(rows)
+
     # --- helpers ----------------------------------------------------------------------------
 
-    def _paid[T](
+    def _spend(
+        self, kind: SpendKind, option_id: str, run: str, model: str, *, limit_usd: float
+    ) -> RunSpend:
+        return RunSpend(
+            self.ledger,
+            self.budget,
+            self._key_usage,
+            limit_usd=limit_usd,
+            per_item_usd=0.0,  # a call's cost is its measured wall time
+            kind=kind,
+            option=option_id,
+            run=run,
+            model=model,
+            service=self._service,
+        )
+
+    def _timed[T](self, spend: RunSpend, call: Callable[[], T], items: Sized) -> Paid[T]:
+        worst = self._calls.machine.usd_per_s * CHUNK_TIMEOUT_S
+        hold = spend.call(len(items), worst_usd=worst)
+        return timed(hold, call, self._calls.machine, self._clock)
+
+    def _hold_call[T](
         self,
         call: Callable[[], T],
         *,
         timeout_s: int,
-        kind: SpendKind,
         option: str,
         run: str,
         model: str,
@@ -804,7 +734,7 @@ class GpuRunner:
             call,
             machine=self._calls.machine,
             timeout_s=timeout_s,
-            kind=kind,
+            kind=SpendKind.RUN,
             option=option,
             run=run,
             model=model,
@@ -817,23 +747,13 @@ class GpuRunner:
             msg = f"no gallery {name!r} at {path}: run `miroir testsets build` first"
             raise FileNotFoundError(msg)
         ids = read_gallery(self.settings, name)
-        self._check(ids)
+        self._calls.gate.check(ids)  # the whole gallery, before paying for any of it
         return ids
 
     def _images(self, ids: Sequence[str]) -> list[Image]:
-        self._check(ids)
-        return [self._store().images[i] for i in ids]
-
-    def _check(self, ids: Sequence[str]) -> None:
-        if self._all_images:
-            self._store().check_known(ids)
-        else:
-            self._store().check(ids, SERVICE_NAME)
-
-    def _store(self) -> PublishableImages:
-        if self._loaded is None:
-            self._loaded = PublishableImages.load(self.settings)
-        return self._loaded
+        self._calls.gate.check(ids)
+        images = self._calls.gate.store.images
+        return [images[i] for i in ids]
 
     def _info(
         self,
@@ -863,6 +783,19 @@ class GpuRunner:
         )
 
 
+def _supplied_chunks(
+    source: SuppliesImages, ids: Sequence[str], skips: Counter[str]
+) -> Iterator[Chunk]:
+    """Images fetched on the Mac and sent as bytes, one call per chunk."""
+    for chunk in _chunks(ids):
+        supplied = [
+            SuppliedImage(f.image_id, f.jpeg)
+            for f in source.fetch_all(chunk)
+            if kept(f, skips) and f.jpeg is not None
+        ]
+        yield Chunk(supplied=supplied)
+
+
 def _made_on_a_gpu(notes: str, opt: ModelOption) -> bool:
     """Whether run notes start "Modal <gpu>, <dtype>" or "Scaleway <gpu>, <dtype>"."""
     return re.match(rf"(Modal|Scaleway) [^,;]+, {re.escape(opt.dtype)}\b", notes) is not None
@@ -878,36 +811,6 @@ def _one_pooling(info: RunInfo, pooling: Pooling, *, shared: bool) -> RunInfo:
 def _chunks(ids: Sequence[str]) -> Iterator[list[str]]:
     for chunk in batched(ids, CHUNK_IMAGES):
         yield list(chunk)
-
-
-def _keep_chunk(
-    result: ChunkResult, opt: ModelOption, checkpoint: Checkpoint, skips: dict[str, int]
-) -> None:
-    """Check one answer, save its vectors to the checkpoint, add up what it skipped."""
-    _check_chunk(result, opt)
-    if result.ids:
-        checkpoint.append(list(result.ids), _unit_float16(result.vectors))
-    for reason, n in result.skips.items():
-        skips[reason] = skips.get(reason, 0) + n
-    logger.info("%s: %d images embedded so far", opt.id, len(checkpoint.ids))
-
-
-def _check_chunk(result: ChunkResult, opt: ModelOption) -> None:
-    rows = result.vectors.shape[0] if result.vectors.ndim == 2 else -1
-    if rows != len(result.ids):
-        msg = f"{opt.id}: {len(result.ids)} ids but vectors of shape {result.vectors.shape}"
-        raise ValueError(msg)
-
-
-def _unit_float16(vectors: NDArray[np.float32]) -> NDArray[np.float16]:
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    return (vectors / np.where(norms == 0, 1, norms)).astype(np.float16)
-
-
-def _refuse_existing(out: Path) -> None:
-    if out.exists() and any(out.iterdir()):
-        msg = f"{out} already exists; a finished run is never overwritten"
-        raise FileExistsError(msg)
 
 
 def _today() -> date:

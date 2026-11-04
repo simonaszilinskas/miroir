@@ -4,7 +4,7 @@
 |---|---|---|
 | `<prefix>-weights` | `miroir-weights` | Hugging Face and torch hub caches (`hf/`, `torch/`) |
 | `<prefix>-benchmarks` | `miroir-benchmarks` | AmsterTime |
-| `<prefix>-images` | `miroir-images` | POP images at 512 px, `<id[:2]>/<id>.jpg` |
+| `<prefix>-images` | `miroir-images` | POP images at 512 px, `512-v2/<id[:2]>/<id>.jpg` |
 | `<prefix>-index` | `miroir-web-index` | The website's index bundles, `<name>/<file>` |
 
 The GPU machine mirrors a bucket into a local folder (`config.WEIGHTS_MOUNT`, ...), so the

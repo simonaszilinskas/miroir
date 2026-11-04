@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from miroir.config import ENV_FILE, ENV_PASSWORD_KEY, WEB_INDEX, Settings
+from miroir.config import ENV_FILE, ENV_MCP_TOKENS_KEY, ENV_PASSWORD_KEY, WEB_INDEX, Settings
 from miroir.web import auth
 from miroir.web.bundle import bundle_files
 
@@ -68,18 +68,42 @@ def set_secret(*, rotate: bool = False, env_file: Path = ENV_FILE) -> bool:
 
 
 def read_env_password(env_file: Path) -> str | None:
-    if not env_file.exists():
-        return None
-    match = re.search(rf"^{ENV_PASSWORD}=(.*)$", env_file.read_text(encoding="utf-8"), re.M)
-    return match.group(1).strip() if match and match.group(1).strip() else None
+    return read_env_value(env_file, ENV_PASSWORD)
 
 
 def write_env_password(env_file: Path, password: str) -> None:
     """Set the password line in `.env`, keeping every other line."""
+    write_env_value(env_file, ENV_PASSWORD, password)
+
+
+def read_env_value(env_file: Path, key: str) -> str | None:
+    if not env_file.exists():
+        return None
+    match = re.search(rf"^{key}=(.*)$", env_file.read_text(encoding="utf-8"), re.M)
+    return match.group(1).strip() if match and match.group(1).strip() else None
+
+
+def write_env_value(env_file: Path, key: str, value: str) -> None:
+    """Set one line of `.env`, keeping every other line."""
     text = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
-    lines = [line for line in text.splitlines() if not line.startswith(f"{ENV_PASSWORD}=")]
-    lines.append(f"{ENV_PASSWORD}={password}")
+    lines = [line for line in text.splitlines() if not line.startswith(f"{key}=")]
+    lines.append(f"{key}={value}")
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def set_mcp_token(name: str, *, rotate: bool = False, env_file: Path = ENV_FILE) -> str:
+    """Make sure `.env` holds an MCP connector token for client `name` (`miroir.web.mcp`);
+    `rotate` replaces it. Returns the token. `miroir demo install` sends the tokens."""
+    from miroir.web.mcp import format_tokens, new_token, parse_tokens  # noqa: PLC0415
+
+    found = parse_tokens(read_env_value(env_file, ENV_MCP_TOKENS_KEY) or "")
+    by_name = {n: t for t, n in found.names.items()}
+    if name not in by_name or rotate:
+        by_name[name] = new_token()
+        parse_tokens(format_tokens(by_name))  # checks the name
+        write_env_value(env_file, ENV_MCP_TOKENS_KEY, format_tokens(by_name))
+        logger.info("MCP token for %s written to %s", name, env_file)
+    return by_name[name]
 
 
 class LedgerSpend:
@@ -171,6 +195,11 @@ def serve_locally(
         secure_cookies=False,
         chat=chat,
     )
+    if settings.mcp_tokens is not None:
+        from miroir.web.mcp import mount_mcp, parse_tokens  # noqa: PLC0415
+
+        tokens = parse_tokens(settings.mcp_tokens.get_secret_value())
+        mount_mcp(site, tokens=tokens, publishable=publishable)
     logger.info("conversation page: %s", model.model)
     if search is None:
         logger.info("fake models: photo results are look-alikes, not a real search")

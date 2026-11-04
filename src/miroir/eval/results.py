@@ -148,6 +148,7 @@ def set_score(
         msg = "SetScore stores hit@1, hit@5 and hit@10 only"
         raise AssertionError(msg)
     values = per_query_values(result.per_query)
+    clusters = [q.cluster for q in result.per_query]
     return SetScore(
         test_set=test_set,
         half=half,
@@ -157,10 +158,10 @@ def set_score(
         queries=len(result.per_query),
         skipped_no_answer=result.skipped_no_answer,
         ap_max_rank=result.ap_max_rank,
-        hit_at_1=bootstrap(values["hit@1"], seed=seed),
-        hit_at_5=bootstrap(values["hit@5"], seed=seed),
-        hit_at_10=bootstrap(values["hit@10"], seed=seed),
-        map=bootstrap(values["map"], seed=seed),
+        hit_at_1=bootstrap(values["hit@1"], clusters=clusters, seed=seed),
+        hit_at_5=bootstrap(values["hit@5"], clusters=clusters, seed=seed),
+        hit_at_10=bootstrap(values["hit@10"], clusters=clusters, seed=seed),
+        map=bootstrap(values["map"], clusters=clusters, seed=seed),
         per_query=result.per_query,
     )
 
@@ -256,7 +257,8 @@ def summary_table(results: Sequence[RunResult]) -> str:
     body = "\n".join(line for _, line in sorted(rows))
     note = (
         "Each cell: value in %, then the 95% bootstrap interval "
-        f"({RESAMPLES:,} resamples over queries)."
+        f"({RESAMPLES:,} resamples; over queries, or over the buildings, objects and room photos "
+        "a result file names for its queries)."
     )
     table = f"{note}\n\n{header}\n{body}" if body else f"{note}\n\n{header}"
     found = not_found_table(results)

@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import replace
 
 import httpx
 
 from miroir.commons.client import WikimediaClient, open_client
 from miroir.commons.images import CommonsImages, commons_photos, open_commons_images
 from miroir.config import Settings
-from miroir.images.fetch import CONCURRENCY, ImageCache, ImageFetcher
+from miroir.images.fetch import CONCURRENCY, ImageFetcher, local_cache
 from miroir.jobs.describe import OPTIONS as DESCRIBE_OPTIONS
-from miroir.jobs.describe import DescribeOption, Describer
+from miroir.jobs.describe import DescribeOption, Describer, standard
 from miroir.jobs.embed import OPTIONS, OpenRouterEmbedder
 from miroir.jobs.h4_agent import OPTIONS as AGENT_OPTIONS
 from miroir.jobs.h4_agent import CallCache, Caller, ImageSource
@@ -33,7 +32,7 @@ def open_embedder(settings: Settings, option: str) -> Generator[OpenRouterEmbedd
         raise RuntimeError(msg)
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
     client = OpenRouterClient(settings.openrouter_api_key)
-    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
+    cache = local_cache(settings)
     with (
         httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http,
         open_commons_images(settings) as commons,
@@ -56,7 +55,7 @@ def open_describer(settings: Settings, model: str, *, batch: bool = True) -> Gen
         msg = f"unknown vision model {model!r}; known: {', '.join(DESCRIBE_OPTIONS)}"
         raise ValueError(msg)
     option = DESCRIBE_OPTIONS[model]
-    with open_vision(settings, option if batch else replace(option, batch=False)) as describer:
+    with open_vision(settings, option if batch else standard(option)) as describer:
         yield describer
 
 
@@ -70,11 +69,19 @@ def open_vision(
         raise RuntimeError(msg)
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
     client = OpenRouterClient(settings.openrouter_api_key)
-    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
-    with httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http:
+    cache = local_cache(settings)
+    with (
+        httpx.Client(timeout=60.0, limits=limits, follow_redirects=True) as images_http,
+        open_commons_images(settings) as commons,
+    ):
         try:
             yield Describer(
-                settings, option, client, ImageFetcher(images_http, cache), prompts=prompts
+                settings,
+                option,
+                client,
+                ImageFetcher(images_http, cache),
+                commons=commons,
+                prompts=prompts,
             )
         finally:
             client.close()
@@ -92,7 +99,7 @@ def open_agent_caller(settings: Settings, model: str, *, limit_usd: float) -> Ge
     option = AGENT_OPTIONS[model]
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
     client = OpenRouterClient(settings.openrouter_api_key)
-    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
+    cache = local_cache(settings)
     photos = commons_photos(settings)
     for path in settings.commons_gallery_parquets():  # F2 gallery photos, shown as thumbnails
         photos.update((p.image_id, p) for p in read_commons(path))

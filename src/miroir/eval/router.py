@@ -11,8 +11,9 @@ models share the rest equally, as in G1.
 
 The guess is a logistic regression on vectors that already exist (no model runs here). It
 learns from gallery images whose record says what they show (`photo_type`), leaving out every
-building or object that appears in a T1, T3, T5 or T8 tune query. The two weights come from a
-small grid, one pair for all scored sets together (mean hit@10 over sets), never one per set.
+building or object any test set uses, tune and sealed (`sets.entities_in_sets`). The two
+weights come from a small grid, one pair for all scored sets together (mean hit@10 over
+sets), never one per set.
 
 With only one building set (T1), `w_building` is in effect tuned on T1 alone. A two-fold check
 (`cross_fitted`) picks the weights on one half of each set's buildings and objects and scores
@@ -45,7 +46,7 @@ from miroir.eval.scoring import (
     per_query_values,
     rank_entities,
 )
-from miroir.eval.sets import Query, load_queries, read_gallery
+from miroir.eval.sets import Query, entities_in_sets, load_queries, read_gallery
 from miroir.eval.stack import (
     IN_INDEX_SETS,
     NOT_FOUND_SET,
@@ -64,7 +65,7 @@ Float64s = NDArray[np.float64]
 
 #: First-model weights tried for buildings and for objects. 1.0 and 0.0 leave a model out.
 ROUTE_GRID = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
-#: Sets whose tune queries' buildings and objects never train the guess.
+#: Sets whose tune queries the guess is checked on (it leaves out the entities of every set).
 QUERY_SETS = ("T1", "T3", "T5", "T8")
 #: L2 penalties tried for the logistic regression, on a held-out share of the gallery.
 PENALTIES = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0)
@@ -514,16 +515,11 @@ def guess_report(
     *,
     query_sets: Sequence[str] = QUERY_SETS,
 ) -> GuessReport:
-    """Train the guess on gallery images, every tune-query entity of `query_sets` left out."""
+    """Train the guess on gallery images, every entity of every test set left out (both
+    halves, `entities_in_sets`); report how right it is on the tune queries of `query_sets`."""
     queries = {s: load_queries(settings, s, "tune") for s in query_sets}
-    left_out = {
-        e for qs in queries.values() for q in qs for e in (q.entity_id, *q.expected_entity_ids)
-    }
-    labels = {
-        i: type_of_image[i]
-        for i in gallery_ids
-        if i in type_of_image and entity_of[i] not in left_out
-    }
+    left_out = entities_in_sets(settings)
+    labels = training_labels(gallery_ids, entity_of, type_of_image, left_out)
     skipped = sum(1 for i in gallery_ids if i not in type_of_image)
     logger.info(
         "guess trains on %d gallery images (%d without a known type, %d entities left out)",
@@ -550,6 +546,21 @@ def guess_report(
         held_out_accuracy=held_out,
         query_accuracy=tuple(accuracy),
     )
+
+
+def training_labels(
+    gallery_ids: Sequence[str],
+    entity_of: Mapping[str, str],
+    type_of_image: Mapping[str, PhotoType],
+    left_out: frozenset[str],
+) -> dict[str, PhotoType]:
+    """The gallery images the guess learns from: those whose record gives the type, minus
+    every image of an entity a test set uses (its query photos are gallery images too)."""
+    return {
+        i: type_of_image[i]
+        for i in gallery_ids
+        if i in type_of_image and entity_of[i] not in left_out
+    }
 
 
 def _routed_set(

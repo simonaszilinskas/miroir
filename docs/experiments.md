@@ -10,7 +10,7 @@ Finding the right heritage record from a photo is a research problem before it i
 2. **Simplest wins a tie.** When two options' error bars overlap, keep the cheaper, faster, open one.
 3. **Same queries for every option.** Comparisons are paired: every option answers the same queries against the same index.
 4. **The sealed half stays sealed.** We tune on the tuning half only and open the sealed half once, in week 6.
-5. **Paid runs have a cap.** All paid model work in dollars together (OpenRouter, and Modal before 2026-11-03) may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` and `miroir embed scw` refuse a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is the larger of our log of OpenRouter calls and what OpenRouter says the key has spent, plus our log of Modal calls. Scaleway GPU machines have their own cap, in euros (developpement.md, "Scaleway"). Probes together may not spend more than $2. Raising the cap (`MIROIR_OPENROUTER_BUDGET_USD`) needs the project lead's yes.
+5. **Paid runs have a cap.** All paid model work in dollars together (OpenRouter, and Modal before 2026-11-03) may not pass $50 for now, and we keep $5 of it in reserve. Before a paid model embeds a gallery, a probe embeds 100 of its images and measures the cost. `miroir embed openrouter` and `miroir embed scw` refuse a run with no probe on file, and refuses one whose projected cost would take total spend past $45. Total spend is the larger of our log of OpenRouter calls and what OpenRouter says the key has spent, plus our log of Modal calls. Scaleway GPU machines have their own cap, in euros (developpement.md, "Scaleway"). Probes together may not spend more than $2. Raising the cap (`BUDGET_USD` in `src/miroir/config.py`; `MIROIR_BUDGET_USD` may only lower it) needs the project lead's yes.
 6. **Every result is committed.** Each run writes `eval/results/<round>/<step>-<option>.json`, and `docs/results.md` holds the summary table.
 
 ## 2. Options by step
@@ -136,6 +136,8 @@ Scored on: T1–T5 and T7 for ranking, T8 for "not found" (wrong-but-confident r
 
 [technical-spec.md §7](technical-spec.md#7-evaluation) defines sets T1–T9. Every set except T9 is split 50/50 into a tuning half and a sealed half, **by building or object**, so no entity appears in both halves.
 
+Every number reported so far is on a tuning half, where the options were picked: in-sample, so optimistic until R4. Two sets measure less than their names say: T3's answers are other crops of the same room photo, so it measures finding the outline and matching a crop to its record, not finding a work in a visitor's photo; T2b is mostly one museum's Roman objects, many uploaded by the museum or a few regulars, with a few same-photo copies left.
+
 Two more sets test finding the whole from a part (the plan in `docs/search-levels.md`). Their targets come from the whole POP download (`full-pop/`), so most are not in today's index.
 
 - **VET** (`miroir testsets vet <3 images>`): three photos of the Vétheuil Passion altarpiece (PM95000723) from outside POP: two sale catalogue pages, each one stolen carved group with text, and the altarpiece today in colour. Target: APMH047981, a Mémoire photo from before 1896; any record of the altarpiece is right. Tune half only. The photos are kept in `testsets/outside/`.
@@ -146,7 +148,7 @@ Two more sets test finding the whole from a part (the plan in `docs/search-level
 For every run:
 
 - **Accuracy:** hit rate in the top 1, 5 and 10, and mean average precision where a query has several right answers
-- **Error bars:** 95% bootstrap intervals (1,000 resamples). Differences between options use a paired bootstrap on the same queries
+- **Error bars:** 95% bootstrap intervals (1,000 resamples) over clusters, not queries: the photos of one building or object, the crops of one room photo (T3), are drawn together. T2 is 1,000 photos of 385 buildings, so resampling photos one by one made its intervals too narrow. Differences between options use a paired bootstrap of the same clusters. Results scored before 2026-11 resampled queries one by one
 - **Time:** median and 95th-percentile search time, on CPU and on GPU
 - **Size:** index size on disk and in memory
 - **Money:** indexing cost, and cost per 1,000 searches for paid models
@@ -164,6 +166,8 @@ As a guide to what counts as a real difference, an interval on 231 queries spans
 | R4 | Week 6 | The chosen stack and the two runners-up on the sealed halves, once | Final scores for the decision meeting |
 
 Status (2026-10-19): R0, R1 and R2 done. R3 done for C, G and H (H1 to H5); D not run. R4 not started: the sealed halves are still closed.
+
+**Running R4** (`miroir eval r4`, technical spec §7.2). Rebuild the sets and every bundle from the full export, retrain the type guess (it now leaves out every test entity, both halves), set the cut-offs, levels and sure margin on the tune halves, then: `freeze` the bundles (the chosen one first) and commit `eval/r4.json`; `embed` the sealed Commons photos with both models; `run`, once. `run` refuses a bundle changed since the freeze, and a second run. Nothing else reads a sealed half: `miroir eval run` scores tune halves only, and `tests/test_sealed_guard.py` keeps the in-memory draw, the sealed folder and the T7 writer's answers inside the set builders.
 
 **Screening first.** Every A option is scored on the screening gallery (`screening-20k`: every image a query needs, plus seeded random distractors up to 20,000; technical spec §7). Only the top 3 embed the full collection. A screening run costs about a seventh of a full one. Closed models search `screening-20k-publishable` only, and are compared with open ones on the queries both can answer.
 

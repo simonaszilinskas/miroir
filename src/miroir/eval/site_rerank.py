@@ -31,11 +31,13 @@ from miroir.eval.scoring import QueryScore, ScoreResult, paired_bootstrap
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import SiteMatches, SiteMatchTask
 from miroir.images.fetch import Fetched
+from miroir.jobs.durable import append_lines, read_lines
 from miroir.jobs.gpu_run import PaidCall, paid_call
 from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, Machine
 from miroir.jobs.spend import BudgetError, SpendKind
-from miroir.web.bundle import SiteBundle, SiteHit, asked_sets, site_search
+from miroir.web.bundle import INDEXES
 from miroir.web.engine import prepare_photo
+from miroir.web.measure import SiteBundle, SiteHit, site_search, tune_sets
 from miroir.web.routing import PhotoType
 
 logger = logging.getLogger(__name__)
@@ -70,21 +72,16 @@ _LINE = TypeAdapter(SiteMatches)
 
 
 def read_site_matches(path: Path) -> dict[str, SiteMatches]:
-    if not path.exists():
-        return {}
+    """Matches saved so far, by query id; a last line cut short by a crash is asked again."""
     found: dict[str, SiteMatches] = {}
-    for line in path.read_bytes().splitlines():
-        if line.strip():
-            item = _LINE.validate_json(line)
-            found[item.query_id] = item
+    for line in read_lines(path):
+        item = _LINE.validate_json(line)
+        found[item.query_id] = item
     return found
 
 
 def _append(path: Path, done: Sequence[SiteMatches]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("ab") as out:
-        for item in done:
-            out.write(_LINE.dump_json(item) + b"\n")
+    append_lines(path, (_LINE.dump_json(item) for item in done))
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,13 +108,13 @@ def search_sets(settings: Settings, bundle: SiteBundle, index: str = WEB_INDEX) 
     path = searched_path(settings, index)
     if path.exists():
         return _SEARCHED.validate_json(path.read_bytes())
-    asked = asked_sets(settings, index)
+    asked = tune_sets(settings, INDEXES[index], bundle.catalog)
     out: list[Searched] = []
     for set_id in SETS:
         if set_id not in asked:
             continue
         a = asked[set_id]
-        hits = site_search(bundle, a.a7, a.a3, hidden=a.hidden, right=a.right, top=SHORTLIST)
+        hits = site_search(bundle, a, top=SHORTLIST)
         out.append(Searched(set_id, a.query_ids, a.query_image_ids, tuple(hits)))
         logger.info("%s: %d queries searched", set_id, len(hits))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +176,8 @@ def _tasks(
             if jpeg is None:
                 logger.warning("%s: Commons photo not fetched; left out", qid)
                 continue
-            tasks.append(SiteMatchTask(qid, hit.best_images, jpeg=prepare_photo(jpeg)))
+            photo = prepare_photo(jpeg)  # the id names it for the privacy gate
+            tasks.append(SiteMatchTask(qid, hit.best_images, image_id=image_id, jpeg=photo))
         else:
             tasks.append(SiteMatchTask(qid, hit.best_images, image_id=image_id))
     return tasks

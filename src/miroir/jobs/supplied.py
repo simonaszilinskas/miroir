@@ -19,7 +19,7 @@ from miroir.commons.model import is_commons_image
 from miroir.config import Settings
 from miroir.eval.sets import load_queries, read_gallery
 from miroir.images.colour import already_grey, greyscale
-from miroir.images.fetch import Fetched, ImageCache, ImageFetcher
+from miroir.images.fetch import Fetched, ImageFetcher, local_cache
 from miroir.records.extra import read_extra_images
 from miroir.records.model import Image
 from miroir.records.store import read_commons, read_images
@@ -71,9 +71,9 @@ class GreyCopies:
 
 @contextmanager
 def open_grey_copies(settings: Settings) -> Generator[GreyCopies]:
-    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1_000_000)
+    cache = local_cache(settings)
     images = {i.image_id: i for i in read_images(settings.images_parquet)}
-    with httpx.Client(timeout=60.0) as pop, open_client() as wikimedia:
+    with httpx.Client(timeout=60.0, follow_redirects=True) as pop, open_client() as wikimedia:
         commons = CommonsImages(
             commons_photos(settings), WikimediaClient(wikimedia, settings.commons_cache_dir)
         )
@@ -101,9 +101,9 @@ class PopImages:
 
 @contextmanager
 def open_extra_images(settings: Settings) -> Generator[PopImages]:
-    cache = ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1_000_000)
+    cache = local_cache(settings)
     images = {i.image_id: i for i in read_extra_images(settings)}
-    with httpx.Client(timeout=60.0) as pop:
+    with httpx.Client(timeout=60.0, follow_redirects=True) as pop:
         yield PopImages(ImageFetcher(pop, cache), images)
 
 

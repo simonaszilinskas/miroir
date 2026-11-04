@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from miroir.eval.bm25 import Bm25, fold, tokens
+from miroir.eval.bm25 import DESCRIPTION_CHARS, Bm25, fold, record_text, tokens
+from tests import web_helpers as h
+
+
+def test_record_text_keeps_as_much_description_as_the_site_does() -> None:
+    # The site's catalog holds DESCRIPTION_CHARS of a description: the evaluation's BM25
+    # (H1, H4) must index the same text, or it finds words the site never sees.
+    record = h.record("R1", "E1", "joconde", description="a" * DESCRIPTION_CHARS + " lièvre")
+    assert "lièvre" not in record_text(record)
+    assert "a" * DESCRIPTION_CHARS in record_text(record)
 
 
 def test_tokens_fold_accents_drop_stop_words_and_plurals() -> None:

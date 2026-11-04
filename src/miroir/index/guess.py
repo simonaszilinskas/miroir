@@ -2,8 +2,8 @@
 
 Same labels as R2 (`miroir.eval.router.photo_type`): Joconde, Rose Valland and Mémoire photos
 of a Palissy object (PM) are objects, Mémoire photos of a Mérimée building (PA) are buildings,
-and every building or object of a tune query is left out. Only the training images change:
-every image of the run instead of the screening gallery.
+and every building or object of any test set, tune or sealed, is left out. Only the training
+images change: every image of the run instead of the screening gallery.
 
 The website applies it to a query's EmbeddingGemma 2 (A7) vector `x` (unit length):
 

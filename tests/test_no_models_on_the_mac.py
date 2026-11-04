@@ -61,18 +61,61 @@ def test_the_gpu_machine_driver_is_among_the_modules_checked() -> None:
     assert "miroir.cli" in local_modules()
 
 
-def test_remote_code_is_imported_only_inside_functions() -> None:
-    """Outside `miroir.remote`, an import of it must sit in a function body (run on the machine)."""
-    top_level: list[str] = []
+def _imports_remote(node: ast.AST) -> bool:
+    if isinstance(node, ast.ImportFrom):
+        return (node.module or "").startswith("miroir.remote")
+    if isinstance(node, ast.Import):
+        return any(a.name.startswith("miroir.remote") for a in node.names)
+    return False
+
+
+def _hidden_command(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether a function is a CLI command registered with `hidden=True`: one the machine runs."""
+    for decorator in fn.decorator_list:
+        if isinstance(decorator, ast.Call) and any(
+            k.arg == "hidden" and isinstance(k.value, ast.Constant) and k.value.value is True
+            for k in decorator.keywords
+        ):
+            return True
+    return False
+
+
+def remote_imports_off_the_machine(path: Path) -> list[str]:
+    """Imports of `miroir.remote` anywhere but in the body of a hidden CLI command."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    allowed: set[int] = set()
+    if path.name == "cli.py":
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and _hidden_command(fn):
+                allowed.update(id(n) for n in ast.walk(fn))
+    return [
+        f"{path.name}:{node.lineno}"  # pyright: ignore[reportAttributeAccessIssue]
+        for node in ast.walk(tree)
+        if _imports_remote(node) and id(node) not in allowed
+    ]
+
+
+def test_remote_code_is_imported_only_by_the_machines_own_commands() -> None:
+    """Outside `miroir.remote`, it may be imported only in the body of a hidden CLI command
+    (`miroir scw serve`, `miroir demo serve`...), which only the GPU machine runs."""
+    found: list[str] = []
     for path in PACKAGE.rglob("*.py"):
-        if REMOTE in path.parents:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in tree.body:
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("miroir.remote"):
-                top_level.append(f"{path.name}:{node.lineno}")
-            if isinstance(node, ast.Import) and any(
-                a.name.startswith("miroir.remote") for a in node.names
-            ):
-                top_level.append(f"{path.name}:{node.lineno}")
-    assert not top_level, top_level
+        if REMOTE not in path.parents:
+            found.extend(remote_imports_off_the_machine(path))
+    assert not found, found
+
+
+def test_an_import_in_a_mac_side_function_is_caught(tmp_path: Path) -> None:
+    module = tmp_path / "cli.py"
+    module.write_text(
+        "import typer\n"
+        "app = typer.Typer()\n"
+        "@app.command('serve', hidden=True)\n"
+        "def serve():\n"
+        "    from miroir.remote.worker import serve\n"
+        "@app.command('embed')\n"
+        "def embed():\n"
+        "    from miroir.remote.models import encoder\n",
+        encoding="utf-8",
+    )
+    assert remote_imports_off_the_machine(module) == ["cli.py:8"]

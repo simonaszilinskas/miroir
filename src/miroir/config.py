@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from miroir.records.model import Collection
@@ -73,6 +73,17 @@ WEB_INDEX = "full-f2"
 #: index bucket and on the machine's disk. Switching is this line, then `miroir demo install`.
 DEMO_INDEX = "pop-all"
 
+# Money caps (experiments.md §1 rule 5). Raising one is a project decision: change it here, in
+# a reviewed commit, with the project lead's yes. Settings may only tighten them.
+#: Dollars for all paid model work together: OpenRouter, and Modal before 2026-11-03.
+BUDGET_USD = 50.0
+#: Dollars kept back: a run may not push total spend past `BUDGET_USD` minus this.
+BUDGET_RESERVE_USD = 5.0
+#: Dollars for all probes together.
+PROBE_BUDGET_USD = 2.0
+#: Euros for all Scaleway GPU machines together (their own ledger).
+SCW_BUDGET_EUR = 5.0
+
 #: The variable that moves the data folder (`Settings.data_dir`), e.g. on a Scaleway machine.
 DATA_DIR_VARIABLE = "MIROIR_DATA_DIR"
 
@@ -80,6 +91,8 @@ DATA_DIR_VARIABLE = "MIROIR_DATA_DIR"
 ENV_FILE = REPO_ROOT / ".env"
 #: The line of `.env` that holds the website's shared password.
 ENV_PASSWORD_KEY = "MIROIR_APP_PASSWORD"  # noqa: S105 (a variable name, not a value)
+#: The line of `.env` that holds the MCP connector's tokens (`miroir web mcp-token`).
+ENV_MCP_TOKENS_KEY = "MIROIR_MCP_TOKENS"
 
 _EXPORT_FOLDER: dict[Collection, str] = {
     Collection.JOCONDE: "joconde",
@@ -119,19 +132,26 @@ class Settings(BaseSettings):
     #: shared by every Scaleway customer, so another prefix may be needed.
     scw_bucket_prefix: str = "miroir"
     #: Cap, in euros, on all Scaleway GPU machines together (their own ledger,
-    #: `scaleway_dir / "spend.jsonl"`), apart from the dollar budget below.
-    scw_budget_eur: float = 5.0
+    #: `scaleway_dir / "spend.jsonl"`), apart from the dollar budget below. At most
+    #: `SCW_BUDGET_EUR`.
+    scw_budget_eur: float = SCW_BUDGET_EUR
     #: The demo machine (`miroir demo`) powers itself off after this long with no visitor,
     #: and after `demo_max_hours` on, visitors or not.
     demo_idle_minutes: int = 60
     demo_max_hours: float = 8.0
 
-    # Money cap for paid model work, in dollars (experiments.md §1 rule 5): OpenRouter, and
-    # Modal before 2026-11-03. Scaleway machines have their own cap above. The names are old.
-    # A run may not push total spend past budget minus reserve. Probes have their own cap.
-    openrouter_budget_usd: float = 50.0
-    openrouter_reserve_usd: float = 5.0
-    probe_budget_usd: float = 2.0
+    # Money cap for paid model work, in dollars: at most `BUDGET_USD`, with at least
+    # `BUDGET_RESERVE_USD` kept back; probes at most `PROBE_BUDGET_USD`. The environment may
+    # lower a cap, never raise it. The OPENROUTER_ names are the old ones.
+    budget_usd: float = Field(
+        default=BUDGET_USD,
+        validation_alias=AliasChoices("MIROIR_BUDGET_USD", "MIROIR_OPENROUTER_BUDGET_USD"),
+    )
+    budget_reserve_usd: float = Field(
+        default=BUDGET_RESERVE_USD,
+        validation_alias=AliasChoices("MIROIR_BUDGET_RESERVE_USD", "MIROIR_OPENROUTER_RESERVE_USD"),
+    )
+    probe_budget_usd: float = PROBE_BUDGET_USD
 
     # The prototype website (`miroir web`): one shared password, and the key that signs session
     # cookies. On the Mac they come from `.env` (MIROIR_...); on the demo machine from its
@@ -142,6 +162,11 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("MIROIR_SESSION_SECRET", "SESSION_SECRET")
     )
+    #: The MCP connector's secrets (`miroir.web.mcp`), one per client: `name=token,...`, made
+    #: by `miroir web mcp-token`; `miroir demo install` sends them as MCP_TOKENS.
+    mcp_tokens: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MIROIR_MCP_TOKENS", "MCP_TOKENS")
+    )
 
     # The conversation page (step H5): a model through OpenRouter leads the search. Spending
     # caps, in dollars, per conversation and per UTC day (all conversations together).
@@ -149,6 +174,25 @@ class Settings(BaseSettings):
     chat_day_usd: float = 2.0
     #: Cap on the resized-image cache, in megabytes. Oldest files go first.
     image_cache_mb: int = 1024
+
+    @model_validator(mode="after")
+    def _caps_only_tighten(self) -> Self:
+        caps = (
+            ("budget_usd", self.budget_usd, BUDGET_USD),
+            ("probe_budget_usd", self.probe_budget_usd, PROBE_BUDGET_USD),
+            ("scw_budget_eur", self.scw_budget_eur, SCW_BUDGET_EUR),
+        )
+        raised = [f"{name} {value} > {cap}" for name, value, cap in caps if value > cap]
+        if self.budget_reserve_usd < BUDGET_RESERVE_USD:
+            raised.append(f"budget_reserve_usd {self.budget_reserve_usd} < {BUDGET_RESERVE_USD}")
+        if raised:
+            msg = (
+                f"a money cap is set looser than config.py allows ({'; '.join(raised)}). "
+                "Raising a cap is a project decision: change it in config.py with the project "
+                "lead's yes, not in the environment"
+            )
+            raise ValueError(msg)
+        return self
 
     @property
     def scaleway_configured(self) -> bool:
@@ -177,9 +221,9 @@ class Settings(BaseSettings):
 
     def demo_site_env(self) -> dict[str, str]:
         """What the website on the demo machine reads (`miroir.jobs.demo`), as environment
-        variables: the shared password, the conversation page's keys (OpenRouter first,
-        `miroir.web.chat.chat_model`) and its spending caps. The session key is made on the
-        machine. Holds secrets: never log it."""
+        variables: the shared password, the MCP connector's tokens, the conversation page's
+        keys (OpenRouter first, `miroir.web.chat.chat_model`) and its spending caps. The
+        session key is made on the machine. Holds secrets: never log it."""
         if self.app_password is None:
             msg = f"no {ENV_PASSWORD_KEY} in .env: run `uv run miroir web secret` first"
             raise RuntimeError(msg)
@@ -191,6 +235,7 @@ class Settings(BaseSettings):
             "APP_PASSWORD": self.app_password,
             "OPENROUTER_API_KEY": self.openrouter_api_key,
             "MISTRAL_API_KEY": self.mistral_api_key,
+            "MCP_TOKENS": self.mcp_tokens,
         }
         for name, secret in secrets.items():
             if secret is not None:
@@ -427,6 +472,12 @@ class Settings(BaseSettings):
             msg = f"the sealed half of {set_id} is closed until round R4 (pass allow_sealed=True)"
             raise PermissionError(msg)
         return self.data_root / "testsets-sealed" / f"{set_id}.sealed.jsonl"
+
+    def testset_entities_path(self, set_id: str) -> Path:
+        """Every building or object a set uses, both halves mixed, written with the set: what
+        a model trained on the gallery (the type guess) leaves out. Holds no query."""
+        _check_name(set_id)
+        return self.testsets_dir / "entities" / f"{set_id}.txt"
 
     def outside_image_path(self, image_id: str) -> Path:
         """A query image that is in no POP record, kept as given (e.g. the VET set's photos)."""

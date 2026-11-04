@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from miroir.commons.model import QUERY_SETS, CommonsPhoto, CommonsSet, is_commons_image
 from miroir.config import SEED, Half, Settings
 from miroir.eval.sets import Query, write_gallery, write_set
+from miroir.records.images import copy_key
 from miroir.records.model import Collection, Record
 from miroir.records.store import read_commons, read_records
 
@@ -43,6 +44,10 @@ DELTA = "-delta"
 
 #: Rose Valland refs of the Jeu de Paume room photos and the artworks seen in them.
 JEU_DE_PAUME_PREFIX = "JDP-"
+
+#: Bits within which two images of one T5 record are the same picture (when hashes are given):
+#: copies of one file sit at 0-2 bits, other photos above 16 (technical spec §7, T2b).
+COPY_BITS = 4
 
 #: Two Mémoire photos whose refs differ only in their last number, by at most this much, count
 #: as one shoot. Among photos of one building, 95% of pairs within 50 share photographer and
@@ -133,6 +138,14 @@ def _sample[T](rng: random.Random, items: Sequence[T], size: int, set_id: str) -
 # --- the sets -------------------------------------------------------------------
 
 
+def file_key(url: str) -> tuple[str, str]:
+    """What two image URLs share when they are one file: its folder and its name as the POP
+    bucket names copies (`copy_key`). A Mérimée record that lists a Mémoire photo gets the
+    same URL under another image id, and a renamed bucket copy the same key."""
+    folder, _, name = url.rpartition("/")
+    return folder.lower(), copy_key(name)
+
+
 def same_shoot(a: Record, b: Record) -> bool:
     """Two Mémoire photos from one shoot: same photographer and date, or nearby refs.
 
@@ -160,20 +173,27 @@ def t1_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Q
 
     Photos from the query's shoot leave the gallery (`same_shoot`): they are often the next
     frame on the same film, so finding them tests near-duplicate search, not knowing the
-    building from another visit. A query left with no answer stays in the draw, so the halves
-    and galleries do not move, and `drop_unanswerable` removes it after the split.
+    building from another visit. So do their copies under the building in any base (a
+    Mérimée record lists Mémoire photos under its own image ids; `file_key`). A query left
+    with no answer stays in the draw, so the halves and galleries do not move, and
+    `drop_unanswerable` removes it after the split.
     """
     rng = _rng(seed, "T1")
     photos: defaultdict[str, list[tuple[str, Record]]] = defaultdict(list)
+    files: defaultdict[str, list[tuple[str, tuple[str, str]]]] = defaultdict(list)
     for record in records:
         if record.collection == Collection.MEMOIRE and record.entity_id.startswith("PA"):
             photos[record.entity_id].extend((i.image_id, record) for i in record.images)
+        files[record.entity_id].extend((i.image_id, file_key(i.url)) for i in record.images)
     eligible = sorted(e for e, items in photos.items() if len(items) >= 2)
     logger.info("T1: %d buildings with 2+ photos", len(eligible))
     queries: list[Query] = []
     for entity in _sample(rng, eligible, size, "T1"):
         image_id, record = rng.choice(sorted(photos[entity], key=lambda item: item[0]))
         shoot = {r.ref: r for _, r in photos[entity] if same_shoot(record, r)}.values()
+        shot = {file_key(i.url) for r in shoot for i in r.images}
+        hidden = {i.image_id for r in shoot for i in r.images}
+        hidden.update(i for i, key in files[entity] if key in shot)
         queries.append(
             Query(
                 query_id=f"T1-{image_id}",
@@ -181,15 +201,27 @@ def t1_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Q
                 entity_id=entity,
                 query_image_id=image_id,
                 expected_entity_ids=(entity,),
-                # The query's photo record and every other photo of its shoot leave the gallery.
-                exclude_image_ids=tuple(sorted(i.image_id for r in shoot for i in r.images)),
+                # The query's photo record, every other photo of its shoot and their copies
+                # leave the gallery.
+                exclude_image_ids=tuple(sorted(hidden)),
             )
         )
     return queries
 
 
-def t5_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Query]:
-    """Joconde records with 2+ images. One view is the query; the record's other views answer."""
+def t5_queries(
+    records: Sequence[Record],
+    size: int,
+    seed: int = SEED,
+    hashes: Mapping[str, int] | None = None,
+) -> list[Query]:
+    """Joconde records with 2+ images. One view is the query; the record's other views answer.
+
+    About 5% of multi-image Joconde records list one picture twice (a bucket copy under
+    another name): those copies of the query leave the gallery too (`file_key`), and with
+    perceptual `hashes` (64-bit, `images.phash`, by image id) so do images within
+    `COPY_BITS` of it. A record left with no other view is dropped after the split.
+    """
     rng = _rng(seed, "T5")
     eligible = sorted(
         (r for r in records if r.collection == Collection.JOCONDE and len(r.images) >= 2),
@@ -206,10 +238,32 @@ def t5_queries(records: Sequence[Record], size: int, seed: int = SEED) -> list[Q
                 entity_id=record.entity_id,
                 query_image_id=image_id,
                 expected_entity_ids=(record.entity_id,),
-                exclude_image_ids=(image_id,),  # the other views are the answer: they stay
+                # The other views are the answer: they stay, but not copies of the query.
+                exclude_image_ids=copies_in_record(record, image_id, hashes),
             )
         )
     return queries
+
+
+def copies_in_record(
+    record: Record, image_id: str, hashes: Mapping[str, int] | None = None
+) -> tuple[str, ...]:
+    """The query image and the record's images that are the same picture, query first."""
+    url = {i.image_id: i.url for i in record.images}
+    key = file_key(url[image_id])
+    hashed = hashes or {}
+    asked = hashed.get(image_id)
+
+    def same(other: str) -> bool:
+        if file_key(url[other]) == key:
+            return True
+        theirs = hashed.get(other)
+        # Pillow is in the `fetch` extra; building sets needs only the base install.
+        from miroir.images.phash import distance  # noqa: PLC0415
+
+        return asked is not None and theirs is not None and distance(asked, theirs) <= COPY_BITS
+
+    return (image_id, *(i for i in sorted(url) if i != image_id and same(i)))
 
 
 def t3_queries(records: Sequence[Record], seed: int = SEED) -> list[Query]:
@@ -442,11 +496,15 @@ def build_sets(
     sizes: Sizes,
     seed: int = SEED,
     commons: Sequence[CommonsPhoto] = (),
+    hashes: Mapping[str, int] | None = None,
 ) -> BuiltSets:
+    """Every set, both halves. `hashes` (perceptual, by image id) also hides T5 near-copies;
+    `build` has none to give yet: no table of POP image hashes exists, and making one means
+    fetching every image (`images.phash` on the 512 px copies)."""
     index = RecordIndex(records)
     t1 = split_by_entity("T1", t1_queries(records, sizes.t1, seed), seed)
     t3 = split_by_entity("T3", t3_queries(records, seed), seed)
-    t5 = split_by_entity("T5", t5_queries(records, sizes.t5, seed), seed)
+    t5 = split_by_entity("T5", t5_queries(records, sizes.t5, seed, hashes), seed)
     # T8 needs no answer, so it draws from every T1 and T5 query, answerable or not.
     t8 = t8_split((t1, t5), index, sizes.t8_per_part, seed)
     drawn = (t1, t3, t5, t8)

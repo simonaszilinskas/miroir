@@ -14,9 +14,11 @@ import pytest
 
 from miroir.config import Settings
 from miroir.jobs.openrouter import JSON
-from miroir.web import chat as chat_module
+from miroir.web import chat_method
 from miroir.web.chat import BRIEF, LOCKED_NOTE
-from miroir.web.chat_tools import NOT_FOUND, ToolName
+from miroir.web.chat_method import Method, early_question
+from miroir.web.chat_prompts import ASK_CLOSE, ASK_PLACE
+from miroir.web.chat_tools import NOT_FOUND, ToolName, ToolOutcome, Wait
 from miroir.web.chatlog import FileChatLog, pull, redact
 from miroir.web.toolsearch import SearchKind, ToolQuery, ToolSearch
 from tests import web_helpers as h
@@ -28,11 +30,13 @@ from tests.test_web_chat import (
     Rig,
     body_text,
     call,
+    calls,
     card_ids,
     of,
     searching,
     shown,
     tool_messages,
+    tool_names,
 )
 
 NOT_SURE = 1.5
@@ -182,15 +186,19 @@ def test_the_brief_asks_for_words_from_evidence_never_guesses() -> None:
 def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(chat_module, "MAX_SEARCHES", 3)  # a script short enough to read
-    monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # this test is about the count alone
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 3)  # a script short enough to read
+    monkeypatch.setattr(chat_method, "MAX_STALE", 99)  # this test is about the count alone
     script = [
         LOOK,
         searching("image_search", {"model": "A3"}),
         searching("text_search", {"query": "église portail"}),
         searching("more_like", {"entity_id": "PA1"}),
-        searching("image_search", {"model": "A7"}),
-        searching("view_results", {"entity_ids": ["OBJ2"]}),
+        calls(
+            [
+                ("image_search", {"model": "A7", "why": WHY}),
+                ("view_results", {"entity_ids": ["OBJ2"], "why": WHY}),
+            ]
+        ),
         call("ask_visitor", ASK),
     ]
     with Rig(script, cutoff=NOT_SURE) as rig:
@@ -213,7 +221,7 @@ def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_result
 def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
+    monkeypatch.setattr(chat_method, "MAX_STALE", 2)
     script = [
         LOOK,  # the first look's three entities are already the best so far
         searching("image_search", {"model": "A3"}),
@@ -232,8 +240,8 @@ def test_two_searches_in_a_row_that_add_nothing_new_lock_the_turn(
 def test_a_search_that_brings_a_new_best_resets_the_stale_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(chat_module, "MAX_SEARCHES", 99)
-    monkeypatch.setattr(chat_module, "MAX_STALE", 2)
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 99)
+    monkeypatch.setattr(chat_method, "MAX_STALE", 2)
     script = [
         searching("text_search", {"query": "église"}),
         searching("text_search", {"query": "vase", "best": ["PA1"]}),  # PA1 came from the 1st
@@ -249,6 +257,31 @@ def test_a_search_that_brings_a_new_best_resets_the_stale_count(
     assert "Best so far: PA1 (Église Saint-Pierre" in replies[1]
 
 
+def test_a_locked_turn_offers_only_the_finishing_tools_and_ends_after_two_refused_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model once kept calling refused searches, each a paid call, while the request still
+    offered them."""
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 1)
+    script = [
+        LOOK,
+        searching("image_search", {"model": "A3"}),
+        searching("image_search", {"model": "A7"}),
+        searching("text_search", {"query": "église"}),
+        shown("OBJ1"),  # never asked for
+    ]
+    with Rig(script, cutoff=NOT_SURE) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    assert len(rig.model.bodies) == 4
+    finishing = {"ask_visitor", "ask_region", "show_results", "read_record"}
+    assert tool_names(rig.model.bodies[1]) > finishing
+    assert tool_names(rig.model.bodies[2]) == finishing
+    assert tool_names(rig.model.bodies[3]) == finishing
+    assert events[-1]["waiting"] == "message"
+    assert str(of(events, "say")[-1]["text"]).startswith("Je m’arrête là")
+
+
 def test_best_names_only_records_the_model_has_seen() -> None:
     script = [
         searching("text_search", {"query": "église", "best": ["PA999"]}),
@@ -262,6 +295,194 @@ def test_best_names_only_records_the_model_has_seen() -> None:
     assert "Best so far: none named yet" in replies[0]
     assert "Best so far: PA1 (" in replies[1]
     assert "PA999" not in replies[1]
+
+
+# --- the method alone, without a model ---------------------------------------------------------
+
+OFFERED = {t.value for t in ToolName}
+
+
+def search(
+    method: Method,
+    name: str = "text_search",
+    *,
+    hits: tuple[str, ...] = (),
+    best: list[str] | None = None,
+) -> str | None:
+    """Ask for a search; when not refused, run it as listing `hits`."""
+    args: dict[str, object] = {} if best is None else {"best": best}
+    refused = method.refusal(name, args, offered=OFFERED, waiting=False, seen=bool)
+    if refused is None:
+        method.ran(name, ToolOutcome("ok", hit_ids=hits), tuple(method.best))
+    return refused
+
+
+def test_the_method_locks_after_its_searches_without_a_sure_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 2)
+    monkeypatch.setattr(chat_method, "MAX_STALE", 99)
+    method = Method()
+    assert search(method) is None
+    assert not method.finishing
+    assert search(method) is None
+    assert method.finishing
+    refused = search(method)
+    assert refused is not None
+    assert refused.startswith("not run: 2 searches without a sure match")
+    method.new_turn()
+    assert search(method) is None
+
+
+def test_the_method_counts_a_search_stale_unless_its_results_enter_the_best() -> None:
+    method = Method()
+    search(method, hits=("A", "B"))
+    search(method, hits=("C",), best=["B"])  # B came from the first: not stale
+    assert method.turn.stale == 0
+    search(method, hits=("D",), best=["B"])  # nothing from C entered the best
+    assert method.turn.stale == 1
+
+
+def test_the_method_wants_a_look_at_the_first_look_before_a_search() -> None:
+    method = Method()
+    method.first_look(["A", "B", "C", "D", "E"], sure=())
+    assert method.best == ["A", "B", "C"]
+    refused = search(method)
+    assert refused is not None
+    assert "A, B, C, D" in refused
+    assert search(method, "view_results", hits=("B",)) is None
+    assert search(method) is None
+
+
+def test_a_failed_search_uses_a_call_but_not_a_search() -> None:
+    method = Method()
+    refused = method.refusal("text_search", {}, offered=OFFERED, waiting=False, seen=bool)
+    assert refused is None
+    method.ran("text_search", ToolOutcome("error: down", error=True), ())
+    assert (method.turn.used, method.turn.searches) == (1, 0)
+    assert method.refusal("image_search", {}, offered=set(), waiting=False, seen=bool) == (
+        "error: image_search is not available in this search."
+    )
+
+
+# --- 6. ask when unsure ------------------------------------------------------------------------
+
+
+def asked(method: Method, name: str = "ask_visitor") -> str | None:
+    """Ask the visitor; when not refused, count it as asked."""
+    refused = method.refusal(name, {}, offered=OFFERED, waiting=False, seen=bool)
+    if refused is None:
+        method.ran(name, ToolOutcome("", wait=Wait.ANSWER, counted=False), tuple(method.best))
+    return refused
+
+
+def test_after_two_searches_without_a_sure_match_the_model_is_told_to_ask_once() -> None:
+    method = Method()
+    search(method, hits=("A", "B"))
+    assert method.ask_note() is None
+    search(method, hits=("C",))
+    note = method.ask_note()
+    assert note is not None
+    assert note.startswith("2 searches and no sure match")
+    assert "ask_visitor" in note
+    search(method, hits=("D",))
+    assert method.ask_note() is None  # once a message
+    method.new_turn()
+    search(method)
+    search(method)
+    assert method.ask_note() is not None
+
+
+def test_a_search_whose_top_two_are_close_tells_the_model_to_ask() -> None:
+    method = Method()
+    gap = chat_method.CLOSE_GAP / 2
+    method.ran("text_search", ToolOutcome("ok", hit_ids=("A", "B"), top_gap=gap), ())
+    assert method.ask_note() == ASK_CLOSE
+    clear = Method()
+    clear.ran("text_search", ToolOutcome("ok", hit_ids=("A", "B"), top_gap=0.2), ())
+    assert clear.ask_note() is None
+
+
+def test_no_note_to_ask_after_a_question_or_with_a_sure_match() -> None:
+    method = Method()
+    assert asked(method) is None
+    search(method)
+    search(method)
+    assert method.ask_note() is None
+    sure = Method()
+    sure.first_look(["A", "B"], sure=("A",))
+    sure.must_view = ()
+    search(sure)
+    search(sure)
+    assert sure.ask_note() is None
+
+
+def test_questions_use_no_search_and_stop_at_their_cap() -> None:
+    method = Method()
+    for n in range(chat_method.MAX_QUESTIONS):
+        assert asked(method, "ask_region" if n else "ask_visitor") is None
+        method.new_turn()
+    assert (method.turn.used, method.turn.searches) == (0, 0)
+    refused = asked(method)
+    assert refused is not None
+    assert refused.startswith(f"not run: {chat_method.MAX_QUESTIONS} questions already")
+    assert method.ask_note() is None  # none left to ask
+    assert search(method) is None
+
+
+@pytest.mark.parametrize(
+    ("building", "position", "caption_place", "sure", "asks"),
+    [
+        (True, False, False, False, True),
+        (True, True, False, False, False),
+        (True, False, True, False, False),
+        (True, False, False, True, False),
+        (False, False, False, False, False),
+    ],
+)
+def test_a_building_with_no_position_asks_where_first(
+    building: bool, position: bool, caption_place: bool, sure: bool, asks: bool
+) -> None:
+    note = early_question(
+        building=building, position=position, caption_place=caption_place, sure=sure
+    )
+    assert note == (ASK_PLACE if asks else "")
+
+
+def test_the_opening_asks_for_the_place_of_a_building_without_a_position() -> None:
+    with Rig([shown("PA1")], cutoff=NOT_SURE) as rig:  # the tiny engine guesses building
+        cid = rig.start()
+        rig.send(cid, "goal", EXACT)
+    assert ASK_PLACE in body_text(rig.model.bodies[0])
+    with Rig([shown("PA1")], cutoff=NOT_SURE) as rig:
+        cid = rig.start(position={"latitude": 43.6, "longitude": 1.44})
+        rig.send(cid, "goal", EXACT)
+    assert ASK_PLACE not in body_text(rig.model.bodies[0])
+
+
+def test_the_model_reads_the_note_to_ask_in_its_second_searchs_result() -> None:
+    script = [
+        LOOK,
+        searching("image_search", {"model": "A3"}),
+        searching("text_search", {"query": "église"}),
+        call("ask_visitor", {**ASK, "about": "place", "offer_position": True}),
+    ]
+    with Rig(script, cutoff=NOT_SURE) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    replies = last_tools(rig)
+    assert "Before searching again, ask the visitor" not in replies[1]
+    assert "2 searches and no sure match" in replies[2]
+    question = of(events, "question")[0]
+    assert (question["about"], question["position"], question["region"]) == ("place", True, False)
+    assert events[-1]["waiting"] == "answer"
+
+
+def test_the_brief_makes_asking_a_first_class_move() -> None:
+    assert "Ask the visitor." in BRIEF
+    assert "offer_position" in BRIEF
+    assert "A question uses no search" in BRIEF
+    assert "{questions}" in BRIEF
 
 
 # --- 5. end honestly ---------------------------------------------------------------------------

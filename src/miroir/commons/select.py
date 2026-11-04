@@ -33,6 +33,8 @@ class Kind(StrEnum):
 class Reject(StrEnum):
     """Why a Commons file is not used as a query."""
 
+    NO_LICENCE = "no_licence"
+    """The file page names no licence: we could not credit it or say it may be shown."""
     NOT_JPEG = "not_jpeg"
     """PNG, SVG, TIFF, PDF...: drawings, maps and scans far more often than photos."""
     TOO_SMALL = "too_small"
@@ -123,6 +125,7 @@ def photo_problem(file: CommonsFile, entity_id: str, kind: Kind) -> Reject | Non
     words = _words(file)
     year = file.year
     checks = (
+        (Reject.NO_LICENCE, not file.licence.strip()),
         (Reject.NOT_JPEG, file.mime != "image/jpeg"),
         (Reject.TOO_SMALL, min(file.width, file.height) < MIN_SHORT_SIDE),
         (Reject.OTHER_RECORD, bool(file.pop_refs) and entity_id not in file.pop_refs),

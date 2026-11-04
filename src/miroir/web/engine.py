@@ -8,6 +8,7 @@ and on the Mac with fake models (`miroir.web.fake`, tests, `miroir web dev`).
 from __future__ import annotations
 
 import io
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -17,13 +18,13 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image as PILImage
-from PIL import ImageOps
 
 from miroir.caption import CaptionPlace, Gazetteer, clean_caption
-from miroir.eval.bm25 import Bm25
+from miroir.eval.bm25 import Bm25, record_text
 from miroir.images.colour import chroma_spread
 from miroir.images.fetch import JPEG_QUALITY, LONG_SIDE
-from miroir.images.mount import Picture, crop_picture, find_picture
+from miroir.images.mount import Picture, cut_picture, picture_in
+from miroir.images.upload import open_photo, open_upload
 from miroir.web import ranking
 from miroir.web.archive import SITE_ARCHIVE, ArchiveRule, CaptionReader, gazetteer
 from miroir.web.catalog import (
@@ -48,6 +49,7 @@ from miroir.web.levels import (
     read_levels,
 )
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, EntityPlaces, Position, read_places
+from miroir.web.ranking import PhotoRanking, rank_photo, weighted
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
@@ -58,8 +60,9 @@ from miroir.web.routing import (
     TextWeights,
     read_guess,
     read_routing,
+    route,
 )
-from miroir.web.store import ExactStore, read_exact, shortlist_cosines, top_rows
+from miroir.web.store import EXACT_FILE, ExactStore, read_exact, shortlist_cosines, top_rows
 from miroir.web.sure import SURE_FILE, SureRule, read_sure
 
 logger = logging.getLogger(__name__)
@@ -106,16 +109,6 @@ class GalleryVectors(Protocol):
     def a3_row(self, row: int) -> Floats:
         """One image's stored MegaLoc vector, in the space `a3` searches."""
         ...
-
-
-def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
-    """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
-    score of -inf, off the shortlist, cannot turn an EmbeddingGemma 2-only score into NaN)."""
-    if a7_weight >= 1:
-        return np.asarray(a7, dtype=np.float32)
-    if a7_weight <= 0:
-        return np.asarray(a3, dtype=np.float32)
-    return (a7_weight * a7 + (1 - a7_weight) * a3).astype(np.float32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +261,7 @@ class Engine:
         archive = _Archive()
         if request.image is not None:
             archive = self._archive(request, timings)
-            photo = self._photo(archive.query or request.image, mask, timings)
+            photo = self._photo(archive.query, mask, timings)
             signals += photo.signals
             per_image = photo.per_image
         if archive.caption and self.archive.words > 0:
@@ -322,18 +315,21 @@ class Engine:
     def _levels(
         self, photo: _Photo | None, unplaced: Floats, fused: Floats, top: ranking.Ints
     ) -> list[Level]:
-        """Each card's level (`miroir.web.levels`). A photo search reads the photo's routed
-        cosines, whatever words refine it; words alone read the fused score, before any
-        position bonus."""
+        """Each card's level (`miroir.web.levels`). A photo search reads the first card's
+        routed cosines against the photo's own top cards (the photo-only ranking the levels
+        were set on, `miroir.eval.levels`), whatever words, a caption or a position change in
+        the order; words alone read the fused score, before any position bonus."""
         if not len(top):
             return []
-        head = ranking.top_entities(fused, GAP_OVER)
         if photo is not None:
             route = photo.bucket
-            over = [photo.confidence(int(r)) for r in head]
+            first = int(top[0])
+            head = ranking.top_entities(photo.ranking.fused, GAP_OVER)
+            others = [int(r) for r in head if int(r) != first][: GAP_OVER - 1]
+            over = [photo.confidence(r) for r in (first, *others)]
         else:
             route = WORDS_ROUTE
-            over = [float(unplaced[r]) for r in head]
+            over = [float(unplaced[r]) for r in ranking.top_entities(fused, GAP_OVER)]
         rule = None if self.levels is None else self.levels.for_route(route)
         if rule is not None:
             return rule.card_levels(len(top), over)
@@ -370,13 +366,11 @@ class Engine:
         person gave none)."""
         assert request.image is not None
         tick = time.monotonic()
-        try:
-            picture = find_picture(request.image) if request.mount else None
-        except (OSError, PILImage.DecompressionBombError) as err:
-            msg = f"cannot read the photo: {err}"
-            raise ValueError(msg) from err
+        opened = open_upload(request.image)  # the one decode of the upload
+        picture = picture_in(opened) if request.mount else None
         timings["mount"] = _ms(tick)
-        query = crop_picture(request.image, picture) if picture and self.archive.crop else None
+        cut = cut_picture(opened.upright, picture) if picture and self.archive.crop else None
+        query = prepare_upright(opened.upright) if cut is None else prepare_photo(cut)
         read = False
         if request.caption is not None:
             caption = clean_caption(request.caption)
@@ -391,7 +385,7 @@ class Engine:
         return _Archive(
             mount=picture is not None,
             query=query,
-            box=None if query is None or picture is None else _shares(picture),
+            box=None if cut is None or picture is None else _shares(picture),
             caption=caption,
             read=read,
             place=place,
@@ -456,32 +450,27 @@ class Engine:
             weight = np.float32(self.crops.rule.weight)
             a3[crop_rows] = np.maximum(a3[crop_rows], weight * crop_scores[crop_rows])
         timings["exact"] = _ms(tick)
-        photo_type, _ = self.guess.photo_type(a7_query)
-        bucket = self.routing.choose(photo_type, chroma)
+        photo_type, bucket = route(self.routing, self.guess, a7_query, chroma)
         return PhotoCosines(a7=a7, a3=a3, bucket=bucket, photo_type=photo_type, chroma=chroma)
 
-    def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
-        cosines = self._cosines(prepare_photo(data), mask, timings)
-        return self.photo_of(cosines)
+    def _photo(self, jpeg: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
+        """`jpeg` is already prepared (`prepare_photo`)."""
+        return self.photo_of(self._cosines(jpeg, mask, timings))
 
     def photo_of(self, cosines: PhotoCosines) -> _Photo:
         """The photo's two signals, routed (what `search` fuses)."""
         a7, a3, bucket = cosines.a7, cosines.a3, cosines.bucket
-        photo_type, chroma = cosines.photo_type, cosines.chroma
         w = bucket.a7_weight
-        e7 = ranking.entity_max(a7, self.catalog)
-        e3 = ranking.entity_max(a3, self.catalog)
-        signals = [s for s in (ranking.Signal(e7, w), ranking.Signal(e3, 1 - w)) if s.weight > 0]
+        ranked = rank_photo(
+            ranking.entity_max(a7, self.catalog), ranking.entity_max(a3, self.catalog), w
+        )
         return _Photo(
-            signals=signals,
+            ranking=ranked,
             per_image=weighted(a7, a3, w),
-            e7=e7,
-            e3=e3,
-            a7_weight=w,
             cutoff=bucket.cutoff,
             bucket=bucket.name,
-            photo_type=photo_type,
-            chroma=chroma,
+            photo_type=cosines.photo_type,
+            chroma=cosines.chroma,
         )
 
     def _words(
@@ -559,28 +548,28 @@ class PhotoCosines:
 
 @dataclass(frozen=True, slots=True)
 class _Photo:
-    signals: list[ranking.Signal]
+    ranking: PhotoRanking
     per_image: Floats
-    e7: Floats
-    e3: Floats
-    a7_weight: float
     cutoff: float
     bucket: str
     photo_type: PhotoType
     chroma: float
 
+    @property
+    def signals(self) -> tuple[ranking.Signal, ...]:
+        return self.ranking.signals
+
     def confidence(self, entity: int) -> float:
         """The routed mix of the entity's raw cosines, as T8 measured it (`notfound`)."""
-        return float(
-            weighted(self.e7[entity : entity + 1], self.e3[entity : entity + 1], self.a7_weight)[0]
-        )
+        return self.ranking.confidence(entity)
 
 
 @dataclass(frozen=True, slots=True)
 class _Archive:
     mount: bool = False
-    query: bytes | None = None
-    """The print alone, when the photo has a mount: what the photo search embeds."""
+    query: bytes = b""
+    """What the photo search embeds (`prepare_photo`): the print alone when the photo has a
+    mount, else the whole photo."""
     box: tuple[float, float, float, float] | None = None
     caption: str = ""
     read: bool = False
@@ -628,35 +617,19 @@ def word_signals(
 
 def prepare_photo(data: bytes) -> bytes:
     """A query photo as the gallery images were (`images.fetch.to_jpeg`): at most 512 px,
-    LANCZOS, RGB JPEG at the same quality. Turned upright first, as a phone camera means it."""
-    try:
-        with PILImage.open(io.BytesIO(data)) as opened:
-            upright = ImageOps.exif_transpose(opened)
-            upright.thumbnail((LONG_SIDE, LONG_SIDE), PILImage.Resampling.LANCZOS)
-            rgb = upright.convert("RGB")
-    except (OSError, PILImage.DecompressionBombError) as err:  # UnidentifiedImageError too
-        msg = f"cannot read the photo: {err}"
-        raise ValueError(msg) from err
+    LANCZOS, RGB JPEG at the same quality. Turned upright first, as a phone camera means it.
+    Raises `UnreadablePhotoError` on bytes Pillow cannot read."""
+    return prepare_upright(open_photo(data).upright)
+
+
+def prepare_upright(upright: PILImage.Image) -> bytes:
+    """`prepare_photo` of a photo already decoded and turned upright (left unchanged)."""
+    small = upright.copy()
+    small.thumbnail((LONG_SIDE, LONG_SIDE), PILImage.Resampling.LANCZOS)
+    rgb = small.convert("RGB")
     out = io.BytesIO()
     rgb.save(out, format="JPEG", quality=JPEG_QUALITY)
     return out.getvalue()
-
-
-def record_text(record: CatalogRecord) -> str:
-    """Every field worth searching by words, as `miroir.eval.bm25.record_text` joins them."""
-    return " ".join(
-        [
-            record.title,
-            record.description,
-            *record.denomination,
-            *record.domain,
-            *record.authors,
-            *record.period,
-            record.commune or "",
-            record.departement or "",
-            record.region or "",
-        ]
-    )
 
 
 def unit(vector: Floats) -> Floats:
@@ -689,6 +662,7 @@ def load_engine(
     """An engine over one index bundle; the caller brings the models and the vectors."""
     start = time.monotonic()
     catalog = read_catalog(directory / CATALOG_FILE)
+    check_bundle(directory, catalog)
     logger.info(
         "catalog: %d images, %d records, %d entities in %.1f s",
         len(catalog.images),
@@ -710,6 +684,37 @@ def load_engine(
         captions=captions,
         crops=read_crops(directory, crop_store),
     )
+
+
+def check_bundle(directory: Path, catalog: Catalog) -> None:
+    """Raise unless the bundle's files are in step with its catalog: one vector row per
+    catalog image in every matrix, the ids in the same order, the manifest's count.
+
+    A file copied alone (`miroir web upload-file`) or a half-finished copy would otherwise
+    serve every search with the wrong records, or fail on each one."""
+    from miroir.web.bundle import IDS_FILE, MANIFEST_FILE  # noqa: PLC0415 (bundle imports this)
+
+    count = len(catalog.images)
+    problems: list[str] = []
+    for name in (A7_FILE, A3_FILE, EXACT_FILE):
+        path = directory / name
+        if path.exists():
+            rows = np.load(path, mmap_mode="r", allow_pickle=False).shape[0]
+            if rows != count:
+                problems.append(f"{name} has {rows} rows")
+    ids = directory / IDS_FILE
+    if ids.exists() and ids.read_text(encoding="utf-8").split() != [
+        i.image_id for i in catalog.images
+    ]:
+        problems.append(f"{IDS_FILE} lists other images or another order")
+    manifest = directory / MANIFEST_FILE
+    if manifest.exists():
+        said = json.loads(manifest.read_text(encoding="utf-8")).get("images")
+        if said != count:
+            problems.append(f"{MANIFEST_FILE} says {said} images")
+    if problems:
+        msg = f"{directory}: the catalog holds {count} images but " + "; ".join(problems)
+        raise RuntimeError(msg)
 
 
 def _first(records: list[CatalogRecord]) -> CatalogRecord | None:

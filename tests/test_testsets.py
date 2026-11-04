@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from miroir.config import Settings
@@ -17,7 +19,7 @@ from miroir.eval.build_sets import (
     t3_queries,
     t5_queries,
 )
-from miroir.eval.sets import Query, load_queries, read_gallery, write_set
+from miroir.eval.sets import Query, entities_in_sets, load_queries, read_gallery, write_set
 from miroir.records.build import build as build_records
 from miroir.records.images import make_image_id
 from miroir.records.model import Collection, Image, ImageType, Record
@@ -147,6 +149,69 @@ def test_t1_hides_the_query_shoot_and_drops_buildings_with_one_shoot() -> None:
     assert not build_sets.answerable(queries["PA2"], RecordIndex(records))
 
 
+def _copied_into(record: Record, copy_of: Record) -> Record:
+    """`record` listing the same files as `copy_of` (a Mérimée record shows Mémoire photos):
+    the same URLs under other image ids."""
+    images = tuple(
+        replace(
+            i,
+            image_id=make_image_id(record.ref, i.url),
+            ref=record.ref,
+            collection=record.collection,
+            entity_id=record.entity_id,
+        )
+        for i in copy_of.images
+    )
+    return replace(record, images=images)
+
+
+def test_t1_hides_copies_of_the_query_shoot_in_other_bases() -> None:
+    shoot = _photo("APMH00001000", "PA1", "Hurault", "1944")
+    other = _photo("APMH00007000", "PA1", "Bonnel", "1970")
+    building = _record(Collection.MERIMEE, "PA1", 0, entity_id="PA1")
+    copies = [_copied_into(replace(building, ref=f"PA1-{r.ref}"), r) for r in (shoot, other)]
+    records = [shoot, other, *copies]
+    url_of = {i.image_id: i.url for r in records for i in r.images}
+    (q,) = t1_queries(records, size=1)
+    query_url = url_of[q.query_image_id]
+    copy = next(i.image_id for r in copies for i in r.images if i.url == query_url)
+    assert copy in q.exclude_image_ids
+    # The other shoot, and its copy, stay to be found.
+    assert {url_of[i] for i in q.exclude_image_ids} == {query_url}
+    assert build_sets.answerable(q, RecordIndex(records))
+
+
+def test_t5_hides_the_query_s_copies_in_its_own_record() -> None:
+    # A Joconde record listing one picture twice under two names (a bucket copy) and a
+    # second view: the copy would be a free hit.
+    record = _record(Collection.JOCONDE, "J1", 3)
+    base = record.images[0].url.rsplit("/", 1)[0]
+    images = (
+        replace(record.images[0], url=f"{base}/0001074.jpg"),
+        replace(record.images[1], url=f"{base}/M500145_0001074_P.JPG"),
+        replace(record.images[2], url=f"{base}/0001075.jpg"),
+    )
+    record = replace(record, images=images)
+    queries = t5_queries([record] * 1, size=1)
+    (q,) = queries
+    if q.query_image_id == images[2].image_id:
+        assert q.exclude_image_ids == (q.query_image_id,)
+    else:
+        assert set(q.exclude_image_ids) == {images[0].image_id, images[1].image_id}
+
+
+def test_t5_hides_near_copies_by_perceptual_hash_when_given() -> None:
+    record = _record(Collection.JOCONDE, "J1", 3)
+    ids = [i.image_id for i in record.images]
+    hashes = {ids[0]: 0b1111, ids[1]: 0b1110, ids[2]: 0xFFFF_0000_FFFF}  # 1 bit, then far
+    (q,) = t5_queries([record], size=1, hashes=hashes)
+    near = {ids[0], ids[1]}
+    if q.query_image_id in near:
+        assert set(q.exclude_image_ids) == near
+    else:
+        assert q.exclude_image_ids == (q.query_image_id,)
+
+
 def test_dropped_queries_keep_their_images_in_the_galleries() -> None:
     one_shoot = [_photo(f"APMH0900000{n}", "PA99", "Bonnel", "1968") for n in range(3)]
     records = [*_corpus(), *one_shoot]
@@ -243,6 +308,20 @@ def test_sealed_half_loads_only_with_allow_sealed(settings: Settings) -> None:
     with pytest.raises(PermissionError):
         load_queries(settings, "T1", "sealed")
     assert load_queries(settings, "T1", "sealed", allow_sealed=True) == [s]
+
+
+def test_every_entity_of_both_halves_is_listed_apart_from_the_queries(settings: Settings) -> None:
+    write_set(settings, "T1", [Query("T1-a", "T1", "PA1", "a", ("PA1",), ("a",))], [])
+    write_set(settings, "T2", [], [Query("T2-b", "T2", "PA2", "b", ("PA2", "PM9"), ())])
+    settings.testset_path("T2", "sealed", allow_sealed=True).unlink()  # never read
+    assert entities_in_sets(settings) == {"PA1", "PA2", "PM9"}
+
+
+def test_a_set_without_its_entity_list_must_be_rebuilt(settings: Settings) -> None:
+    write_set(settings, "T1", [Query("T1-a", "T1", "PA1", "a", ("PA1",), ("a",))], [])
+    settings.testset_entities_path("T1").unlink()
+    with pytest.raises(FileNotFoundError, match="testsets build"):
+        entities_in_sets(settings)
 
 
 def test_build_writes_sets_and_galleries(settings: Settings) -> None:

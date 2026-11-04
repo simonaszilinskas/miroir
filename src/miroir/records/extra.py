@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 
 from miroir.config import Settings
 from miroir.records.model import Image, Record
-from miroir.records.store import read_images, read_records
+from miroir.records.store import read_images, read_records, write_table
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,7 @@ def add_entities(settings: Settings, entity_ids: Sequence[str]) -> int:
         if target.exists():
             kept = _read(target, "not in", wanted)
             found = pa.concat_tables([kept, found.cast(kept.schema)])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        pq.write_table(found, target)  # pyright: ignore[reportUnknownMemberType]
+        write_table(found, target)
         logger.info("%s: %d rows", target, found.num_rows)
         if source == settings.full_records_parquet:
             held = found.num_rows

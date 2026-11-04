@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image as PILImage
 
 from miroir.config import Settings
+from miroir.images import upload
+from miroir.web import app as app_module
 from miroir.web import auth
 from miroir.web.app import create_app
 from miroir.web.bundle import MANIFEST_FILE
+from miroir.web.chat import ChatService
+from miroir.web.engine import SearchRequest, SearchResponse
 from miroir.web.fake import LocalBackend
 from miroir.web.ops import (
     read_env_password,
@@ -73,6 +81,16 @@ def test_the_built_page_loads_without_login(client: TestClient) -> None:
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-cache"
     assert client.get("/static/assets/nothing.js").status_code == 404
+
+
+def test_every_answer_carries_the_security_headers(client: TestClient) -> None:
+    for answer in (client.get("/"), client.get("/static/assets/index.js"), client.get("/api/me")):
+        policy = answer.headers["content-security-policy"]
+        assert "script-src 'self';" in policy
+        assert "frame-ancestors 'none'" in policy
+        assert "https://iiif.prd.cloud.culture.fr " in policy  # an origin, not the IIIF path
+        assert answer.headers["x-frame-options"] == "DENY"
+        assert answer.headers["x-content-type-options"] == "nosniff"
 
 
 def test_a_page_not_built_says_how_to_build_it(tmp_path: Path) -> None:
@@ -222,6 +240,12 @@ def test_record_page_groups_an_entity(client: TestClient) -> None:
     assert client.get("/api/entity/NOPE").status_code == 404
 
 
+def test_a_record_page_gives_the_entity_and_the_notice_it_shows(client: TestClient) -> None:
+    login(client)
+    facts = {f["label"]: f["value"] for f in client.get("/api/entity/PA1").json()["facts"]}
+    assert facts["Référence"] == "PA1 (notice AP1)"  # Mémoire photos of a Mérimée building
+
+
 def test_example_photos_are_served_after_login(client: TestClient) -> None:
     assert client.get("/api/examples").status_code == 401
     login(client)
@@ -293,3 +317,178 @@ def test_a_position_reaches_the_search_and_is_checked(client: TestClient) -> Non
     assert answer.json()["nearby"] is None  # the test engine holds no places
     body["position"] = {"latitude": 123.0, "longitude": 1.44}
     assert client.post("/api/search", json=body).status_code == 422
+
+
+def test_a_huge_body_is_refused_before_it_is_read(client: TestClient) -> None:
+    """No session needed to send a body: the cap holds before login and before parsing."""
+    too_big = app_module.MAX_BODY_BYTES + 1
+    response = client.post(
+        "/api/search", content=b"x" * too_big, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+
+
+def test_a_huge_body_sent_in_chunks_is_cut_off(client: TestClient) -> None:
+    chunk = b"x" * (1 << 20)
+    count = app_module.MAX_BODY_BYTES // len(chunk) + 2
+
+    def chunks() -> Iterator[bytes]:
+        for _ in range(count):
+            yield chunk
+
+    response = client.post(
+        "/api/login", content=chunks(), headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 413
+
+
+class _BrokenBackend(LocalBackend):
+    async def search(self, request: SearchRequest) -> SearchResponse:
+        del request
+        msg = "a7.npy has 5 rows, the catalog 6"
+        raise ValueError(msg)
+
+
+def test_a_server_fault_is_a_500_not_an_unreadable_photo(tmp_path: Path) -> None:
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=_BrokenBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    broken = TestClient(app, raise_server_exceptions=False)
+    login(broken)
+    image = base64.b64encode(h.photo(130)).decode()
+    response = broken.post("/api/search", json={"image": image})
+    assert response.status_code == 500
+    assert "lue" not in response.json()["detail"]
+
+
+class _SlowBackend(LocalBackend):
+    """Each search takes `SLOW_S`, and is counted."""
+
+    calls = 0
+
+    async def search(self, request: SearchRequest) -> SearchResponse:
+        type(self).calls += 1
+        await asyncio.sleep(SLOW_S)
+        return await super().search(request)
+
+
+SLOW_S = 0.75
+
+
+def test_a_retry_waits_for_the_search_already_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_module, "SEARCH_WAIT_S", 0.5)
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=_SlowBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    body = {"image": base64.b64encode(h.photo(130)).decode()}
+    with TestClient(app) as slow:  # one event loop: the first call goes on between requests
+        login(slow)
+        assert slow.post("/api/search", json=body).status_code == 503
+        assert slow.post("/api/search", json=body).status_code == 200  # joined the first call
+        assert _SlowBackend.calls == 1
+        other = {"image": base64.b64encode(h.photo(90)).decode()}
+        assert slow.post("/api/search", json=other).status_code == 503
+        assert _SlowBackend.calls == 2
+
+
+class _Conversation:
+    id = "c1"
+
+
+class _QuietChat:
+    """Opens conversations whose events stream ends at once."""
+
+    def open(self, *args: object, **kwargs: object) -> _Conversation:
+        del args, kwargs
+        return _Conversation()
+
+    def get(self, session: str, conversation_id: str) -> _Conversation:
+        del session, conversation_id
+        return _Conversation()
+
+    async def stream(self, conversation: object, after: int) -> AsyncIterator[dict[str, object]]:
+        del conversation, after
+        for event in ():
+            yield event
+
+
+def _chat_client(tmp_path: Path) -> TestClient:
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=LocalBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        chat=lambda _: cast("ChatService", _QuietChat()),
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    return TestClient(app)
+
+
+def test_new_conversations_are_capped_per_session_per_day(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth, "CONVERSATIONS_PER_DAY", 2)
+    monkeypatch.setattr(auth, "SEARCHES_PER_MINUTE", 100)
+    chat = _chat_client(tmp_path)
+    login(chat)
+    codes = [chat.post("/api/chat/open", json={"text": "un pont"}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    chat.cookies.clear()
+    login(chat)  # another session has its own count
+    assert chat.post("/api/chat/open", json={"text": "un pont"}).status_code == 200
+
+
+def test_event_streams_and_wake_ups_are_rate_limited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(auth, "CALLS_PER_MINUTE", 3)
+    chat = _chat_client(tmp_path)
+    login(chat)
+    body = {"conversation_id": "c1"}
+    codes = [chat.post("/api/chat/events", json=body).status_code for _ in range(3)]
+    assert codes == [200, 200, 200]
+    assert chat.post("/api/chat/events", json=body).status_code == 429
+    assert chat.post("/api/warm").status_code == 429
+
+
+def test_a_photo_too_large_to_decode_is_unreadable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(client)
+    monkeypatch.setattr(upload, "MAX_UPLOAD_PIXELS", 1000)
+    image = base64.b64encode(h.photo(130)).decode()  # 64 x 48 = 3,072 px
+    response = client.post("/api/search", json={"image": image})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Cette image n’a pas pu être lue."
+
+
+def test_a_photo_in_another_format_is_unreadable(client: TestClient) -> None:
+    login(client)
+    out = io.BytesIO()
+    PILImage.new("RGB", (64, 48), "grey").save(out, format="GIF")
+    image = base64.b64encode(out.getvalue()).decode()
+    assert client.post("/api/search", json={"image": image}).status_code == 422
+    assert client.post("/api/detect", json={"image": image}).status_code == 200  # fake outlines
+
+
+@pytest.mark.parametrize("path", ["/api/search", "/api/detect", "/api/chat/open"])
+def test_a_photo_field_has_a_length_cap(client: TestClient, path: str) -> None:
+    login(client)
+    body = {"image": "A" * (app_module.MAX_PHOTO_CHARS + 4)}
+    assert client.post(path, json=body).status_code == 422

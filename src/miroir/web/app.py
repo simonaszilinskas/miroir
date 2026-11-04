@@ -18,9 +18,10 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, cast
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
@@ -33,10 +34,13 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from miroir.caption import MAX_CAPTION
-from miroir.config import WIKIMEDIA_USER_AGENT
+from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST, WIKIMEDIA_USER_AGENT
 from miroir.images.fetch import to_jpeg
+from miroir.images.upload import UnreadablePhotoError
 from miroir.outlines import Outlines
 from miroir.web import auth
 from miroir.web.catalog import (
@@ -68,12 +72,42 @@ NOT_BUILT = (
 )
 #: Largest photo accepted, after base64 decoding. The page shrinks photos before sending.
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
+#: Longest photo field: `MAX_PHOTO_BYTES` in base64, with room for a `data:` URL prefix.
+MAX_PHOTO_CHARS = MAX_PHOTO_BYTES * 4 // 3 + 4 + 64
+#: Largest request body, refused before it is read (`BodyLimit`): one photo and the rest.
+MAX_BODY_BYTES = MAX_PHOTO_CHARS + 64 * 1024
+TOO_LARGE = "Photo trop lourde."
+SERVER_ERROR = "La recherche a échoué de notre côté. Réessayez dans un instant."
 #: Longest wait on the search backend before the page is told to retry (`_wait_for`).
 SEARCH_WAIT_S = 100.0
 #: Side of the small images under the large one on a record page.
 THUMB_SIDE = 200
 #: Example photos are served at most this size (the page shrinks them again to search).
 EXAMPLE_SIDE = 1280
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+#: Where the page may load from: itself, and images from POP's bucket and IIIF service and
+#: from Commons. Styles may be inline (React sets them; the docs page writes `style=""`).
+CONTENT_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        f"img-src 'self' data: blob: {POP_ASSET_HOST} {_origin(POP_IIIF_IMAGE_HOST)} "
+        "https://upload.wikimedia.org",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
 
 
 class SearchBackend(Protocol):
@@ -114,18 +148,24 @@ class FiltersBody(BaseModel):
 
 
 class PositionBody(BaseModel):
-    """Where the person stands, sent only when they turned on "Utiliser ma position"."""
+    """Where the photo was taken (its EXIF GPS, sent unless the person turns it off) or where
+    the person stands (only when they turned on "Utiliser ma position")."""
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
 
 
 class DetectBody(BaseModel):
-    image: str = Field(description="The whole photo as base64 (JPEG), at most DETECT_SIDE px.")
+    image: str = Field(
+        max_length=MAX_PHOTO_CHARS,
+        description="The whole photo as base64 (JPEG), at most DETECT_SIDE px.",
+    )
 
 
 class SearchBody(BaseModel):
-    image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
+    image: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The photo as base64 (JPEG or PNG)."
+    )
     text: str = Field(default="", max_length=MAX_TEXT)
     filters: FiltersBody = Field(default_factory=FiltersBody)
     position: PositionBody | None = None
@@ -208,9 +248,13 @@ class Site:
     search_limit: auth.RateLimit
     detect_limit: auth.RateLimit
     login_limit: auth.RateLimit
+    call_limit: auth.RateLimit
+    conversation_limit: auth.RateLimit
     facet_options: FacetOptions
     fetch: Callable[[str], Awaitable[bytes]]
     example_cache: dict[str, bytes]
+    running: dict[str, asyncio.Future[object]]
+    """Backend calls still running, by `_call_key`: a retry joins its call."""
     chat: ChatService | None
     """The conversation page (step H5); None when no model is set up."""
     on_visit: Callable[[], None]
@@ -267,14 +311,18 @@ def create_app(
         search_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
         detect_limit=auth.RateLimit(auth.SEARCHES_PER_MINUTE),
         login_limit=auth.RateLimit(auth.LOGINS_PER_MINUTE),
+        call_limit=auth.RateLimit(auth.CALLS_PER_MINUTE),
+        conversation_limit=auth.RateLimit(auth.CONVERSATIONS_PER_DAY, window_s=24 * 3600),
         facet_options=catalog.facet_options(),
         fetch=fetch or _fetch,
         example_cache={},
+        running={},
         chat=None if chat is None else chat(fetch or _fetch),
         on_visit=on_visit or _nothing,
         notice=notice,
     )
     app.middleware("http")(_headers)
+    app.add_middleware(BodyLimit)
 
     async def index() -> Response:
         page = ui_dir / "index.html"
@@ -294,6 +342,60 @@ def _nothing() -> None:
     return None
 
 
+class BodyLimit:
+    """Refuses a request body over `limit` bytes with 413, before any route parses it.
+
+    FastAPI reads and parses a whole JSON body before the session check runs, so without
+    this anyone could send gigabytes. A declared Content-Length over the limit is refused at
+    once (the server holds the body to that length); a body sent without one (chunked) is
+    read here, at most `limit` bytes, then handed on."""
+
+    def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = Headers(scope=scope).get("content-length")
+        if declared is not None:
+            if not declared.isdigit() or int(declared) > self.limit:
+                await _too_large(scope, receive, send)
+                return
+            await self.app(scope, receive, send)
+            return
+        chunks: list[bytes] = []
+        size = 0
+        more = True
+        while more:
+            message = await receive()
+            if message["type"] != "http.request":
+                return  # the client went away
+            chunk: bytes = message.get("body", b"")
+            size += len(chunk)
+            if size > self.limit:
+                await _too_large(scope, receive, send)
+                return
+            chunks.append(chunk)
+            more = bool(message.get("more_body", False))
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
+async def _too_large(scope: Scope, receive: Receive, send: Send) -> None:
+    response = JSONResponse({"detail": TOO_LARGE}, status_code=413, headers={"Connection": "close"})
+    await response(scope, receive, send)
+
+
 async def _headers(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
@@ -301,6 +403,7 @@ async def _headers(
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = CONTENT_POLICY
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):
@@ -315,6 +418,7 @@ async def _chat_page() -> RedirectResponse:
 
 @api.post("/login")
 async def login(body: LoginBody, request: Request, site: SiteDep) -> JSONResponse:
+    # The visitor's address: uvicorn reads it from Caddy's X-Forwarded-For (`remote.site`).
     client = request.client.host if request.client else "unknown"
     if not site.login_limit.allow(client):
         raise HTTPException(status_code=429, detail="Trop d’essais. Réessayez dans une minute.")
@@ -345,7 +449,8 @@ async def me(_: SessionId) -> dict[str, bool]:
 
 
 @api.post("/warm")
-async def warm(_: SessionId, site: SiteDep) -> dict[str, bool]:
+async def warm(session_id: SessionId, site: SiteDep) -> dict[str, bool]:
+    _calls_allowed(site, session_id)
     await site.backend.warm()
     return {"ok": True}
 
@@ -405,7 +510,8 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
         caption=body.caption,
     )
     start = time.monotonic()
-    result = await _wait_for(site.backend.search(request), "search")
+    key = _call_key("search", session_id, request.image, replace(request, image=None))
+    result = await _wait_for(site, key, lambda: site.backend.search(request), "search")
     _log_search(request, result, time.monotonic() - start)
     return result
 
@@ -419,7 +525,8 @@ async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outl
     if image is None:
         raise HTTPException(status_code=422, detail="Ajoutez une photo.")
     start = time.monotonic()
-    found = await _wait_for(site.backend.detect(image), "detect")
+    key = _call_key("detect", session_id, image)
+    found = await _wait_for(site, key, lambda: site.backend.detect(image), "detect")
     logger.info(
         "detect image=%s outlines=%d %.0f ms",
         hashlib.sha256(image).hexdigest()[:12],
@@ -429,15 +536,32 @@ async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outl
     return found
 
 
-async def _wait_for[T](work: Awaitable[T], what: str) -> T:
-    """The backend's answer, or 503 when the models are still loading.
+def _forget(site: Site, key: str, done: object) -> None:
+    if site.running.get(key) is done:
+        del site.running[key]
 
-    Just after the demo machine powers on, the models may still be loading onto the GPU. Rather
-    than hold the request open that long, a call gives up after `SEARCH_WAIT_S` with 503 and
-    the page retries (Caddy, in front, waits for the site meanwhile). The call itself goes on
-    (shielded), so the models keep loading.
+
+def _call_key(what: str, session_id: str, photo: bytes | None, rest: object = None) -> str:
+    """Names one backend call: the same session asking the same thing again."""
+    digest = hashlib.sha256(f"{what}\0{session_id}\0{rest!r}\0".encode())
+    digest.update(photo or b"")
+    return digest.hexdigest()
+
+
+async def _wait_for[T](site: Site, key: str, start: Callable[[], Awaitable[T]], what: str) -> T:
+    """The backend's answer, or 503 when it takes longer than `SEARCH_WAIT_S`.
+
+    The GPU runs one call at a time, so a search may wait behind others (or, on a machine just
+    powered on, behind the models loading). Rather than hold the request open that long, a
+    call gives up after `SEARCH_WAIT_S` with 503 and the page retries. The call itself goes on
+    (shielded), and the retry, under the same `key`, waits for that call instead of queueing
+    a second one.
     """
-    call = asyncio.ensure_future(work)
+    call = cast("asyncio.Future[T] | None", site.running.get(key))
+    if call is None:
+        call = asyncio.ensure_future(start())
+        site.running[key] = cast("asyncio.Future[object]", call)
+        call.add_done_callback(lambda done: _forget(site, key, done))
     try:
         return await asyncio.wait_for(asyncio.shield(call), SEARCH_WAIT_S)
     except TimeoutError as err:
@@ -446,22 +570,23 @@ async def _wait_for[T](work: Awaitable[T], what: str) -> T:
             detail="Le moteur de recherche démarre. Nouvel essai dans un instant.",
             headers={"Retry-After": "2"},
         ) from err
-    except ValueError as err:
+    except UnreadablePhotoError as err:
         logger.warning("%s refused: %s", what, err)
         raise HTTPException(status_code=422, detail="Cette image n’a pas pu être lue.") from err
+    except Exception as err:
+        logger.exception("%s failed", what)
+        raise HTTPException(status_code=500, detail=SERVER_ERROR) from err
 
 
 # --- the conversation page (step H5, `miroir.web.chat`) -----------------------------------------
 
 
 class ChatOpenBody(BaseModel):
-    image: str | None = Field(default=None, description="The photo as base64 (JPEG or PNG).")
+    image: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The photo as base64 (JPEG or PNG)."
+    )
     text: str = Field(default="", max_length=MAX_WORDS)
     position: PositionBody | None = None
-    oneshot: bool = Field(
-        default=False,
-        description='The page\'s "Approfondi" search: one turn, no question to the visitor.',
-    )
     filters: FiltersBody = Field(default_factory=FiltersBody)
 
 
@@ -469,7 +594,9 @@ class ChatSendBody(BaseModel):
     conversation_id: str = Field(max_length=64)
     kind: Visit
     text: str = Field(default="", max_length=MAX_WORDS)
-    region: str | None = Field(default=None, description="The framed part, base64 JPEG.")
+    region: str | None = Field(
+        default=None, max_length=MAX_PHOTO_CHARS, description="The framed part, base64 JPEG."
+    )
     position: PositionBody | None = None
 
 
@@ -484,6 +611,11 @@ def _chat(site: Site) -> ChatService:
             status_code=503, detail="La recherche en conversation n’est pas activée ici."
         )
     return site.chat
+
+
+def _calls_allowed(site: Site, session_id: str) -> None:
+    if not site.call_limit.allow(session_id):
+        raise HTTPException(status_code=429, detail="Trop de demandes en une minute.")
 
 
 def _position(body: PositionBody | None) -> Position | None:
@@ -504,12 +636,16 @@ async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) ->
     image = _decode_photo(body.image)
     if image is None and not body.text.strip():
         raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
+    if not site.conversation_limit.allow(session_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Assez de recherches approfondies pour aujourd’hui. Revenez demain.",
+        )
     found = chat.open(
         session_id,
         photo=image,
         words=body.text,
         position=_position(body.position),
-        oneshot=body.oneshot,
         filters=body.filters.filters(),
     )
     return {"conversation_id": found.id}
@@ -541,6 +677,7 @@ async def chat_send(body: ChatSendBody, session_id: SessionId, site: SiteDep) ->
 async def chat_events(body: ChatEventsBody, session_id: SessionId, site: SiteDep) -> Response:
     """What the model does, one JSON object per line, as it happens."""
     chat = _chat(site)
+    _calls_allowed(site, session_id)
     conversation = chat.get(session_id, body.conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation introuvable. Recommencez.")
@@ -597,7 +734,10 @@ def entity_page(catalog: Catalog, entity_id: str) -> EntityPage | None:
         Fact("Commune", main.commune or ""),
         Fact("Département", main.departement or ""),
         Fact("Région", main.region or ""),
-        Fact("Référence", entity_id if entity_id != main.ref else main.ref),
+        # The entity (a Mérimée building, a Palissy object) and the notice the page links to.
+        Fact(
+            "Référence", entity_id if entity_id == main.ref else f"{entity_id} (notice {main.ref})"
+        ),
     ]
     return EntityPage(
         entity_id=entity_id,
@@ -620,8 +760,6 @@ def _decode_photo(data: str | None) -> bytes | None:
         return None
     if data.startswith("data:"):
         data = data.split(",", 1)[-1]
-    if len(data) > MAX_PHOTO_BYTES * 4 // 3 + 4:
-        raise HTTPException(status_code=413, detail="Photo trop lourde.")
     try:
         return base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as err:

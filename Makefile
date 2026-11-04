@@ -6,12 +6,12 @@ sync:            ## install base + dev deps
 check: lint types test   ## everything CI runs
 
 fmt:             ## rewrite files: format and auto-fix lint
-	uv run ruff format src tests
-	uv run ruff check --fix src tests
+	uv run ruff format src tests scripts
+	uv run ruff check --fix src tests scripts
 
 lint:
-	uv run ruff format --check src tests
-	uv run ruff check src tests
+	uv run ruff format --check src tests scripts
+	uv run ruff check src tests scripts
 
 types:
 	uv run pyright

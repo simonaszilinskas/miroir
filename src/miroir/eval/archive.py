@@ -36,14 +36,15 @@ from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import CaptionChunk, CaptionPhoto
 from miroir.images.mount import crop_picture, find_picture
 from miroir.jobs.gpu_run import PaidCall, paid_call
+from miroir.jobs.privacy import DERIVED
 from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, OPTIONS, ChunkResult, Machine, ModelOption
 from miroir.jobs.remote_spec import SuppliedImage as Supplied
 from miroir.jobs.spend import SpendKind
 from miroir.records.model import Image
 from miroir.records.store import read_images
 from miroir.web.archive import ArchiveRule
-from miroir.web.bundle import SiteBundle
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
+from miroir.web.measure import SiteBundle
 from miroir.web.nearby import EntityPlaces
 from miroir.web.routing import TextWeights
 
@@ -140,8 +141,14 @@ def run_remote(
     cost = 0.0
     vectors_file = settings.archive_dir / PHOTO_VECTORS
     if not vectors_file.exists():
-        jpegs = {_key(j): j for p in photos for j in (p.whole, p.cut()) if j is not None}
-        supplied = [Supplied(k, j) for k, j in jpegs.items()]
+        jpegs = {
+            _key(j): (p.query.query_image_id, j)
+            for p in photos
+            for j in (p.whole, p.cut())
+            if j is not None
+        }
+        # "<image id>#<key>": the privacy gate checks the image each copy is cut from.
+        supplied = [Supplied(f"{i}{DERIVED}{k}", j) for k, (i, j) in jpegs.items()]
         found: dict[str, ChunkResult] = {}
         for option_id in (A7, A3):
             option = OPTIONS[option_id]
@@ -162,7 +169,8 @@ def run_remote(
         if a7.ids != a3.ids:
             msg = "the two models returned the photos in different orders"
             raise RuntimeError(msg)
-        np.savez(vectors_file, keys=np.asarray(a7.ids), a7=a7.vectors, a3=a3.vectors)
+        keys = [i.split(DERIVED, 1)[1] for i in a7.ids]
+        np.savez(vectors_file, keys=np.asarray(keys), a7=a7.vectors, a3=a3.vectors)
     for model in models:
         path = captions_path(settings, model)
         if not path.exists():
@@ -409,7 +417,11 @@ def score(
             found = [c.entity_id for c in response.cards]
             rank = next((n + 1 for n, e in enumerate(found) if e in q.expected_entity_ids), 0)
             ranks.append(rank)
-            per_query.append(QueryScore(q.query_id, rank or TOP + 1, 1.0 / rank if rank else 0.0))
+            per_query.append(
+                QueryScore(
+                    q.query_id, rank or TOP + 1, 1.0 / rank if rank else 0.0, cluster=q.entity_id
+                )
+            )
         r = np.asarray(ranks)
         hits = {k: float(((r >= 1) & (r <= k)).mean()) for k in (1, 5, 10)}
         out.append(RuleScore(label, rule, hits, len(photos), with_place, right_place))

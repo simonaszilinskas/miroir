@@ -44,21 +44,22 @@ from miroir.eval.scoring import (
     Difference,
     EntityScores,
     Gallery,
-    NotFoundQuery,
     QueryScore,
     ScoreResult,
     average_precision,
     entity_scores,
     paired_bootstrap,
     per_query_values,
+    tie_ranks,
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.stack import combined_info
+from miroir.eval.stack import combined_info, not_found_queries
 from miroir.eval.vectors import RunInfo, VectorSet, read_vectors
 from miroir.geo.model import distance_km, moved
 from miroir.records.mappers import PlaceHint
 from miroir.records.model import Record
 from miroir.records.store import read_places, read_positions, read_records
+from miroir.web.routing import ARCHIVE_A7_WEIGHT, COLOUR_BUILDING_A7_WEIGHT, OBJECT_A7_WEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,9 @@ Bools = NDArray[np.bool_]
 
 #: The G5 + F2 weights of R2 (results.md, F2): A7 weight per bucket, A3 the rest.
 G5_F2_WEIGHTS: Mapping[Bucket, float] = {
-    Bucket.ARCHIVE_BUILDING: 1.0,
-    Bucket.COLOUR_BUILDING: 0.0,
-    Bucket.OBJECT: 0.2,
+    Bucket.ARCHIVE_BUILDING: ARCHIVE_A7_WEIGHT,
+    Bucket.COLOUR_BUILDING: COLOUR_BUILDING_A7_WEIGHT,
+    Bucket.OBJECT: OBJECT_A7_WEIGHT,
 }
 #: Radius of the hard filter, in km (experiments.md, H2).
 RADIUS_KM = 2.0
@@ -162,15 +163,13 @@ def rank(searched: Searched, change: Change) -> ScoreResult:
             skipped += 1
             continue
         row = scores[j]
-        ranks = sorted(
-            int((row > row[c]).sum() + (row[:c] == row[c]).sum()) + 1
-            if np.isfinite(row[c])
-            else worst
-            for c in codes
-        )
-        found = [r for r in ranks if r < worst]
+        alive = [c for c in codes if np.isfinite(row[c])]
+        found = tie_ranks(row, alive) if alive else []
+        ranks = [*found, *[worst] * (len(codes) - len(alive))]
         ap = average_precision(found) * len(found) / len(ranks) if found else 0.0
-        per_query.append(QueryScore(searched.query_ids[j], ranks[0], ap))
+        per_query.append(
+            QueryScore(searched.query_ids[j], ranks[0], ap, cluster=searched.query_entities[j])
+        )
     return ScoreResult(
         per_query=tuple(per_query),
         skipped_no_answer=skipped,
@@ -588,11 +587,7 @@ def _search(
     )
     out: dict[str, Searched] = {}
     for set_id, qs in loaded.items():
-        asked = (
-            [NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids) for q in qs]
-            if set_id == not_found_set
-            else search_queries(qs)
-        )
+        asked = not_found_queries(qs, set_id) if set_id == not_found_set else search_queries(qs)
         parts = [
             chunked_entity_scores(a, v, entity_of, gallery_ids, asked)
             for a, v in zip(asking, vectors, strict=True)

@@ -16,11 +16,11 @@ from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import Outlines
 from miroir.records.bases import place_key
 from miroir.web import chat as chat_module
+from miroir.web import chat_method
 from miroir.web.app import create_app
 from miroir.web.catalog import Filters
 from miroir.web.chat import (
     BRIEF,
-    ONESHOT_NOTE,
     ChatService,
     Limits,
     MemorySpend,
@@ -54,6 +54,7 @@ EXACT = "Je cherche ce monument précis."
 SIMILAR = "Je cherche des objets semblables."
 CAPS = Limits(0.10, 2.0)
 WHY = "Le dernier résultat ne tranche pas ; je vérifie."
+ASK_PLACE_Q: dict[str, JSON] = {"question": "Où est-ce ?", "choices": ["En ville", "Au musée"]}
 
 
 def call(name: str, args: Mapping[str, JSON], cost: float = 0.001, text: str = "") -> ChatAnswer:
@@ -86,15 +87,23 @@ class CountingBackend:
         self.counts = {"search": 0, "tool": 0}
         self.queries: list[ToolQuery] = []
         self.requests: list[SearchRequest] = []
+        self.failures: list[Exception] = []
+        """Raised by the next tool searches, one each, before any runs."""
+        self.search_failure: Exception | None = None
+        """Raised by the usual search (the first look)."""
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
         self.requests.append(request)
+        if self.search_failure is not None:
+            raise self.search_failure
         return await self.local.search(request)
 
     async def tool_search(self, query: ToolQuery) -> ToolHits:
         self.counts["tool"] += 1
         self.queries.append(query)
+        if self.failures:
+            raise self.failures.pop(0)
         return await self.local.tool_search(query)
 
     async def warm(self) -> None:
@@ -279,6 +288,57 @@ def test_question_then_answer_then_search_then_results() -> None:
     assert rig.backend.counts["search"] == 1
 
 
+def test_a_question_may_offer_framing_and_a_framed_part_answers_it() -> None:
+    question = {**ASK_PLACE_Q, "about": "work", "offer_region": True}
+    script = [
+        call("ask_visitor", question),
+        LOOK,
+        searching("image_search", {"source": "region", "model": "A3"}),
+        shown("OBJ1"),
+    ]
+    with Rig(script) as rig:
+        cid = rig.start()
+        first = rig.send(cid, "goal", EXACT)
+        asked = of(first, "question")[0]
+        assert (asked["about"], asked["region"], asked["position"]) == ("work", True, False)
+        crop = base64.b64encode(h.photo(130)).decode()
+        second = rig.send(cid, "region", region=crop)
+    assert "The visitor framed a part" in tool_messages(rig.model.bodies[1])[0]
+    assert card_ids(second) == ["OBJ1"]
+
+
+def test_a_question_about_something_unknown_is_an_error_the_model_can_fix() -> None:
+    script = [call("ask_visitor", {**ASK_PLACE_Q, "about": "weather"}), shown("OBJ1")]
+    with Rig(script) as rig:
+        cid = rig.start(photo=False, words="église")
+        events = rig.send(cid, "goal", EXACT)
+    assert not of(events, "question")
+    assert tool_messages(rig.model.bodies[1])[0].startswith("error: unknown about 'weather'")
+
+
+def test_framing_is_not_offered_without_a_photo() -> None:
+    script = [call("ask_visitor", {**ASK_PLACE_Q, "offer_region": True})]
+    with Rig(script) as rig:
+        cid = rig.start(photo=False, words="église")
+        events = rig.send(cid, "goal", EXACT)
+    assert of(events, "question")[0]["region"] is False
+
+
+def test_each_step_names_its_tool_and_the_shortlist_after_it() -> None:
+    script = [LOOK, searching("image_search", {"model": "A3", "best": ["PA1"]}), shown("PA1")]
+    with Rig(script) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    done = [s for s in of(events, "step") if s["state"] == "done"]
+    assert [s["tool"] for s in done] == ["first_look", "view_results", "image_search"]
+    first = done[0]["shortlist"]
+    assert isinstance(first, list)
+    assert len(first) == 3  # the first look's top three start the best-so-far
+    last = done[2]["shortlist"]
+    assert isinstance(last, list)
+    assert [x["entity_id"] for x in last if isinstance(x, dict)] == ["PA1"]
+
+
 @pytest.mark.parametrize("goal", [EXACT, SIMILAR])
 def test_the_visitors_goal_is_the_first_thing_the_model_reads(goal: str) -> None:
     with Rig([shown("PA1")]) as rig:
@@ -403,8 +463,8 @@ def test_a_repeated_search_is_not_run_and_the_model_is_told() -> None:
 
 
 def test_searches_stop_at_the_cap_for_one_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(chat_module, "MAX_TOOL_CALLS", 8)  # a script short enough to read
-    monkeypatch.setattr(chat_module, "MAX_STALE", 99)  # the tiny index has nothing new to add
+    monkeypatch.setattr(chat_method, "MAX_TOOL_CALLS", 8)  # a script short enough to read
+    monkeypatch.setattr(chat_method, "MAX_STALE", 99)  # the tiny index has nothing new to add
     words = [
         "vase",
         "église",
@@ -566,10 +626,7 @@ def test_every_tool_has_a_unique_name_and_a_json_schema() -> None:
         ToolName.IMAGE_SEARCH,
         ToolName.ASK_REGION,
     }
-    assert {t.name for t in tools_for(photo=True, ask=False)} == set(ToolName) - {
-        ToolName.ASK_VISITOR,
-        ToolName.ASK_REGION,
-    }
+    assert {t.name for t in tools_for(photo=True)} == set(ToolName)
 
 
 def test_filters_favour_by_default_and_cut_only_when_hard() -> None:
@@ -678,7 +735,7 @@ def test_an_empty_reply_is_not_sent_back_to_the_model() -> None:
 
 
 def test_looks_at_thumbnails_have_their_own_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(chat_module, "MAX_VIEWS", 3)
+    monkeypatch.setattr(chat_method, "MAX_VIEWS", 3)
     views = [searching("view_results", {"entity_ids": [e]}) for e in ("PA1", "OBJ1", "OBJ2")]
     script = [
         *views,
@@ -697,37 +754,14 @@ def tool_names(body: Mapping[str, JSON]) -> set[str]:
     return {str(t["function"]["name"]) for t in json.loads(json.dumps(body["tools"]))}
 
 
-def test_a_one_shot_search_asks_the_visitor_nothing() -> None:
-    """The page's "Approfondi" search: no question, no framing; the model is told so."""
-    with Rig([LOOK, shown("OBJ1")]) as rig:
-        cid = rig.start(oneshot=True)
-        events = rig.send(cid, "goal", EXACT)
-    names = tool_names(rig.model.bodies[0])
-    assert ToolName.ASK_VISITOR.value not in names
-    assert ToolName.ASK_REGION.value not in names
-    assert ToolName.IMAGE_SEARCH.value in names
-    assert ONESHOT_NOTE in body_text(rig.model.bodies[0])
-    assert card_ids(events) == ["OBJ1"]
-
-
-def test_a_question_in_a_one_shot_search_is_refused() -> None:
-    question = call("ask_visitor", {"question": "Où ?", "choices": ["Ici", "Là"]})
-    with Rig([question, shown("OBJ1")]) as rig:
-        cid = rig.start(oneshot=True)
-        events = rig.send(cid, "goal", EXACT)
-    assert not of(events, "question")
-    assert "not available in this search" in tool_messages(rig.model.bodies[1])[0]
-    assert card_ids(events) == ["OBJ1"]
-
-
-def test_a_conversation_still_offers_questions() -> None:
+def test_the_deep_search_offers_questions() -> None:
+    """The page's "Approfondi" search is a conversation: the model may ask and frame."""
     with Rig([shown("OBJ1")]) as rig:
         cid = rig.start()
         rig.send(cid, "goal", EXACT)
     assert {ToolName.ASK_VISITOR.value, ToolName.ASK_REGION.value} <= tool_names(
         rig.model.bodies[0]
     )
-    assert ONESHOT_NOTE not in body_text(rig.model.bodies[0])
 
 
 def test_the_visitors_filters_reach_the_first_look_and_the_model() -> None:
@@ -737,7 +771,7 @@ def test_the_visitors_filters_reach_the_first_look_and_the_model() -> None:
         "period": "16e siècle",
     }
     with Rig([shown("OBJ1")]) as rig:
-        cid = rig.start(oneshot=True, filters=filters)
+        cid = rig.start(filters=filters)
         rig.send(cid, "goal", EXACT)
     assert rig.backend.requests[0].filters == Filters(
         collections=("joconde",), departement="Val-d’Oise", period="16e siècle"
@@ -767,10 +801,11 @@ def test_openrouter_asks_mistral_to_reason_a_little_never_none() -> None:
     sent: list[Mapping[str, JSON]] = []
     model = OpenRouterModel(SecretStr("sk-or-test"))
 
-    def chat(name: str, body: Mapping[str, JSON]) -> ChatAnswer:
+    def chat(name: str, body: Mapping[str, JSON], *, need_cost: bool = True) -> ChatAnswer:
         assert name == model.model
+        assert not need_cost  # an answer without a cost is priced, not refused
         sent.append(body)
-        return ChatAnswer("ok", 0.0, 1, 1, "stop")
+        return ChatAnswer("ok", 0.001, 1, 1, "stop")
 
     model._client.chat = chat  # type: ignore[method-assign]
     asyncio.run(model.complete({"messages": [], "max_tokens": 800}))
@@ -786,7 +821,7 @@ def test_the_model_reads_the_outlines_and_sees_the_image_it_searched() -> None:
     the transformed photo, and the model sees that image in its next call."""
     crop = searching("image_search", {"transform": {"outline": 2, "grayscale": True}})
     with Rig([LOOK, crop, shown("OBJ1")]) as rig:
-        cid = rig.start(oneshot=True)
+        cid = rig.start()
         events = rig.send(cid, "goal", EXACT)
     opening = body_text(rig.model.bodies[0])
     assert "Outlines the detector found in the photo" in opening
@@ -808,6 +843,6 @@ def test_the_model_reads_the_outlines_and_sees_the_image_it_searched() -> None:
 
 def test_the_step_caps_leave_room_for_a_thorough_run() -> None:
     """Raised 2026-11-03: the spending caps, not the step caps, end a long run."""
-    assert chat_module.MAX_TOOL_CALLS >= 20
+    assert chat_method.MAX_TOOL_CALLS >= 20
     assert chat_module.MAX_MODEL_CALLS >= 25
-    assert chat_module.MAX_SEARCHES >= 10
+    assert chat_method.MAX_SEARCHES >= 10

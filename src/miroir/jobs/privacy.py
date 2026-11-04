@@ -1,15 +1,17 @@
 """Which images may leave the Mac (technical spec §9, CLAUDE.md rule 8).
 
 Only images of `publishable` records go to an outside service (OpenRouter, any other) or to
-the GPU machine; the full-sample index is the one exception (`miroir.jobs.gpu_run`).
-Commons photos (test queries T2, T2b, T8c) are openly licensed, so they may go to any service.
-Runners load the record store through `PublishableImages` and check every id before sending.
+the GPU machine; the full-sample index is the one exception (`--all-images`).
+Commons photos (test queries T2, T2b, T8c, F2 gallery photos) are openly licensed, so they may
+go to any service. The OpenRouter runners (`miroir.jobs.embed`, `miroir.jobs.describe`) check
+every id through `PublishableImages` before sending. Every call to the GPU machine goes through
+`ImageGate`, inside `miroir.jobs.scw_run.ScalewayCalls`, whoever makes it.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 from miroir.commons.images import commons_photos
 from miroir.config import Settings
@@ -76,3 +78,48 @@ class PublishableImages:
         if len(kept) < len(image_ids):
             logger.info("left out %d non-publishable image(s)", len(image_ids) - len(kept))
         return kept
+
+
+#: Splits a derived id ("<image id>#<anything>": a cut or a copy of that image) from its image.
+DERIVED = "#"
+
+
+class ImageGate:
+    """The one check every image bound for the GPU machine passes (`miroir.jobs.scw_run`).
+
+    `ScalewayCalls` runs it inside each call that sends an image or names one, so no caller
+    can send an image without it. An id may name a copy made on the Mac (a cut, a grey copy)
+    as `<image id>#<anything>`: the image it comes from is checked. With `all_images`, the
+    full-sample index exception (technical spec §9), any known image passes.
+    """
+
+    def __init__(
+        self,
+        load: Callable[[], PublishableImages],
+        *,
+        all_images: bool = False,
+        service: str = "the GPU machine",
+    ) -> None:
+        self._load = load
+        self._loaded: PublishableImages | None = None
+        self.all_images = all_images
+        self._service = service
+
+    @property
+    def store(self) -> PublishableImages:
+        if self._loaded is None:
+            self._loaded = self._load()
+        return self._loaded
+
+    def check(self, image_ids: Iterable[str]) -> None:
+        """Raise unless every image may go to the machine."""
+        sources = [i.split(DERIVED, 1)[0] for i in image_ids]
+        if self.all_images:
+            self.store.check_known(sources)
+        else:
+            self.store.check(sources, self._service)
+
+    def check_held(self, image_ids: Iterable[str]) -> None:
+        """Images the machine reads from its own images bucket, where the full-sample index
+        put every image (site re-rank candidates): they must be known, nothing more."""
+        self.store.check_known([i.split(DERIVED, 1)[0] for i in image_ids])

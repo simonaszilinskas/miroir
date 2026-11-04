@@ -18,8 +18,8 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 from PIL import Image as PILImage
-from PIL import ImageOps
 
+from miroir.images.upload import open_upload
 from miroir.jobs.remote_spec import OPTIONS
 from miroir.outlines import (
     DETECT_SIDE,
@@ -153,12 +153,7 @@ class OutlineFinder:
 
     def find(self, jpeg: bytes) -> Outlines:
         start = time.monotonic()
-        try:
-            with PILImage.open(io.BytesIO(jpeg)) as opened:
-                image = detect_size(ImageOps.exif_transpose(opened))
-        except (OSError, PILImage.DecompressionBombError) as err:
-            msg = f"cannot read the photo: {err}"
-            raise ValueError(msg) from err
+        image = detect_size(open_upload(jpeg).upright)
         boxes = self.detector.detect(image)
         shown = pick_outlines(boxes, SITE_RULE, width=image.width, height=image.height)
         return Outlines(shown, detect_ms=round(1000 * (time.monotonic() - start), 1))
