@@ -10,6 +10,12 @@ export type Filters = {
   period: string;
 };
 
+const POP_NOTICES = "https://pop.culture.gouv.fr/";
+
+/** A link to a POP notice as the server gives it; nothing when it points anywhere else. */
+export const popLink = (url: string | null | undefined): string | undefined =>
+  url && url.startsWith(POP_NOTICES) ? url : undefined;
+
 export const NO_FILTERS: Filters = { collections: [], region: "", departement: "", domain: "", period: "" };
 
 export const filterCount = (f: Filters) =>

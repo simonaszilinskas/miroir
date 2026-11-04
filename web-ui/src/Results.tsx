@@ -7,7 +7,7 @@ import { Button } from "@codegouvfr/react-dsfr/Button";
 import { CallOut } from "@codegouvfr/react-dsfr/CallOut";
 import { Card } from "@codegouvfr/react-dsfr/Card";
 import { Tag } from "@codegouvfr/react-dsfr/Tag";
-import { api, ApiError, apiPatient, chatEvents, type Card as CardData, type ChatEvent, type Position, type SearchResponse } from "./api";
+import { api, ApiError, apiPatient, chatEvents, popLink, type Card as CardData, type ChatEvent, type Position, type SearchResponse } from "./api";
 import { collectionLabel, DEEP_GOAL, LEVELS } from "./content";
 import { cut, devicePosition, SEND_SIDE } from "./photo";
 import { describe, type Query } from "./query";
@@ -84,7 +84,7 @@ function ResultCard({ card, best, index }: { card: CardData; best: boolean; inde
         }
         detail={card.photo_count > 1 ? `${card.entity_id} · ${card.photo_count} photos` : card.entity_id}
         footer={
-          <a className={fr.cx("fr-link", "fr-link--sm", "fr-icon-external-link-line", "fr-link--icon-right")} href={card.pop_url} target="_blank" rel="noopener" title={`${card.title} sur POP, nouvelle fenêtre`}>
+          <a className={fr.cx("fr-link", "fr-link--sm", "fr-icon-external-link-line", "fr-link--icon-right")} href={popLink(card.pop_url)} target="_blank" rel="noopener" title={`${card.title} sur POP, nouvelle fenêtre`}>
             Voir sur POP
           </a>
         }

@@ -3,7 +3,7 @@ import { fr } from "@codegouvfr/react-dsfr";
 import { Alert } from "@codegouvfr/react-dsfr/Alert";
 import { Badge } from "@codegouvfr/react-dsfr/Badge";
 import { Button } from "@codegouvfr/react-dsfr/Button";
-import { api, ApiError, type EntityPage } from "./api";
+import { api, ApiError, popLink, type EntityPage } from "./api";
 
 /** Record page: every POP image of the building or object, key facts, POP links. */
 export function Record({ entityId, onBack }: { entityId: string; onBack: () => void }) {
@@ -79,7 +79,7 @@ export function Record({ entityId, onBack }: { entityId: string; onBack: () => v
             <h1 className="fr-h3 fr-mb-1w">{page.title}</h1>
             {page.place && <p className="fr-text--lg mr-muted">{page.place}</p>}
             <p className="fr-text--sm mr-muted">{page.collection_hint}</p>
-            <a className={fr.cx("fr-btn", "fr-btn--icon-right", "fr-icon-external-link-line")} href={page.pop_url} target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">
+            <a className={fr.cx("fr-btn", "fr-btn--icon-right", "fr-icon-external-link-line")} href={popLink(page.pop_url)} target="_blank" rel="noopener" title="La notice sur POP, nouvelle fenêtre">
               Voir la notice sur POP
             </a>
             <dl className="mr-facts">
@@ -97,7 +97,7 @@ export function Record({ entityId, onBack }: { entityId: string; onBack: () => v
                 <ul className="fr-text--sm mr-linked">
                   {page.records.map((r) => (
                     <li key={r.ref}>
-                      <a href={r.pop_url} target="_blank" rel="noopener" title={`${r.title} sur POP, nouvelle fenêtre`}>
+                      <a href={popLink(r.pop_url)} target="_blank" rel="noopener" title={`${r.title} sur POP, nouvelle fenêtre`}>
                         {r.title}
                       </a>{" "}
                       <span className="mr-muted">{r.ref}</span>
