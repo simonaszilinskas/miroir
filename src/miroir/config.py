@@ -80,6 +80,8 @@ DATA_DIR_VARIABLE = "MIROIR_DATA_DIR"
 ENV_FILE = REPO_ROOT / ".env"
 #: The line of `.env` that holds the website's shared password.
 ENV_PASSWORD_KEY = "MIROIR_APP_PASSWORD"  # noqa: S105 (a variable name, not a value)
+#: The line of `.env` that holds the MCP connector's tokens (`miroir web mcp-token`).
+ENV_MCP_TOKENS_KEY = "MIROIR_MCP_TOKENS"
 
 _EXPORT_FOLDER: dict[Collection, str] = {
     Collection.JOCONDE: "joconde",
@@ -142,6 +144,11 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("MIROIR_SESSION_SECRET", "SESSION_SECRET")
     )
+    #: The MCP connector's secrets (`miroir.web.mcp`), one per client: `name=token,...`, made
+    #: by `miroir web mcp-token`; `miroir demo install` sends them as MCP_TOKENS.
+    mcp_tokens: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MIROIR_MCP_TOKENS", "MCP_TOKENS")
+    )
 
     # The conversation page (step H5): a model through OpenRouter leads the search. Spending
     # caps, in dollars, per conversation and per UTC day (all conversations together).
@@ -177,9 +184,9 @@ class Settings(BaseSettings):
 
     def demo_site_env(self) -> dict[str, str]:
         """What the website on the demo machine reads (`miroir.jobs.demo`), as environment
-        variables: the shared password, the conversation page's keys (OpenRouter first,
-        `miroir.web.chat.chat_model`) and its spending caps. The session key is made on the
-        machine. Holds secrets: never log it."""
+        variables: the shared password, the MCP connector's tokens, the conversation page's
+        keys (OpenRouter first, `miroir.web.chat.chat_model`) and its spending caps. The
+        session key is made on the machine. Holds secrets: never log it."""
         if self.app_password is None:
             msg = f"no {ENV_PASSWORD_KEY} in .env: run `uv run miroir web secret` first"
             raise RuntimeError(msg)
@@ -191,6 +198,7 @@ class Settings(BaseSettings):
             "APP_PASSWORD": self.app_password,
             "OPENROUTER_API_KEY": self.openrouter_api_key,
             "MISTRAL_API_KEY": self.mistral_api_key,
+            "MCP_TOKENS": self.mcp_tokens,
         }
         for name, secret in secrets.items():
             if secret is not None:
