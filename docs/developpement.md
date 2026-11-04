@@ -35,6 +35,7 @@ Every setting is read by `src/miroir/config.py`, from the environment or from `.
 | `MIROIR_SCW_BUCKET_PREFIX` | Start of the bucket names (default `miroir`). Bucket names are shared by every Scaleway customer, so a taken name needs another prefix |
 | `MIROIR_OPENROUTER_BUDGET_USD` | Spending cap for paid model runs in dollars (OpenRouter; Modal too before 2026-11-03). Scaleway machines have their own cap |
 | `MIROIR_APP_PASSWORD`, `MIROIR_SESSION_SECRET` | The prototype website's shared password and cookie key (`miroir web secret`; `miroir demo install` sends the password to the demo machine) |
+| `MIROIR_MCP_TOKENS` | The MCP connector's tokens, `name=token,...` (`miroir web mcp-token <name>`; `miroir demo install` sends them; prototype.md, "Utiliser MIROIR depuis ChatGPT ou Claude") |
 | `MIROIR_CHAT_CONVERSATION_USD`, `MIROIR_CHAT_DAY_USD` | Spending caps of the agentic search, per conversation and per day in dollars (defaults 0.10 and 2) |
 
 Data and images are never stored in the repository. Secrets are never committed.
@@ -56,6 +57,7 @@ uv run miroir eval stack ...     # fuse models (G1, G2), expand queries (E5), sc
 uv run miroir eval summary       # rebuild the results table in docs/results.md
 uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir web dev            # the website at http://localhost:8000 with fake models
+uv run miroir web mcp-token NAME # a token for the MCP connector (ChatGPT, Claude), kept in .env
 ```
 
 To put the website online: see [prototype.md](prototype.md), section Hosting.
