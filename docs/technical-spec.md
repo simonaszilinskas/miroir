@@ -341,7 +341,7 @@ Write a run with `miroir.eval.vectors.write_vectors`: it normalises, casts to fl
 
 `miroir.eval.scoring` searches exactly: every query against every gallery image, cosine on the stored vectors, no approximate index. Before a query searches, its own image and its `exclude_image_ids` leave the gallery. An entity scores the best of its images, and the ranking is a ranking of entities. A right entity tied with a wrong one ranks after it (records that share an image both score 1.0), so row order never changes a score and a tie never counts as a hit; the site still shows tied cards in entity id order. The scorer logs how many queries had such a tie.
 
-For each query we keep the rank of the first right entity and its average precision (over the right entities in the gallery). From those: hit rate at 1, 5 and 10, and mAP, each with a 95% bootstrap interval (1,000 resamples of the queries, seed `config.SEED`). Two runs on the same queries are compared with a paired bootstrap of their difference.
+For each query we keep the rank of the first right entity and its average precision (over the right entities in the gallery). From those: hit rate at 1, 5 and 10, and mAP, each with a 95% bootstrap interval (1,000 resamples, seed `config.SEED`). A resample draws clusters, not queries (`sets.cluster_of`): a building or object, or for T3 its room photo; each per-query score keeps its `cluster` in the result file, and a score without one counts as its own cluster (files written before 2026-11). Two runs on the same queries are compared with a paired bootstrap of their difference over the same clusters.
 
 | Command | Does |
 |---|---|

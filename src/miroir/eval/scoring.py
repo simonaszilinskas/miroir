@@ -46,6 +46,8 @@ class SearchQuery:
     image_id: str
     entity_ids: tuple[str, ...]
     excluded_image_ids: tuple[str, ...] = ()
+    cluster: str = ""
+    """What the query's score is resampled with (`QueryScore.cluster`)."""
 
     def __post_init__(self) -> None:
         if not self.entity_ids:
@@ -127,6 +129,9 @@ class QueryScore:
     """Rank of the best-placed right entity, from 1."""
     ap: float
     """Average precision over the right entities present in the gallery."""
+    cluster: str = ""
+    """Queries that share a cluster (one building, one room photo) are resampled together
+    (`bootstrap`); empty: the query is a cluster of its own."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,13 +282,14 @@ class Shortlist:
     query_id: str
     image_id: str
     entity_ids: tuple[str, ...]
-    """The top entities, best first, ties broken as in `score`."""
+    """The top entities, best first, in the site's display order (lower id first on a tie)."""
     image_ids: tuple[str, ...]
     """Each entity's best-scoring image the query may see."""
     scores: tuple[float, ...]
     """Each entity's cosine."""
     right_ranks: tuple[tuple[str, int], ...]
     """Every right entity in the gallery with its rank from 1, in and beyond the shortlist."""
+    cluster: str = ""
 
 
 def shortlists(
@@ -324,6 +330,7 @@ def shortlists(
                 image_ids=tuple(images),
                 scores=tuple(float(values[c]) for c in best),
                 right_ranks=tuple((scores.entity_ids[c], first_rank(values, [c])) for c in right),
+                cluster=query.cluster,
             )
         )
     return tuple(lists), plain
@@ -378,7 +385,7 @@ def _score_one(
     ranks = tie_ranks(scores, right)
     cut = ap_max_rank if ap_max_rank is not None else len(scores)
     ap = sum((i + 1) / r for i, r in enumerate(ranks) if r <= cut) / len(ranks)
-    scored = QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap)
+    scored = QueryScore(query_id=query.query_id, rank=ranks[0], ap=ap, cluster=query.cluster)
     return scored, tied_with_wrong(scores, right)
 
 
@@ -394,9 +401,16 @@ def per_query_values(per_query: Sequence[QueryScore]) -> dict[str, NDArray[np.fl
     return values
 
 
-def bootstrap(values: NDArray[np.float64], *, seed: int = SEED) -> Interval:
-    """Mean and 95% percentile interval over RESAMPLES resamples of the queries."""
-    means = _resampled_means(values, seed)
+def bootstrap(
+    values: NDArray[np.float64], *, clusters: Sequence[str] | None = None, seed: int = SEED
+) -> Interval:
+    """Mean and 95% percentile interval over RESAMPLES resamples of the queries' clusters.
+
+    Photos of one building, or crops of one room photo, are not independent draws: their
+    clusters are resampled whole, so the interval is as wide as the number of buildings
+    makes it. Without `clusters` (or with an empty one) each query is its own cluster.
+    """
+    means = _resampled_means(values, seed, clusters)
     low, high = np.percentile(means, [2.5, 97.5])
     return Interval(value=float(values.mean()), low=float(low), high=float(high))
 
@@ -404,7 +418,7 @@ def bootstrap(values: NDArray[np.float64], *, seed: int = SEED) -> Interval:
 def paired_bootstrap(
     a: Sequence[QueryScore], b: Sequence[QueryScore], *, seed: int = SEED
 ) -> tuple[Difference, ...]:
-    """Difference a - b for every metric, resampling the same queries for both runs."""
+    """Difference a - b for every metric, resampling the same clusters for both runs."""
     a_by_id = {q.query_id: q for q in a}
     b_by_id = {q.query_id: q for q in b}
     if a_by_id.keys() != b_by_id.keys():
@@ -413,12 +427,13 @@ def paired_bootstrap(
         msg = f"runs answer different queries: {only_a} only in a, {only_b} only in b"
         raise ValueError(msg)
     ids = sorted(a_by_id)
+    clusters = [a_by_id[i].cluster or b_by_id[i].cluster for i in ids]
     a_values = per_query_values([a_by_id[i] for i in ids])
     b_values = per_query_values([b_by_id[i] for i in ids])
     out: list[Difference] = []
     for metric, a_metric in a_values.items():
         diff = a_metric - b_values[metric]
-        means = _resampled_means(diff, seed)
+        means = _resampled_means(diff, seed, clusters)
         low, high = np.percentile(means, [2.5, 97.5])
         out.append(
             Difference(
@@ -432,10 +447,28 @@ def paired_bootstrap(
     return tuple(out)
 
 
-def _resampled_means(values: NDArray[np.float64], seed: int) -> NDArray[np.float64]:
+def _resampled_means(
+    values: NDArray[np.float64], seed: int, clusters: Sequence[str] | None = None
+) -> NDArray[np.float64]:
+    """Means of RESAMPLES draws of whole clusters, with replacement, as many as there are."""
     if values.size == 0:
         msg = "cannot bootstrap zero queries"
         raise ValueError(msg)
+    if clusters is not None and len(clusters) != values.size:
+        msg = f"{len(clusters)} clusters for {values.size} values"
+        raise ValueError(msg)
+    # Clusters in order of first appearance; an empty name is a cluster of its own.
+    code: dict[str, int] = {}
+    names = clusters if clusters is not None else [""] * values.size
+    codes = np.fromiter(
+        (code.setdefault(c or f"\0{i}", len(code)) for i, c in enumerate(names)),
+        dtype=np.int64,
+        count=values.size,
+    )
+    sums = np.bincount(codes, weights=values)
+    sizes = np.bincount(codes).astype(np.float64)
     rng = np.random.default_rng(seed)
-    picks = rng.integers(0, values.size, size=(RESAMPLES, values.size))
-    return values[picks].mean(axis=1)
+    picks = rng.integers(0, len(sums), size=(RESAMPLES, len(sums)))
+    if len(sums) == values.size:  # one query per cluster: the plain query bootstrap
+        return values[picks].mean(axis=1)
+    return sums[picks].sum(axis=1) / sizes[picks].sum(axis=1)

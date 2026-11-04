@@ -340,8 +340,9 @@ def score_outlines(
         can_tap += tap if was_located else best_any <= TOP
         found_any += was_located
         recalled += covered
-        tapped.append(QueryScore(item.query_id, best_tap, 1.0 / best_tap))
-        any_box.append(QueryScore(item.query_id, best_any, 1.0 / best_any))
+        room = "scene:" + "+".join(item.scenes)  # resampled by room photo (`cluster_of`)
+        tapped.append(QueryScore(item.query_id, best_tap, 1.0 / best_tap, cluster=room))
+        any_box.append(QueryScore(item.query_id, best_any, 1.0 / best_any, cluster=room))
     times = [1000 * r.detect_s for r in detections.rooms]
     return OutlineScore(
         rule=rule,

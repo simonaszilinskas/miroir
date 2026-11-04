@@ -40,6 +40,15 @@ class Query:
 _QUERY = TypeAdapter(Query)
 
 
+def cluster_of(query: Query) -> str:
+    """What the query is not independent of, for the bootstrap: its building or object (T2
+    holds 1,000 photos of 385 buildings), or for T3 its room photo(s), which every query of
+    the room is cropped from."""
+    if query.scene_image_ids:
+        return "scene:" + "+".join(query.scene_image_ids)
+    return query.entity_id
+
+
 def write_set(
     settings: Settings, set_id: str, tune: Sequence[Query], sealed: Sequence[Query]
 ) -> None:

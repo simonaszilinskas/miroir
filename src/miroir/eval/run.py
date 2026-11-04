@@ -25,6 +25,7 @@ from miroir.eval.scoring import (
     Difference,
     Gallery,
     Interval,
+    QueryScore,
     ScoreResult,
     SearchQuery,
     Shortlist,
@@ -34,7 +35,7 @@ from miroir.eval.scoring import (
     score,
     shortlists,
 )
-from miroir.eval.sets import Query, load_queries, read_gallery, write_gallery
+from miroir.eval.sets import Query, cluster_of, load_queries, read_gallery, write_gallery
 from miroir.eval.vectors import VectorSet, merge_runs, read_vectors
 from miroir.jobs.spend import SpendKind, SpendLedger
 from miroir.records.store import read_commons, read_images, read_records
@@ -326,13 +327,22 @@ def score_by_view(
     scored = find_set_score(read_result(result), test_set, "tune", gallery)
     image_of = {q.query_id: q.query_image_id for q in load_queries(settings, test_set, "tune")}
     view_of = {i: p.view for i, p in commons_photos(settings).items()}
-    by_view: dict[View, list[int]] = {}
+    by_view: dict[View, list[QueryScore]] = {}
     for q in scored.per_query:
-        by_view.setdefault(view_of[image_of[q.query_id]], []).append(q.rank)
-    return tuple(
-        ViewScore(view, len(ranks), bootstrap(hits(ranks, 1)), bootstrap(hits(ranks, 10)))
-        for view, ranks in sorted(by_view.items())
-    )
+        by_view.setdefault(view_of[image_of[q.query_id]], []).append(q)
+    out: list[ViewScore] = []
+    for view, scores in sorted(by_view.items()):
+        ranks = [q.rank for q in scores]
+        clusters = [q.cluster for q in scores]
+        out.append(
+            ViewScore(
+                view,
+                len(ranks),
+                bootstrap(hits(ranks, 1), clusters=clusters),
+                bootstrap(hits(ranks, 10), clusters=clusters),
+            )
+        )
+    return tuple(out)
 
 
 def search_queries(queries: list[Query]) -> list[SearchQuery]:
@@ -349,6 +359,7 @@ def search_queries(queries: list[Query]) -> list[SearchQuery]:
             image_id=q.query_image_id,
             entity_ids=q.expected_entity_ids,
             excluded_image_ids=q.exclude_image_ids,
+            cluster=cluster_of(q),
         )
         for q in queries
     ]

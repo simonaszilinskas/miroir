@@ -309,8 +309,8 @@ def _set_score(index: WebIndex, part: Subset, mixer: Mixer) -> SetScore:
     ranked = ranks(part.signals, mixer)
     result = ScoreResult(
         per_query=tuple(
-            QueryScore(q, int(r), 1.0 / int(r))
-            for q, r in zip(part.signals.query_ids, ranked, strict=True)
+            QueryScore(q, int(r), 1.0 / int(r), cluster=index.catalog.entity_ids[int(e)])
+            for q, r, e in zip(part.signals.query_ids, ranked, part.signals.right, strict=True)
         ),
         skipped_no_answer=0,
         gallery_images=len(index.catalog.images),

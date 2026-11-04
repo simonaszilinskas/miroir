@@ -147,6 +147,45 @@ def test_bootstrap_is_seeded() -> None:
     assert bootstrap(values) == bootstrap(values)
 
 
+def test_bootstrap_resamples_clusters_not_queries() -> None:
+    # 20 buildings, 10 photos each, all right or all wrong: 20 draws, not 200.
+    values = np.repeat((np.arange(20) % 2).astype(np.float64), 10)
+    clusters = [f"PA{i // 10}" for i in range(200)]
+    iid = bootstrap(values)
+    clustered = bootstrap(values, clusters=clusters)
+    assert clustered.value == iid.value == 0.5
+    half_width = 1.96 * 0.5 / np.sqrt(20)  # about 0.22, against 0.07 query by query
+    assert clustered.high - clustered.value == pytest.approx(half_width, abs=0.05)
+    assert iid.high - iid.value < 0.1
+
+
+def test_one_query_per_cluster_bootstraps_as_before() -> None:
+    values = np.random.default_rng(3).random(100)
+    assert bootstrap(values, clusters=[f"e{i}" for i in range(100)]) == bootstrap(values)
+
+
+def test_paired_bootstrap_resamples_the_clusters_of_the_scores() -> None:
+    # Two buildings: on one, a wins all ten photos; on the other, it ties.
+    better = [QueryScore(f"q{i}", 1, 1.0, cluster=f"PA{i // 10}") for i in range(20)]
+    worse = [
+        QueryScore(f"q{i}", 1 if i >= 10 else 20, 1.0, cluster=f"PA{i // 10}") for i in range(20)
+    ]
+    by_query = {d.metric: d for d in paired_bootstrap(_scores_of(better), _scores_of(worse))}
+    by_building = {d.metric: d for d in paired_bootstrap(better, worse)}
+    assert by_building["hit@1"].diff.value == by_query["hit@1"].diff.value == 0.5
+    assert by_building["hit@1"].share_not_better > by_query["hit@1"].share_not_better
+
+
+def _scores_of(scores: list[QueryScore]) -> list[QueryScore]:
+    """The same scores with no cluster: each query its own."""
+    return [QueryScore(q.query_id, q.rank, q.ap) for q in scores]
+
+
+def test_a_query_score_reads_its_cluster_from_the_query() -> None:
+    hit = one(SearchQuery("q1", "q", ("X",), cluster="PA1"))
+    assert hit.cluster == "PA1"
+
+
 def _scores(ranks: list[int]) -> list[QueryScore]:
     return [QueryScore(f"q{i}", r, 1 / r) for i, r in enumerate(ranks)]
 

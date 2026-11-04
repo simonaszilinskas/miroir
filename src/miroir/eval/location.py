@@ -167,7 +167,9 @@ def rank(searched: Searched, change: Change) -> ScoreResult:
         found = tie_ranks(row, alive) if alive else []
         ranks = [*found, *[worst] * (len(codes) - len(alive))]
         ap = average_precision(found) * len(found) / len(ranks) if found else 0.0
-        per_query.append(QueryScore(searched.query_ids[j], ranks[0], ap))
+        per_query.append(
+            QueryScore(searched.query_ids[j], ranks[0], ap, cluster=searched.query_entities[j])
+        )
     return ScoreResult(
         per_query=tuple(per_query),
         skipped_no_answer=skipped,

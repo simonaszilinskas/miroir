@@ -146,7 +146,7 @@ Two more sets test finding the whole from a part (the plan in `docs/search-level
 For every run:
 
 - **Accuracy:** hit rate in the top 1, 5 and 10, and mean average precision where a query has several right answers
-- **Error bars:** 95% bootstrap intervals (1,000 resamples). Differences between options use a paired bootstrap on the same queries
+- **Error bars:** 95% bootstrap intervals (1,000 resamples) over clusters, not queries: the photos of one building or object, the crops of one room photo (T3), are drawn together. T2 is 1,000 photos of 385 buildings, so resampling photos one by one made its intervals too narrow. Differences between options use a paired bootstrap of the same clusters. Results scored before 2026-11 resampled queries one by one
 - **Time:** median and 95th-percentile search time, on CPU and on GPU
 - **Size:** index size on disk and in memory
 - **Money:** indexing cost, and cost per 1,000 searches for paid models

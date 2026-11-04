@@ -409,7 +409,11 @@ def score(
             found = [c.entity_id for c in response.cards]
             rank = next((n + 1 for n, e in enumerate(found) if e in q.expected_entity_ids), 0)
             ranks.append(rank)
-            per_query.append(QueryScore(q.query_id, rank or TOP + 1, 1.0 / rank if rank else 0.0))
+            per_query.append(
+                QueryScore(
+                    q.query_id, rank or TOP + 1, 1.0 / rank if rank else 0.0, cluster=q.entity_id
+                )
+            )
         r = np.asarray(ranks)
         hits = {k: float(((r >= 1) & (r <= k)).mean()) for k in (1, 5, 10)}
         out.append(RuleScore(label, rule, hits, len(photos), with_place, right_place))
