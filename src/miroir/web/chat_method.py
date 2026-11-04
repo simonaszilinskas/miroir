@@ -49,6 +49,8 @@ LOOK_FIRST = 4
 #: Looks at thumbnails per visitor message, apart from the searches (the smoke test with
 #: Mistral spent its 8 calls on searches and could not check its picks by eye).
 MAX_VIEWS = 6
+#: Replies in a row whose every call was refused; then the turn ends.
+MAX_REFUSED = 2
 #: The first look's results that start the best-so-far.
 FIRST_BEST = 3
 

@@ -28,11 +28,13 @@ from tests.test_web_chat import (
     Rig,
     body_text,
     call,
+    calls,
     card_ids,
     of,
     searching,
     shown,
     tool_messages,
+    tool_names,
 )
 
 NOT_SURE = 1.5
@@ -189,8 +191,12 @@ def test_three_searches_without_a_sure_match_leave_only_a_question_or_the_result
         searching("image_search", {"model": "A3"}),
         searching("text_search", {"query": "église portail"}),
         searching("more_like", {"entity_id": "PA1"}),
-        searching("image_search", {"model": "A7"}),
-        searching("view_results", {"entity_ids": ["OBJ2"]}),
+        calls(
+            [
+                ("image_search", {"model": "A7", "why": WHY}),
+                ("view_results", {"entity_ids": ["OBJ2"], "why": WHY}),
+            ]
+        ),
         call("ask_visitor", ASK),
     ]
     with Rig(script, cutoff=NOT_SURE) as rig:
@@ -247,6 +253,31 @@ def test_a_search_that_brings_a_new_best_resets_the_stale_count(
     replies = last_tools(rig)
     assert [r.startswith("not run") for r in replies[:4]] == [False, False, False, True]
     assert "Best so far: PA1 (Église Saint-Pierre" in replies[1]
+
+
+def test_a_locked_turn_offers_only_the_finishing_tools_and_ends_after_two_refused_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model once kept calling refused searches, each a paid call, while the request still
+    offered them."""
+    monkeypatch.setattr(chat_method, "MAX_SEARCHES", 1)
+    script = [
+        LOOK,
+        searching("image_search", {"model": "A3"}),
+        searching("image_search", {"model": "A7"}),
+        searching("text_search", {"query": "église"}),
+        shown("OBJ1"),  # never asked for
+    ]
+    with Rig(script, cutoff=NOT_SURE) as rig:
+        cid = rig.start()
+        events = rig.send(cid, "goal", EXACT)
+    assert len(rig.model.bodies) == 4
+    finishing = {"ask_visitor", "ask_region", "show_results", "read_record"}
+    assert tool_names(rig.model.bodies[1]) > finishing
+    assert tool_names(rig.model.bodies[2]) == finishing
+    assert tool_names(rig.model.bodies[3]) == finishing
+    assert events[-1]["waiting"] == "message"
+    assert str(of(events, "say")[-1]["text"]).startswith("Je m’arrête là")
 
 
 def test_best_names_only_records_the_model_has_seen() -> None:

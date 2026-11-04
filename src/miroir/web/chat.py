@@ -39,7 +39,7 @@ from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import DETECT_SIDE, Box, Outlines
 from miroir.web import chat_method, chat_prompts
 from miroir.web.catalog import Catalog, CatalogRecord, Filters
-from miroir.web.chat_method import COUNTED, Method
+from miroir.web.chat_method import COUNTED, FINISHING, MAX_REFUSED, Method
 from miroir.web.chat_model import ChatModel, MistralModel, ModelError, OpenRouterModel, chat_model
 from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE, ONESHOT_NOTE
 from miroir.web.chat_render import (
@@ -195,7 +195,7 @@ class _Reply:
     """One model reply's messages: its tool calls, then a reply to each. They join the
     conversation only once every call has its reply."""
 
-    __slots__ = ("messages", "thumbs", "wait", "waiting")
+    __slots__ = ("messages", "refused", "thumbs", "wait", "waiting")
 
     def __init__(self, assistant: Message) -> None:
         self.messages: list[Message] = [assistant]
@@ -204,6 +204,8 @@ class _Reply:
         self.wait: tuple[Wait, int] | None = None
         """What a question waits for, and its tool reply's index in `messages`."""
         self.waiting: str | None = None
+        self.refused = 0
+        """Calls the method refused."""
 
 
 class Conversation:
@@ -666,10 +668,13 @@ class ChatService:
         tools = tools_for(photo=c.photo_bytes is not None, ask=not c.oneshot)
         c.method.new_turn()
         schemas = [t.schema() for t in tools]
+        # Locked or out of searches, the model is offered only what still runs.
+        finishing = [t.schema() for t in tools if t.name in FINISHING]
         offered = {t.name.value for t in tools}
         told_last = False
         told_lock = False
         nudged = False
+        refused = 0
         for _ in range(MAX_MODEL_CALLS):
             out_of_calls = c.method.out_of_calls
             if out_of_calls and not told_last:
@@ -685,7 +690,7 @@ class ChatService:
                 told_lock = True
             body: dict[str, JSON] = {
                 "messages": self._render(c),
-                "tools": schemas,
+                "tools": finishing if c.method.finishing else schemas,
                 "tool_choice": "required" if out_of_calls or told_lock else "auto",
                 "max_tokens": MAX_TOKENS,
             }
@@ -716,6 +721,10 @@ class ChatService:
             c.messages.extend(reply.messages)
             if reply.waiting is not None:
                 return reply.waiting
+            refused = refused + 1 if reply.refused == len(ids) else 0
+            if refused >= MAX_REFUSED:  # each refused reply is a paid call that did nothing
+                logger.info("chat %s: %d replies refused in a row", c.id[:8], refused)
+                break
         c.emit({"type": "say", "text": chat_prompts.GAVE_UP})
         return "message"
 
@@ -780,6 +789,7 @@ class ChatService:
                 call.name, args, offered=offered, waiting=reply.waiting is not None, seen=c.seen
             )
             if refused is not None:
+                reply.refused += 1
                 reply.messages.append(tool_message(call_id, call.name, refused))
                 c.log({"type": "tool", "name": call.name, "args": redact(args), "refused": refused})
                 logger.info("chat %s: %s refused: %s", c.id[:8], call.name, refused[:60])
