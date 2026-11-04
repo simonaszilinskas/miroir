@@ -11,11 +11,11 @@ Sur 680 photos de test, cherchées parmi 147 000 images, la bonne notice arrive 
 
 Ces chiffres sont ceux de la moitié « réglage » des photos de test : les réglages ont été choisis dessus, ils sont donc optimistes. L'autre moitié, scellée, sera mesurée une seule fois, après l'indexation de tout POP.
 
-Pour l'instant, un grand point faible : sans la position du téléphone, un bâtiment n'est dans les 10 premières réponses qu'une fois sur trois (37 % ; 43 % dans les 50 premières). Le site ne couvre encore que 5 % de POP (101 000 notices sur 2,1 millions). La prochaine étape est d'indexer tout POP, pour environ 140 € de calcul, puis de le tester avec de vrais visiteurs.
+Pour l'instant, un grand point faible : sans la position du téléphone, un bâtiment n'est dans les 10 premières réponses qu'une fois sur trois (37 % ; 43 % dans les 50 premières). Ces mesures portent sur 5 % de POP (101 000 notices sur 2,1 millions). Depuis le 3 novembre, le site cherche dans tout POP ; la prochaine étape est d'y refaire l'index et les mesures, puis de le tester avec de vrais visiteurs.
 
-![La recherche simple de MIROIR sur ordinateur et sur téléphone](docs/images/miroir-1-accueil.jpg)
+![La recherche de MIROIR sur ordinateur et sur téléphone](docs/images/miroir-1-accueil.jpg)
 
-*La recherche simple, capture du 13 octobre 2026. Depuis le 19 octobre, la page d'accueil propose d'abord de choisir entre la recherche simple et la recherche agentique.*
+*La recherche, capture du 13 octobre 2026. Depuis le 3 novembre, la page d'accueil est la recherche elle-même, avec un choix « Rapide » ou « Approfondi ».*
 
 ## Sommaire
 
@@ -44,12 +44,12 @@ Pour l'instant, un grand point faible : sans la position du téléphone, un bât
 
 Un premier prototype tourne sur une machine Scaleway allumée pour les démonstrations : **<https://51-159-130-27.sslip.io>**. Mot de passe : demandez-le au porteur du projet. La machine s'allume avec `uv run miroir demo up` (environ 5 minutes) et s'éteint seule après une heure sans visiteur ; le détail est dans [docs/prototype.md](docs/prototype.md), section Hosting. Elle cherche dans tout POP : 2,1 millions de notices avec image. Une recherche prend moins d'une seconde.
 
-La page d'accueil propose deux recherches. Des photos d'œuvres de POP flottent autour du titre.
+La page d'accueil est la recherche : une photo, quelques mots ou les deux, des filtres, et un choix entre deux façons de chercher. Des photos d'œuvres de POP flottent autour du titre.
 
-- **Recherche simple** (`#/simple`) : une photo ou quelques mots, et la liste des notices les plus proches en quelques secondes. Elle couvre les quatre cas ci-dessous.
-- **Recherche agentique** (`#/agentique`, expérimentale) : le visiteur dit ce qu'il cherche (« C'est quoi ? », « C'est où ? », « D'autres comme ça », « Qui l'a fait ? »). Un modèle ouvert, Mistral Large 4, mène la recherche avec les mêmes outils, regarde les images, pose une question si besoin et explique chaque notice retenue. Une conversation prend environ une minute. La photo du visiteur part chez OpenRouter, qui sert ce modèle ; la page le dit. Les dépenses sont plafonnées par conversation et par jour.
+- **Rapide** : la liste des notices les plus proches en quelques secondes. Elle couvre les quatre cas ci-dessous.
+- **Approfondi** (expérimental) : un modèle ouvert, Mistral Large 4, mène la recherche avec les mêmes outils, regarde les images, pose une question au visiteur si besoin et explique chaque notice retenue. Une recherche prend environ une minute. La photo du visiteur part chez Mistral ou OpenRouter, qui servent ce modèle ; la page le dit. Les dépenses sont plafonnées par conversation et par jour. Après une recherche rapide, « Aller plus loin » lance la recherche approfondie.
 
-Dans la recherche simple :
+Dans la recherche rapide :
 
 1. **Photo d'un bâtiment.** Le site devine qu'il s'agit d'un bâtiment et cherche parmi les photos de POP et 10 221 photos de Wikimedia Commons rattachées à 2 726 monuments. Pourquoi Commons : les photos de POP sont souvent anciennes, en noir et blanc, prises sous un seul angle ; celles de Commons, sous licence libre, sont récentes, en couleur et prises de partout, comme celles d'un visiteur. Elles ont fait passer les bâtiments trouvés sans position de 27 % à 37 %. Elles servent seulement de repère : le visiteur ne voit que des notices et des images de POP. Si la photo porte sa position, ou si le visiteur active « Utiliser ma position », les monuments proches passent en tête. La position sert à cette recherche seulement et n'est pas gardée.
 2. **Photo d'une salle de musée.** Le site entoure jusqu'à 20 œuvres, les plus grandes et les plus centrales d'abord. Le visiteur touche celle qui l'intéresse.
@@ -129,7 +129,7 @@ sequenceDiagram
     S-->>V: 7. Notices classées, chacune avec son niveau et son lien vers POP
 ```
 
-En haut, ce que fait le visiteur ; sur la ligne du serveur, ce qui se passe en coulisses. Les étapes 2 et 3 ne servent que pour une photo qui montre plusieurs œuvres, comme une salle de musée. Pour une recherche par mots, le serveur passe directement à l'étape 5. La recherche simple tourne sur des modèles ouverts, sur des serveurs que je loue. La recherche agentique y ajoute Mistral Large 4, un modèle ouvert servi par OpenRouter.
+En haut, ce que fait le visiteur ; sur la ligne du serveur, ce qui se passe en coulisses. Les étapes 2 et 3 ne servent que pour une photo qui montre plusieurs œuvres, comme une salle de musée. Pour une recherche par mots, le serveur passe directement à l'étape 5. La recherche rapide tourne sur des modèles ouverts, sur des serveurs que je loue. La recherche approfondie y ajoute Mistral Large 4, un modèle ouvert servi par Mistral ou OpenRouter.
 
 ## Ce que j'ai essayé
 
@@ -192,7 +192,7 @@ Tout POP compte 15 fois plus d'images : il faut s'attendre à une nouvelle baiss
 
 - **Aucun vrai visiteur ne l'a encore utilisé.** Les chiffres viennent de photos de test ; il faut des essais avec de vrais utilisateurs.
 - **Sans la position du téléphone, un bâtiment n'est trouvé qu'une fois sur trois.** Ajouter des photos Commons à tous les bâtiments (2 726 sur 3 924 en ont aujourd'hui) est la prochaine piste.
-- **Droits des images.** La recherche simple n'envoie aucune image à un service d'IA tiers : tout tourne sur des modèles ouverts que j'héberge. La recherche agentique envoie à OpenRouter la photo du visiteur et des vignettes des seules images de POP publiables. Les photos Commons servent seulement à la recherche ; le site n'affiche que des images de POP.
+- **Droits des images.** La recherche rapide n'envoie aucune image à un service d'IA tiers : tout tourne sur des modèles ouverts que j'héberge. La recherche approfondie envoie à Mistral ou OpenRouter la photo du visiteur et des vignettes des seules images de POP publiables. Les photos Commons servent seulement à la recherche ; le site n'affiche que des images de POP.
 
 ## Prochaines étapes
 
@@ -223,7 +223,7 @@ Pour mettre en ligne : voir [docs/prototype.md](docs/prototype.md), section Host
 
 ## Utiliser MIROIR depuis ChatGPT ou Claude
 
-Le site est aussi un serveur MCP : ChatGPT ou Claude peuvent chercher dans POP à travers MIROIR, seuls. Trois outils : `search` (la recherche simple, par mots ou par lien vers une photo, avec filtres et position), `fetch` (une notice en entier) et `delegate_search` (l'agent de MIROIR mène la recherche et explique chaque choix ; il peut poser une question, que ChatGPT ou Claude relaie). Chaque client reçoit un jeton secret :
+Le site est aussi un serveur MCP : ChatGPT ou Claude peuvent chercher dans POP à travers MIROIR, seuls. Trois outils : `search` (la recherche rapide, par mots ou par lien vers une photo, avec filtres et position), `fetch` (une notice en entier) et `delegate_search` (l'agent de MIROIR mène la recherche et explique chaque choix ; il peut poser une question, que ChatGPT ou Claude relaie). Chaque client reçoit un jeton secret :
 
 ```sh
 uv run miroir web mcp-token chatgpt --show   # affiche /mcp/<jeton>

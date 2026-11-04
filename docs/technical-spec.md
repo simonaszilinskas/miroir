@@ -443,7 +443,7 @@ uv run miroir vlm h4 --all --max-usd <usd>        # every tune query; writes the
 
 ## 8. Website
 
-> **Built (2026-10-19).** One static page (`src/miroir/web/static/`: `index.html`, `app.js`, `chat.js`, `hero.js`, DSFR 1.15.4), not SvelteKit. The home page (`#/`) offers two tiles: "Recherche simple" (`#/simple`) and "Recherche agentique" (`#/agentique`, §8.1); photos of POP works float around the title (`hero.js`). Login is one shared password set by `miroir web secret`, not accounts. The rest of this list holds as written. What the visitor sees: [prototype.md](prototype.md).
+> **Built (2026-11-03).** A React app in `web-ui/` with the DSFR (`@codegouvfr/react-dsfr`), not SvelteKit, built by `make ui` into `src/miroir/web/ui/`. The home page (`#/`) is the search: one card for a photo, words or both, filters, and a **Rapide / Approfondi** switch (Approfondi is §8.1); photos of POP works float around the title. Login is one shared password set by `miroir web secret`, not accounts. The rest of this list holds as written. What the visitor sees: [prototype.md](prototype.md).
 
 - **Stack.** SvelteKit with Tailwind, built phone-first. The camera opens through `<input type="file" accept="image/*" capture="environment">`.
 - **Photo view.** After upload, the site calls `/detect` and draws the boxes. Tapping a box, or drawing a new one, calls `/search` with that box.
@@ -452,12 +452,12 @@ uv run miroir vlm h4 --all --max-usd <usd>        # every tune query; writes the
 
 ### 8.1 The conversation page (step H5)
 
-An experiment beside the usual search, at `#/agentique` (`/chat` and the old `#/conversation` lead there). The home page offers two searches as DSFR tiles, "Recherche simple" (`#/simple`) and "Recherche agentique" (`#/agentique`), each with a line on what it does and how long it takes. Each opens its own page: a title, the photo and words inputs, examples and three steps. On the agentic page an example opens a conversation with that photo. Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
+An experiment beside the usual search: the **Approfondi** side of the home page's switch, or "Aller plus loin" under a Rapide search's results (`/chat` leads to the home). Same login as the rest of the site. An open vision model leads the search, as H4 did offline, but on a visitor's new photo and the live index.
 
 **Flow.**
 
 1. The visitor gives a photo, words, or both (`POST /api/chat/open`). With a photo, the site's usual search (G5, with the photo's GPS position when it has one) starts at once, while the visitor writes what they want.
-2. The page asks "Que cherchez-vous ?" in a free-text box, with suggestion chips above it ("C'est quoi ?", "C'est où ?", "D'autres comme ça", "Qui l'a fait ?"; `GOAL_CHIPS` in `static/chat.js`, the one place to change them). The goal is the first thing the model reads, with the photo, the visitor's words and the first look (the usual search's top 10, with their levels). The brief tells the model how a goal changes the search: one record and 1 to 5 picks for "what is it", where the records place it for "where is it", up to 10 look-alikes for "more like this", the records' author and date for "who made it".
+2. The page sends the goal: find the POP record of what the photo shows, or of the description (`DEEP_GOAL` in `web-ui/src/content.ts`); a visitor who writes again refines it. The goal is the first thing the model reads, with the photo, the visitor's words and the first look (the usual search's top 10, with their levels). The brief tells the model how a goal changes the search: one record and 1 to 5 picks for "what is it", where the records place it for "where is it", up to 10 look-alikes for "more like this", the records' author and date for "who made it".
 3. The model calls tools until it shows results or asks the visitor something. Questions fit the subject (a building, a painting, an object and an archive print need different ones); the model gives 2 to 4 suggested answers, and the page always adds a free-text box (the main way to answer) and "Je ne sais pas". It may offer "Utiliser ma position". `ask_region` opens the site's framing step on the visitor's photo; the framed part comes back as an image the model can search.
 4. `show_results` ends the turn: the page shows the model's summary, then the site's result cards, each with the model's short reason, under a line that says what was found. Ids the model never saw in a result are dropped. The visitor can write again ("pas celle-ci, l'église est plus ancienne"), and the model searches again.
 
