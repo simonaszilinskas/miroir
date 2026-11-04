@@ -179,7 +179,8 @@ def _tasks(
             if jpeg is None:
                 logger.warning("%s: Commons photo not fetched; left out", qid)
                 continue
-            tasks.append(SiteMatchTask(qid, hit.best_images, jpeg=prepare_photo(jpeg)))
+            photo = prepare_photo(jpeg)  # the id names it for the privacy gate
+            tasks.append(SiteMatchTask(qid, hit.best_images, image_id=image_id, jpeg=photo))
         else:
             tasks.append(SiteMatchTask(qid, hit.best_images, image_id=image_id))
     return tasks
