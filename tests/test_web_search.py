@@ -15,7 +15,7 @@ from miroir.images.upload import UnreadablePhotoError
 from miroir.records.store import write_places as write_places_parquet
 from miroir.web import facets, ranking
 from miroir.web.bundle import add_places, cutoff_for
-from miroir.web.catalog import CATALOG_FILE, CatalogData, Filters, write_catalog
+from miroir.web.catalog import CATALOG_FILE, Catalog, CatalogData, Filters, write_catalog
 from miroir.web.engine import Engine, SearchRequest, prepare_photo
 from miroir.web.levels import WORDS_ROUTE, Level, Levels, RouteLevels
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, Position, read_places, write_places
@@ -85,6 +85,57 @@ def test_filters_apply_before_ranking() -> None:
     request = SearchRequest(image=h.photo(130), filters=Filters(collections=("memoire",)))
     response = engine.search(request)
     assert [c.entity_id for c in response.cards] == ["PA1"]
+
+
+def _random_catalog(count: int) -> Catalog:
+    rng = np.random.default_rng(7)
+
+    def pick(values: tuple[str | None, ...]) -> str | None:
+        return values[int(rng.integers(len(values)))]
+
+    records = tuple(
+        h.record(
+            f"R{n}",
+            f"E{int(rng.integers(count // 3))}",
+            str(pick(("memoire", "joconde", "merimee"))),
+            region=pick(("Occitanie", "Bretagne", "Midi-Pyrénées", None)),
+            departement=pick(("Gard", "Finistère", None)),
+            domain=tuple(
+                d for d in ("peinture", "architecture", "céramique") if rng.random() < 0.4
+            ),
+            period=tuple(p for p in ("18e siècle", "1880", "Moyen Age") if rng.random() < 0.4),
+        )
+        for n in range(count)
+    )
+    images = tuple(h.image(f"i{n}", r.entity_id, r.ref) for n, r in enumerate(records))
+    return Catalog(CatalogData(images=images, records=records))
+
+
+def test_filters_and_record_lists_match_a_plain_scan_of_every_record() -> None:
+    catalog = _random_catalog(300)
+    every = [
+        Filters(collections=("memoire", "merimee")),
+        Filters(collections=("nothing",)),
+        Filters(region="Occitanie"),
+        Filters(region="Nowhere"),
+        Filters(departement="Gard"),
+        Filters(domain="Peinture", period="18e siècle"),
+        Filters(collections=("joconde",), region="Bretagne", domain="Architecture"),
+    ]
+    for f in every:
+        plain = [
+            (not f.collections or r.collection in f.collections)
+            and (not f.region or facets.region(r.region) == f.region)
+            and (not f.departement or r.departement == f.departement)
+            and (not f.domain or f.domain in {facets.domain(d) for d in r.domain})
+            and (not f.period or f.period in set(facets.periods(r.period)))
+            for r in catalog.records
+        ]
+        assert catalog.record_mask(f).tolist() == plain, f
+    assert any(catalog.record_mask(every[5]))  # the tidied values do match something
+    for row, entity in enumerate(catalog.entity_ids):
+        plain_records = [r for r in catalog.records if r.entity_id == entity]
+        assert catalog.entity_records(row) == plain_records
 
 
 def test_a_commons_photo_follows_its_entity_records_through_filters() -> None:

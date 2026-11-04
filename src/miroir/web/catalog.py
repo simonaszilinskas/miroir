@@ -214,6 +214,17 @@ class Catalog:
         self._domains = tuple(frozenset(facets.domain(d) for d in r.domain) for r in self.records)
         self._periods = tuple(frozenset(facets.periods(r.period)) for r in self.records)
         self.image_row = {i.image_id: n for n, i in enumerate(self.images)}
+        # Filters and record pages over 2 million records: codes and indexes made once, so
+        # a search never loops over the records in Python.
+        self._collection = _Codes([r.collection for r in self.records])
+        self._region = _Codes(self._regions)
+        self._departement = _Codes([r.departement for r in self.records])
+        self._domain_rows = _rows_holding(self._domains)
+        self._period_rows = _rows_holding(self._periods)
+        self._record_order: Ints = np.argsort(self.record_entity, kind="stable")
+        self._record_starts: Ints = np.searchsorted(
+            self.record_entity[self._record_order], np.arange(self.entity_count + 1)
+        ).astype(np.int64)
 
     @property
     def entity_count(self) -> int:
@@ -224,17 +235,21 @@ class Catalog:
     def record_mask(self, filters: Filters) -> Bools:
         keep = np.ones(len(self.records), dtype=bool)
         if filters.collections:
-            wanted = set(filters.collections)
-            keep &= np.fromiter((r.collection in wanted for r in self.records), bool)
+            keep &= self._collection.mask(filters.collections)
         if filters.region:
-            keep &= np.fromiter((r == filters.region for r in self._regions), bool)
+            keep &= self._region.mask((filters.region,))
         if filters.departement:
-            keep &= np.fromiter((r.departement == filters.departement for r in self.records), bool)
+            keep &= self._departement.mask((filters.departement,))
         if filters.domain:
-            keep &= np.fromiter((filters.domain in d for d in self._domains), bool)
+            keep &= self._holding(self._domain_rows, filters.domain)
         if filters.period:
-            keep &= np.fromiter((filters.period in p for p in self._periods), bool)
+            keep &= self._holding(self._period_rows, filters.period)
         return keep
+
+    def _holding(self, rows: dict[str, Ints], value: str) -> Bools:
+        out = np.zeros(len(self.records), dtype=bool)
+        out[rows.get(value, np.zeros(0, dtype=np.int64))] = True
+        return out
 
     def image_mask(self, filters: Filters) -> Bools:
         """Images a filtered search may return. A Commons photo follows its entity's records."""
@@ -303,11 +318,37 @@ class Catalog:
         return np.sort(self.entity_order[start:end])
 
     def entity_records(self, entity: int) -> list[CatalogRecord]:
-        return [self.records[int(i)] for i in np.flatnonzero(self.record_entity == entity)]
+        """Records of one entity (by entity row), in catalog order."""
+        start, end = self._record_starts[entity], self._record_starts[entity + 1]
+        return [self.records[int(i)] for i in self._record_order[start:end]]
 
     def record_of(self, image_row: int) -> CatalogRecord | None:
         row = int(self.image_record[image_row])
         return None if row < 0 else self.records[row]
+
+
+class _Codes:
+    """One value per record as an integer code: a filter is one comparison over an array."""
+
+    def __init__(self, values: Sequence[str | None]) -> None:
+        self._code: dict[str, int] = {}
+        codes = np.empty(len(values), dtype=np.int32)
+        for n, value in enumerate(values):
+            codes[n] = -1 if value is None else self._code.setdefault(value, len(self._code))
+        self._codes = codes
+
+    def mask(self, wanted: Sequence[str]) -> Bools:
+        known = [self._code[w] for w in wanted if w in self._code]
+        return np.isin(self._codes, np.asarray(known, dtype=np.int32))
+
+
+def _rows_holding(values: Sequence[frozenset[str]]) -> dict[str, Ints]:
+    """For each value, the records whose set holds it."""
+    rows: dict[str, list[int]] = {}
+    for n, held in enumerate(values):
+        for value in held:
+            rows.setdefault(value, []).append(n)
+    return {v: np.asarray(r, dtype=np.int64) for v, r in rows.items()}
 
 
 def _name_key(item: tuple[str, int]) -> str:
