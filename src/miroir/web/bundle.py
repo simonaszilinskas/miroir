@@ -36,7 +36,7 @@ from miroir.jobs.privacy import PublishableImages
 from miroir.records.extra import read_site_records
 from miroir.records.model import Record
 from miroir.records.store import read_commons, read_places
-from miroir.web.calibrate import calibrate, score_sets
+from miroir.web.calibrate import calibrate, draft_routing, score_sets
 from miroir.web.catalog import (
     CATALOG_FILE,
     Catalog,
@@ -49,7 +49,7 @@ from miroir.web.catalog import (
 )
 from miroir.web.engine import A3_FILE, A3_PROJECTION_FILE, A7_FILE
 from miroir.web.levels import LEVELS_FILE
-from miroir.web.measure import GALLERY_CHUNK, IDS_FILE, BundleVectors, QuerySets
+from miroir.web.measure import GALLERY_CHUNK, IDS_FILE, BundleVectors, SiteBundle, tune_sets
 from miroir.web.nearby import PLACES_FILE, write_places
 from miroir.web.publishable import PUBLISHABLE_FILE, write_publishable
 from miroir.web.routing import (
@@ -219,13 +219,14 @@ def build_index(settings: Settings, name: str) -> Path:
     write_guess(out / GUESS_FILE, guess)
 
     vectors = BundleVectors.load(out)
-    queries = QuerySets.load(settings, spec, ids, None)  # `BundleVectors` projects them
-    routing, cutoff_report = calibrate(catalog, vectors, guess, queries, name)
+    sets = tune_sets(settings, spec, catalog)
+    unrouted = SiteBundle(catalog, vectors, guess, routing=draft_routing())
+    routing, cutoff_report = calibrate(unrouted, sets, name)
     write_routing(out / ROUTING_FILE, routing)
     report = {
         "index": name,
         "cutoffs": cutoff_report,
-        "ranking": score_sets(catalog, vectors, guess, routing, queries),
+        "ranking": score_sets(SiteBundle(catalog, vectors, guess, routing), sets),
     }
     (out / REPORT_FILE).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     # The object margin rule (`miroir web sure`) and the card levels (`miroir web levels`)

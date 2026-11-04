@@ -36,7 +36,7 @@ from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, Machine
 from miroir.jobs.spend import BudgetError, SpendKind
 from miroir.web.bundle import INDEXES
 from miroir.web.engine import prepare_photo
-from miroir.web.measure import SiteBundle, SiteHit, asked_sets, site_search
+from miroir.web.measure import SiteBundle, SiteHit, site_search, tune_sets
 from miroir.web.routing import PhotoType
 
 logger = logging.getLogger(__name__)
@@ -112,13 +112,13 @@ def search_sets(settings: Settings, bundle: SiteBundle, index: str = WEB_INDEX) 
     path = searched_path(settings, index)
     if path.exists():
         return _SEARCHED.validate_json(path.read_bytes())
-    asked = asked_sets(settings, INDEXES[index])
+    asked = tune_sets(settings, INDEXES[index], bundle.catalog)
     out: list[Searched] = []
     for set_id in SETS:
         if set_id not in asked:
             continue
         a = asked[set_id]
-        hits = site_search(bundle, a.a7, a.a3, hidden=a.hidden, right=a.right, top=SHORTLIST)
+        hits = site_search(bundle, a, top=SHORTLIST)
         out.append(Searched(set_id, a.query_ids, a.query_image_ids, tuple(hits)))
         logger.info("%s: %d queries searched", set_id, len(hits))
     path.parent.mkdir(parents=True, exist_ok=True)

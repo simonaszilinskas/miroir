@@ -65,8 +65,11 @@ class Bucket:
     def accepts(self, photo_type: PhotoType, chroma: float | None, grey_below: float) -> bool:
         if self.photo_type is not None and self.photo_type is not photo_type:
             return False
-        if self.greyscale is None or chroma is None:
+        if self.greyscale is None:
             return True
+        if chroma is None:
+            msg = f"bucket {self.name} routes on black and white: give the photo's chroma spread"
+            raise ValueError(msg)
         return (chroma < grey_below) is self.greyscale
 
 
@@ -112,12 +115,23 @@ class Routing:
             raise ValueError(msg)
 
     def choose(self, photo_type: PhotoType, chroma: float | None) -> Bucket:
-        """The first bucket the photo fits. With no chroma spread, greyscale is not asked."""
+        """The first bucket the photo fits. A photo without its chroma spread (None) is
+        refused by a bucket that asks for black and white: it would take every building to
+        the archive bucket."""
         for bucket in self.buckets:
             if bucket.accepts(photo_type, chroma, self.grey_below):
                 return bucket
         msg = f"no routing bucket takes a {photo_type} photo (chroma spread {chroma})"
         raise ValueError(msg)
+
+
+def route(
+    routing: Routing, guess: Guess, a7_query: Floats, chroma: float | None
+) -> tuple[PhotoType, Bucket]:
+    """Where a photo goes: its guessed type (G4) and the first bucket it fits (G5). The one
+    routing every photo search and every measurement of one uses."""
+    photo_type, _ = guess.photo_type(a7_query)
+    return photo_type, routing.choose(photo_type, chroma)
 
 
 _ROUTING = TypeAdapter(Routing)

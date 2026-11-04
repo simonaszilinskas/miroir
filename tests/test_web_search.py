@@ -171,8 +171,9 @@ def test_routing_picks_the_first_bucket_that_fits() -> None:
     )
     assert routing.choose(PhotoType.BUILDING, 0.5).name == "archive"
     assert routing.choose(PhotoType.BUILDING, 40.0).name == "colour-building"
-    assert routing.choose(PhotoType.BUILDING, None).name == "archive"
     assert routing.choose(PhotoType.OBJECT, 0.5).name == "object"
+    with pytest.raises(ValueError, match="chroma"):  # it would send every building to archive
+        routing.choose(PhotoType.BUILDING, None)
 
 
 def test_a_building_guess_routes_to_embeddinggemma_alone() -> None:

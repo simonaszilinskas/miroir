@@ -110,13 +110,8 @@ class Groups:
 
 
 def fused(e7: Floats, e3: Floats, a7_weight: float) -> Floats:
-    """The site's mix (`miroir.web.engine`): a model weighted 0 is left out."""
-    signals = [
-        s
-        for s in (ranking.Signal(e7, a7_weight), ranking.Signal(e3, 1 - a7_weight))
-        if s.weight > 0
-    ]
-    return ranking.fuse(signals)
+    """The site's mix (`ranking.rank_photo`): a model weighted 0 is left out."""
+    return ranking.rank_photo(e7, e3, a7_weight).fused
 
 
 # --- the full index, summarised on the machine --------------------------------------------

@@ -69,6 +69,42 @@ def fuse(signals: Sequence[Signal]) -> Floats:
     return total
 
 
+def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
+    """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
+    score of -inf, off the shortlist, cannot turn an EmbeddingGemma 2-only score into NaN)."""
+    if a7_weight >= 1:
+        return np.asarray(a7, dtype=np.float32)
+    if a7_weight <= 0:
+        return np.asarray(a3, dtype=np.float32)
+    return (a7_weight * a7 + (1 - a7_weight) * a3).astype(np.float32)
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoRanking:
+    """A photo's ranking: both models' best cosine per entity, weighted by the photo's
+    routing bucket (G5) and fused. Every photo search and every measurement of one ranks by
+    this (`rank_photo`), so what is measured is what the site shows."""
+
+    e7: Floats
+    e3: Floats
+    a7_weight: float
+    signals: tuple[Signal, ...]
+    fused: Floats
+
+    def confidence(self, entity: int) -> float:
+        """The routed mix of the entity's raw cosines: what "not found" and the card levels
+        read (T8 measures it)."""
+        mixed = weighted(self.e7[entity : entity + 1], self.e3[entity : entity + 1], self.a7_weight)
+        return float(mixed[0])
+
+
+def rank_photo(e7: Floats, e3: Floats, a7_weight: float) -> PhotoRanking:
+    """Both models' entity scores in, the photo's fused ranking out (a model weighted 0 is
+    left out, so its -inf cannot remove an entity)."""
+    signals = tuple(s for s in (Signal(e7, a7_weight), Signal(e3, 1 - a7_weight)) if s.weight > 0)
+    return PhotoRanking(e7=e7, e3=e3, a7_weight=a7_weight, signals=signals, fused=fuse(signals))
+
+
 def top_entities(scores: Floats, k: int) -> Ints:
     """Rows of the `k` best entities, best first; ties go to the lower row (entity id order)."""
     alive = np.flatnonzero(np.isfinite(scores))

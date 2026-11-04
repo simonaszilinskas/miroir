@@ -48,6 +48,7 @@ from miroir.web.levels import (
     read_levels,
 )
 from miroir.web.nearby import NEAR_KM, PLACES_FILE, EntityPlaces, Position, read_places
+from miroir.web.ranking import PhotoRanking, rank_photo, weighted
 from miroir.web.routing import (
     GUESS_FILE,
     ROUTING_FILE,
@@ -58,6 +59,7 @@ from miroir.web.routing import (
     TextWeights,
     read_guess,
     read_routing,
+    route,
 )
 from miroir.web.store import ExactStore, read_exact, shortlist_cosines, top_rows
 from miroir.web.sure import SURE_FILE, SureRule, read_sure
@@ -106,16 +108,6 @@ class GalleryVectors(Protocol):
     def a3_row(self, row: int) -> Floats:
         """One image's stored MegaLoc vector, in the space `a3` searches."""
         ...
-
-
-def weighted(a7: Floats, a3: Floats, a7_weight: float) -> Floats:
-    """`a7_weight * a7 + (1 - a7_weight) * a3`, leaving out a term weighted 0 (so a MegaLoc
-    score of -inf, off the shortlist, cannot turn an EmbeddingGemma 2-only score into NaN)."""
-    if a7_weight >= 1:
-        return np.asarray(a7, dtype=np.float32)
-    if a7_weight <= 0:
-        return np.asarray(a3, dtype=np.float32)
-    return (a7_weight * a7 + (1 - a7_weight) * a3).astype(np.float32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,8 +448,7 @@ class Engine:
             weight = np.float32(self.crops.rule.weight)
             a3[crop_rows] = np.maximum(a3[crop_rows], weight * crop_scores[crop_rows])
         timings["exact"] = _ms(tick)
-        photo_type, _ = self.guess.photo_type(a7_query)
-        bucket = self.routing.choose(photo_type, chroma)
+        photo_type, bucket = route(self.routing, self.guess, a7_query, chroma)
         return PhotoCosines(a7=a7, a3=a3, bucket=bucket, photo_type=photo_type, chroma=chroma)
 
     def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
@@ -467,21 +458,17 @@ class Engine:
     def photo_of(self, cosines: PhotoCosines) -> _Photo:
         """The photo's two signals, routed (what `search` fuses)."""
         a7, a3, bucket = cosines.a7, cosines.a3, cosines.bucket
-        photo_type, chroma = cosines.photo_type, cosines.chroma
         w = bucket.a7_weight
-        e7 = ranking.entity_max(a7, self.catalog)
-        e3 = ranking.entity_max(a3, self.catalog)
-        signals = [s for s in (ranking.Signal(e7, w), ranking.Signal(e3, 1 - w)) if s.weight > 0]
+        ranked = rank_photo(
+            ranking.entity_max(a7, self.catalog), ranking.entity_max(a3, self.catalog), w
+        )
         return _Photo(
-            signals=signals,
+            ranking=ranked,
             per_image=weighted(a7, a3, w),
-            e7=e7,
-            e3=e3,
-            a7_weight=w,
             cutoff=bucket.cutoff,
             bucket=bucket.name,
-            photo_type=photo_type,
-            chroma=chroma,
+            photo_type=cosines.photo_type,
+            chroma=cosines.chroma,
         )
 
     def _words(
@@ -559,21 +546,20 @@ class PhotoCosines:
 
 @dataclass(frozen=True, slots=True)
 class _Photo:
-    signals: list[ranking.Signal]
+    ranking: PhotoRanking
     per_image: Floats
-    e7: Floats
-    e3: Floats
-    a7_weight: float
     cutoff: float
     bucket: str
     photo_type: PhotoType
     chroma: float
 
+    @property
+    def signals(self) -> tuple[ranking.Signal, ...]:
+        return self.ranking.signals
+
     def confidence(self, entity: int) -> float:
         """The routed mix of the entity's raw cosines, as T8 measured it (`notfound`)."""
-        return float(
-            weighted(self.e7[entity : entity + 1], self.e3[entity : entity + 1], self.a7_weight)[0]
-        )
+        return self.ranking.confidence(entity)
 
 
 @dataclass(frozen=True, slots=True)

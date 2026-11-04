@@ -43,6 +43,7 @@ from miroir.eval.scoring import QueryScore, ScoreResult
 from miroir.eval.sets import load_queries
 from miroir.eval.vectors import Route, RunInfo
 from miroir.eval.wire import DetectChunk, DetectedRoom, Located, LocateTask, RoomPhoto
+from miroir.images.colour import chroma_spread
 from miroir.images.fetch import Fetched, to_jpeg
 from miroir.jobs.gpu_run import PaidCall, paid_call
 from miroir.jobs.remote_spec import CHUNK_TIMEOUT_S, Machine
@@ -63,7 +64,7 @@ from miroir.outlines import (
 )
 from miroir.records.model import Record
 from miroir.records.store import read_records
-from miroir.web.measure import SiteBundle, SiteHit, site_search
+from miroir.web.measure import AskedSet, SiteBundle, SiteHit, site_search
 
 logger = logging.getLogger(__name__)
 
@@ -202,12 +203,19 @@ def detections_path(settings: Settings, label: str) -> Path:
 
 
 def rank_rooms(
-    bundle: SiteBundle, chunk: DetectChunk, *, label: str, model: str, cost_usd: float
+    bundle: SiteBundle,
+    chunk: DetectChunk,
+    chroma: Mapping[str, float],
+    *,
+    label: str,
+    model: str,
+    cost_usd: float,
 ) -> Detections:
-    """Search every box's crop with the site's ranking; keep each box's top entities."""
+    """Search every box's crop with the site's ranking; keep each box's top entities. A box
+    is routed by its room photo's chroma spread (`chroma`, by room image id)."""
     rooms: list[RoomBoxes] = []
     for room in chunk.rooms:
-        hits = _search(bundle, room)
+        hits = _search(bundle, room, chroma[room.image_id])
         rooms.append(
             RoomBoxes(
                 image_id=room.image_id,
@@ -233,17 +241,21 @@ def rank_rooms(
     )
 
 
-def _search(bundle: SiteBundle, room: DetectedRoom) -> list[SiteHit]:
+def _search(bundle: SiteBundle, room: DetectedRoom, chroma: float) -> list[SiteHit]:
     if not room.boxes:
         return []
-    return site_search(
-        bundle,
-        _unit(room.a7),
-        _unit(room.a3),
-        hidden=[()] * len(room.boxes),
-        right=[()] * len(room.boxes),
-        top=TOP,
+    count = len(room.boxes)
+    boxes = AskedSet(
+        set_id="boxes",
+        query_ids=tuple(f"{room.image_id}-{i}" for i in range(count)),
+        query_image_ids=(room.image_id,) * count,
+        a7=_unit(room.a7),
+        a3=_unit(room.a3),
+        hidden=((),) * count,
+        right=((),) * count,
+        chroma=(chroma,) * count,
     )
+    return site_search(bundle, boxes, top=TOP)
 
 
 def _unit(rows: Floats) -> Floats:
@@ -604,7 +616,10 @@ def run_detector(settings: Settings, calls: RoomCalls, paid: PaidCall, label: st
         items=len(photos),
     )
     bundle = SiteBundle.load(settings.web_index_dir(WEB_INDEX))
-    detections = rank_rooms(bundle, done.result, label=label, model=model, cost_usd=done.cost_usd)
+    chroma = {p.image_id: chroma_spread(p.jpeg) for p in photos}
+    detections = rank_rooms(
+        bundle, done.result, chroma, label=label, model=model, cost_usd=done.cost_usd
+    )
     save_detections(settings, detections)
     logger.info("%s: $%.4f, model load %.0f s", label, done.cost_usd, done.result.load_s)
     return detections

@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import numpy as np
 from numpy.typing import NDArray
 
-from miroir.web.catalog import Catalog
-from miroir.web.measure import BundleVectors, QuerySets, Searched, search_set
-from miroir.web.routing import Bucket, Guess, PhotoType, Routing
+from miroir.web.measure import AskedSet, SiteBundle, SiteHit, site_search
+from miroir.web.routing import Bucket, PhotoType, Routing
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +36,33 @@ OBJECT_A7_WEIGHT = 0.2
 MIN_CALIBRATION_QUERIES = 20
 
 
-def calibrate(
-    catalog: Catalog, vectors: BundleVectors, guess: Guess, queries: QuerySets, index: str
-) -> tuple[Routing, dict[str, object]]:
-    """Weights from R2's G5; one cut-off per bucket from T8 (at most WRONG_TARGET confident).
+@dataclass(frozen=True, slots=True)
+class Searched:
+    """Per query: rank of the first right entity (0 when none is in the index), the top
+    entity's confidence, and the bucket the query went to."""
 
-    A bucket that T8 barely reaches (colour photos of buildings) takes its cut-off from T8c,
-    Commons photos with no record, against T2 and T2b as the searches that should match.
-    """
-    draft = Routing(
+    ranks: NDArray[np.int64]
+    confidence: NDArray[np.float64]
+    buckets: tuple[str, ...]
+
+    @classmethod
+    def of(cls, hits: Sequence[SiteHit]) -> Searched:
+        return cls(
+            ranks=np.asarray([h.right_rank for h in hits], dtype=np.int64),
+            confidence=np.asarray(
+                [h.confidences[0] if h.confidences else -math.inf for h in hits], dtype=np.float64
+            ),
+            buckets=tuple(h.bucket for h in hits),
+        )
+
+
+def search_set(bundle: SiteBundle, asked: AskedSet) -> Searched:
+    return Searched.of(site_search(bundle, asked, top=1))
+
+
+def draft_routing() -> Routing:
+    """G5's buckets and weights, before any cut-off is set."""
+    return Routing(
         buckets=(
             Bucket(
                 "archive-building", ARCHIVE_A7_WEIGHT, math.inf, PhotoType.BUILDING, greyscale=True
@@ -61,12 +78,20 @@ def calibrate(
         )
     )
 
+
+def calibrate(
+    bundle: SiteBundle, sets: Mapping[str, AskedSet], index: str
+) -> tuple[Routing, dict[str, object]]:
+    """Weights from R2's G5; one cut-off per bucket from T8 (at most WRONG_TARGET confident).
+
+    A bucket that T8 barely reaches (colour photos of buildings) takes its cut-off from T8c,
+    Commons photos with no record, against T2 and T2b as the searches that should match.
+    """
+    draft = draft_routing()
+    drafted = replace(bundle, routing=draft)
+
     def searched(set_ids: Sequence[str]) -> list[Searched]:
-        return [
-            search_set(catalog, vectors, guess, draft, queries.sets[s])
-            for s in set_ids
-            if s in queries.sets
-        ]
+        return [search_set(drafted, sets[s]) for s in set_ids if s in sets]
 
     pools = {
         "T8": (searched(["T8"]), searched(["T1", "T5"]), "T1+T5"),
@@ -137,20 +162,14 @@ def cutoff_for(confidences: NDArray[np.float64], wrong_target: float) -> float:
     return float(np.nextafter(ordered[allowed], np.inf))
 
 
-def score_sets(
-    catalog: Catalog,
-    vectors: BundleVectors,
-    guess: Guess,
-    routing: Routing,
-    queries: QuerySets,
-) -> dict[str, dict[str, float]]:
-    """Hit rates of the site's ranking on each set's tune half, and "not found" rates."""
+def score_sets(bundle: SiteBundle, sets: Mapping[str, AskedSet]) -> dict[str, dict[str, float]]:
+    """Hit rates of the site's ranking on each set, and "not found" rates."""
     out: dict[str, dict[str, float]] = {}
-    cutoff = {b.name: b.cutoff for b in routing.buckets}
-    for set_id, asked in queries.sets.items():
+    cutoff = {b.name: b.cutoff for b in bundle.routing.buckets}
+    for set_id, asked in sets.items():
         if not asked.query_ids:
             continue
-        searched = search_set(catalog, vectors, guess, routing, asked)
+        searched = search_set(bundle, asked)
         confident = searched.confidence >= np.asarray([cutoff[b] for b in searched.buckets])
         row: dict[str, float] = {"queries": float(len(asked.query_ids))}
         if set_id.startswith("T8"):

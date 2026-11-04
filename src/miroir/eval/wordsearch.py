@@ -40,7 +40,14 @@ from miroir.web.bundle import INDEXES
 from miroir.web.catalog import CATALOG_FILE, Catalog, read_catalog
 from miroir.web.engine import A3_FILE, A7_FILE, record_text, word_signals
 from miroir.web.measure import entity_cosines
-from miroir.web.routing import GUESS_FILE, ROUTING_FILE, TextWeights, read_guess, read_routing
+from miroir.web.routing import (
+    GUESS_FILE,
+    ROUTING_FILE,
+    TextWeights,
+    read_guess,
+    read_routing,
+    route,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -412,11 +419,8 @@ def score_refine(
         text_cos = _cosines(text, index.a7)
         per_weight: dict[float, list[bool]] = {w: [] for w in REFINE_GRID}
         for j, q in enumerate(queries):
-            photo_type, _ = guess.photo_type(q7[j])
-            w = routing.choose(photo_type, chroma.get(q.query_image_id)).a7_weight
-            photo = [
-                s for s in (ranking.Signal(e7[j], w), ranking.Signal(e3[j], 1 - w)) if s.weight
-            ]
+            _, bucket = route(routing, guess, q7[j], chroma[q.query_image_id])
+            photo = list(ranking.rank_photo(e7[j], e3[j], bucket.a7_weight).signals)
             mask = index.hidden_mask(q)
             said = word_signals(index.catalog, text_cos[j], index.bm25.scores(q.text), mask, words)
             right = index.catalog.entity_row[q.expected_entity_ids[0]]

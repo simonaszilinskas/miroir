@@ -49,7 +49,7 @@ from miroir.web.levels import (
     gap_of,
     write_levels,
 )
-from miroir.web.measure import SiteBundle, asked_sets, entity_cosines
+from miroir.web.measure import AskedSet, SiteBundle, SiteHit, site_search, tune_sets
 
 logger = logging.getLogger(__name__)
 
@@ -104,31 +104,27 @@ def rank_tune_sets(settings: Settings, index: str = WEB_INDEX) -> list[Ranked]:
 
 def _photo_searches(settings: Settings, index: str) -> Iterable[Ranked]:
     bundle = SiteBundle.load(settings.web_index_dir(index))
-    catalog, vectors = bundle.catalog, bundle.vectors
-    asked = asked_sets(settings, INDEXES[index])
+    asked = tune_sets(settings, INDEXES[index], bundle.catalog)
     for set_id in PHOTO_SETS:
         a = asked.get(set_id)
         if a is None or not a.query_ids:
             continue
-        e7 = entity_cosines(a.a7, vectors.a7, catalog, a.hidden)
-        e3 = vectors.a3_entity_cosines(catalog, a.a7, a.a3, a.hidden)
-        for j, query_id in enumerate(a.query_ids):
-            photo_type, _ = bundle.guess.photo_type(a.a7[j])
-            bucket = bundle.routing.choose(photo_type, a.chroma[j])
-            w = bucket.a7_weight
-            signals = [
-                s for s in (ranking.Signal(e7[j], w), ranking.Signal(e3[j], 1 - w)) if s.weight > 0
-            ]
-            top = ranking.top_entities(ranking.fuse(signals), TOP)
-            right = {catalog.entity_row[e] for e in a.right[j] if e in catalog.entity_row}
-            yield Ranked(
-                set_id=set_id,
-                query_id=query_id,
-                route=bucket.name,
-                scores=tuple(float(w * e7[j, e] + (1 - w) * e3[j, e]) for e in top),
-                right=tuple(int(e) in right for e in top),
-            )
+        yield from photo_rows(a, site_search(bundle, a, top=TOP))
         logger.info("%s: %d searches ranked", set_id, len(a.query_ids))
+
+
+def photo_rows(asked: AskedSet, hits: Sequence[SiteHit]) -> list[Ranked]:
+    """Each search's route, its top cards' confidences and which of them is right."""
+    return [
+        Ranked(
+            set_id=asked.set_id,
+            query_id=query_id,
+            route=hit.bucket,
+            scores=hit.confidences,
+            right=tuple(e in right for e in hit.entities),
+        )
+        for query_id, right, hit in zip(asked.query_ids, asked.right, hits, strict=True)
+    ]
 
 
 def _word_searches(settings: Settings) -> Iterable[Ranked]:
