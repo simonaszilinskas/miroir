@@ -302,7 +302,6 @@ class McpTools:
         region_image_url: str | None = None,
         filters: FilterArgs | None = None,
         position: Position | None = None,
-        allow_questions: bool = True,
         wait_seconds: int = AGENT_WAIT_S,
         progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentAnswer:
@@ -337,7 +336,6 @@ class McpTools:
                 photo=photo,
                 words="" if photo is not None else request,
                 position=position,
-                oneshot=not allow_questions,
                 filters=self.filters(filters or FilterArgs()),
             )
             self._start(agent, c, VisitorInput(kind=Visit.GOAL, text=request, position=position))

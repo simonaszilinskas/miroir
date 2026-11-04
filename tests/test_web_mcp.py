@@ -484,17 +484,33 @@ def test_filters_are_checked_before_the_search() -> None:
 # --- delegate_search ---------------------------------------------------------------------------
 
 
+def _answered(args: dict[str, object], app: FastAPI | None = None) -> CallToolResult:
+    """Call delegate_search, then answer the fake guide's question about the place."""
+
+    async def go() -> CallToolResult:
+        async with connected(app or make_app()) as client:
+            first = await client.call_tool("delegate_search", args)
+            if structured(first)["status"] != "question":
+                return first
+            reply = {"conversation_id": structured(first)["conversation_id"], "reply": "Fougères"}
+            return await client.call_tool("delegate_search", reply)
+
+    return run(go())
+
+
 def test_the_agent_answers_words_with_its_picks_and_reasons() -> None:
-    result = run(call(make_app(), "delegate_search", {"request": "église Saint-Pierre"}))
+    result = _answered({"request": "église Saint-Pierre"})
     answer = structured(result)
     assert answer["status"] == "done"
     picks = cast("list[dict[str, object]]", answer["results"])
     assert picks
-    assert picks[0]["reason"] == "Choix du modèle factice"
+    reason = picks[0]["reason"]
+    assert isinstance(reason, str)
+    assert reason
     assert answer["steps"]
     text = text_of(result)
     assert "done" in text
-    assert "Choix du modèle factice" in text
+    assert reason in text
 
 
 def test_the_agent_asks_and_the_caller_answers() -> None:
@@ -506,25 +522,18 @@ def test_the_agent_asks_and_the_caller_answers() -> None:
             first = structured(await client.call_tool("delegate_search", photo))
             cid = first["conversation_id"]
             again = structured(await client.call_tool("delegate_search", {"conversation_id": cid}))
-            reply = {"conversation_id": cid, "reply": "Un bâtiment"}
+            reply = {"conversation_id": cid, "reply": "Fougères"}
             second = structured(await client.call_tool("delegate_search", reply))
             return first, again, second
 
     first, again, second = run(go())
     assert first["status"] == "question"
-    assert first["question"] == "Que montre votre photo, en quelques mots ?"
-    assert first["choices"] == ["Un bâtiment", "Un tableau", "Un objet"]
+    assert first["question"] == "Savez-vous où la photo a été prise ? Une commune suffit."
+    assert first["choices"] == ["Dans une ville", "Dans un village", "Dans un musée"]
     assert again["status"] == "question"  # collecting again changes nothing
     assert second["status"] == "done"
     assert second["conversation_id"] == first["conversation_id"]
     assert second["results"]
-
-
-def test_without_questions_the_agent_answers_in_one_go() -> None:
-    args = {"image_url": "https://photos.example/p.png", "allow_questions": False}
-    answer = structured(run(call(make_app(), "delegate_search", args)))
-    assert answer["status"] == "done"
-    assert answer["question"] is None
 
 
 def test_a_conversation_belongs_to_its_token() -> None:
@@ -568,8 +577,12 @@ def test_a_long_turn_answers_running_then_its_results() -> None:
             args = {"request": "église", "wait_seconds": 5}
             first = await client.call_tool("delegate_search", args)
             gate.set()
-            then = {"conversation_id": structured(first)["conversation_id"]}
-            return first, structured(await client.call_tool("delegate_search", then))
+            cid = structured(first)["conversation_id"]
+            then = structured(await client.call_tool("delegate_search", {"conversation_id": cid}))
+            if then["status"] == "question":
+                reply = {"conversation_id": cid, "reply": "Fougères"}
+                then = structured(await client.call_tool("delegate_search", reply))
+            return first, then
 
     first, second = run(go())
     assert structured(first)["status"] == "running"

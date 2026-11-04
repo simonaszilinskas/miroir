@@ -294,9 +294,6 @@ def _add_delegate(server: MCPServer, tools: McpTools) -> None:
         period: Period = None,
         latitude: Latitude = None,
         longitude: Longitude = None,
-        allow_questions: Annotated[
-            bool, Field(description="False: the agent asks nothing and answers in one go.")
-        ] = True,
         wait_seconds: Annotated[
             int,
             Field(
@@ -325,7 +322,6 @@ def _add_delegate(server: MCPServer, tools: McpTools) -> None:
                 region_image_url=region_image_url,
                 filters=FilterArgs(tuple(collections or ()), region, departement, domain, period),
                 position=_position(latitude, longitude),
-                allow_questions=allow_questions,
                 wait_seconds=wait_seconds,
                 progress=progress,
             )

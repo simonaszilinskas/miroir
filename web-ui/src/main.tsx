@@ -3,6 +3,7 @@ import { startReactDsfr } from "@codegouvfr/react-dsfr/spa";
 import { App } from "./App";
 import "./docs.css";
 import "./app.css";
+import "./results.css";
 
 startReactDsfr({ defaultColorScheme: "system" });
 

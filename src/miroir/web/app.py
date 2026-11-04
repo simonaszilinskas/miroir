@@ -587,10 +587,6 @@ class ChatOpenBody(BaseModel):
     )
     text: str = Field(default="", max_length=MAX_WORDS)
     position: PositionBody | None = None
-    oneshot: bool = Field(
-        default=False,
-        description='The page\'s "Approfondi" search: one turn, no question to the visitor.',
-    )
     filters: FiltersBody = Field(default_factory=FiltersBody)
 
 
@@ -650,7 +646,6 @@ async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) ->
         photo=image,
         words=body.text,
         position=_position(body.position),
-        oneshot=body.oneshot,
         filters=body.filters.filters(),
     )
     return {"conversation_id": found.id}

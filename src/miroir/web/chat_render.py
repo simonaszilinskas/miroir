@@ -181,17 +181,29 @@ def call_id_of(call: ToolCall, turn: int, n: int) -> str:
 
 
 def step_event(
-    step: int, label: str, summary: str, thumbs: Sequence[JSON], *, error: bool = False
+    step: int,
+    tool: str,
+    label: str,
+    summary: str,
+    thumbs: Sequence[JSON],
+    *,
+    error: bool = False,
 ) -> Event:
+    """A finished step. `tool` is the tool's name, or `FIRST_LOOK` (the page picks its icon)."""
     return {
         "type": "step",
         "id": step,
+        "tool": tool,
         "state": "done",
         "label": label,
         "summary": summary,
         "thumbs": list(thumbs),
         "error": error,
     }
+
+
+#: The `tool` of the first look's step.
+FIRST_LOOK = "first_look"
 
 
 def card_of_hit(hit: Hit) -> CardView:

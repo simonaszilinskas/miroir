@@ -11,6 +11,11 @@ is enforced here and not only in the brief:
    `MAX_SEARCHES` searches without a sure match, or `MAX_STALE` searches in a row that add
    nothing to the best-so-far, only the finishing tools run (`FINISHING`).
 5. Honest end: `show_results` says `found` (exact, close, none).
+6. Ask when unsure: a question costs no search, and one answer (the commune, the position)
+   often settles what many searches cannot. The opening asks for one early for a building
+   with no position (`early_question`); after `ASK_AFTER` searches without a sure match, or
+   a search whose top two are within `CLOSE_GAP`, the next result says to ask
+   (`Method.ask_note`). At most `MAX_QUESTIONS` questions a conversation.
 
 `Method` holds the state of one conversation; `Turn`, the counters of one visitor message.
 """
@@ -20,6 +25,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from miroir.web.chat_prompts import (
+    ASK_CLOSE,
+    ASK_PLACE,
+    ASK_STUCK,
     BEST_COUNT,
     BEST_LINE,
     BEST_NONE,
@@ -29,10 +37,11 @@ from miroir.web.chat_prompts import (
     NOT_RUN_CAP,
     NOT_RUN_LOCKED,
     NOT_RUN_LOOK,
+    NOT_RUN_QUESTIONS,
     NOT_RUN_VIEWS,
     NOT_RUN_WAITING,
 )
-from miroir.web.chat_tools import BEST, SEARCHES, ToolName, ToolOutcome, best_of
+from miroir.web.chat_tools import ASKING, BEST, SEARCHES, ToolName, ToolOutcome, best_of
 
 #: The step caps of one visitor message. Raised 2026-11-03 (from 8 searches, 3 without a
 #: sure match, 2 stale, 3 looks) so a thorough "Approfondi" run, cropped and grey searches
@@ -53,9 +62,17 @@ MAX_VIEWS = 6
 MAX_REFUSED = 2
 #: The first look's results that start the best-so-far.
 FIRST_BEST = 3
+#: Questions to the visitor (asking or framing) per conversation.
+MAX_QUESTIONS = 3
+#: Searches in one message without a sure match after which the model is told to ask.
+ASK_AFTER = 2
+#: A search whose first two scores are closer than this has no clear winner: ask.
+CLOSE_GAP = 0.02
 
 COUNTED = frozenset(t.value for t in SEARCHES)
 """The searches, by name: each counts towards the turn's searches."""
+QUESTIONS = frozenset(t.value for t in ASKING)
+"""The tools that ask the visitor something, by name."""
 FINISHING = frozenset(
     {ToolName.ASK_VISITOR, ToolName.ASK_REGION, ToolName.SHOW_RESULTS, ToolName.READ_RECORD}
 )
@@ -65,7 +82,17 @@ FINISHING = frozenset(
 class Turn:
     """What one visitor message has used so far (the method's counters; they change)."""
 
-    __slots__ = ("lock", "searches", "stale", "unjudged", "used", "views")
+    __slots__ = (
+        "asked",
+        "close",
+        "lock",
+        "searches",
+        "stale",
+        "told_ask",
+        "unjudged",
+        "used",
+        "views",
+    )
 
     def __init__(self) -> None:
         self.searches = 0
@@ -80,6 +107,12 @@ class Turn:
         """The last search's listed ids and the best-so-far before it, until judged."""
         self.lock: str | None = None
         """Why only a question or the results may come now."""
+        self.asked = False
+        """A question went to the visitor in this message."""
+        self.told_ask = False
+        """The model was told once in this message to ask (`Method.ask_note`)."""
+        self.close: bool = False
+        """The last search's top two were within `CLOSE_GAP`."""
 
 
 class Method:
@@ -92,6 +125,8 @@ class Method:
         """First-look entities the site rated "Très proche"."""
         self.must_view: tuple[str, ...] = ()
         """First-look entities to look at before any search (empty once looked)."""
+        self.questions = 0
+        """Questions the visitor was asked in the conversation."""
         self.turn = Turn()
 
     def new_turn(self) -> None:
@@ -147,6 +182,8 @@ class Method:
             return NOT_RUN_CAP
         if name == ToolName.VIEW_RESULTS.value and self.turn.views >= MAX_VIEWS:
             return NOT_RUN_VIEWS.format(views=MAX_VIEWS)
+        if name in QUESTIONS and self.questions >= MAX_QUESTIONS:
+            return NOT_RUN_QUESTIONS.format(questions=MAX_QUESTIONS)
         return None
 
     def ran(self, name: str, outcome: ToolOutcome, best_before: Sequence[str]) -> None:
@@ -160,6 +197,10 @@ class Method:
         if ran and search:
             self.turn.searches += 1
             self.turn.unjudged = (outcome.hit_ids, tuple(best_before))
+            self.turn.close = outcome.top_gap is not None and outcome.top_gap < CLOSE_GAP
+        if ran and name in QUESTIONS:
+            self.questions += 1
+            self.turn.asked = True
         looked = ran and name == ToolName.VIEW_RESULTS.value
         if looked and set(outcome.hit_ids) & set(self.must_view):
             self.must_view = ()
@@ -186,6 +227,22 @@ class Method:
         elif not self.sure and self.turn.searches >= MAX_SEARCHES:
             self.turn.lock = LOCK_SEARCHES.format(searches=MAX_SEARCHES)
 
+    def ask_note(self) -> str | None:
+        """Once a message, after a search that leaves no clear answer: tell the model to ask
+        the visitor rather than search on blind. None when a question came already, none are
+        left, or a first-look card is a sure match."""
+        turn = self.turn
+        if turn.asked or turn.told_ask or self.sure or self.questions >= MAX_QUESTIONS:
+            return None
+        if turn.close:
+            note = ASK_CLOSE
+        elif turn.searches >= ASK_AFTER:
+            note = ASK_STUCK.format(searches=turn.searches)
+        else:
+            return None
+        turn.told_ask = True
+        return note
+
     def best_line(self, title_of: Callable[[str], str]) -> str:
         if not self.best:
             best = BEST_NONE
@@ -195,3 +252,12 @@ class Method:
         if not self.sure:
             line += BEST_COUNT.format(searches=self.turn.searches, cap=MAX_SEARCHES)
         return line
+
+
+def early_question(*, building: bool, position: bool, caption_place: bool, sure: bool) -> str:
+    """The opening's note asking for the place first: a building with no known position and
+    no commune read on its caption, and no sure match ("" otherwise). With a position or a
+    commune, building searches gain the most of any hint (+66 and +37 points)."""
+    if not building or position or caption_place or sure:
+        return ""
+    return ASK_PLACE
