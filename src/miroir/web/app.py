@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Protocol, cast
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
@@ -37,7 +38,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from miroir.caption import MAX_CAPTION
-from miroir.config import WIKIMEDIA_USER_AGENT
+from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST, WIKIMEDIA_USER_AGENT
 from miroir.images.fetch import to_jpeg
 from miroir.images.upload import UnreadablePhotoError
 from miroir.outlines import Outlines
@@ -83,6 +84,30 @@ SEARCH_WAIT_S = 100.0
 THUMB_SIDE = 200
 #: Example photos are served at most this size (the page shrinks them again to search).
 EXAMPLE_SIDE = 1280
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+#: Where the page may load from: itself, and images from POP's bucket and IIIF service and
+#: from Commons. Styles may be inline (React sets them; the docs page writes `style=""`).
+CONTENT_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        f"img-src 'self' data: blob: {POP_ASSET_HOST} {_origin(POP_IIIF_IMAGE_HOST)} "
+        "https://upload.wikimedia.org",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
 
 
 class SearchBackend(Protocol):
@@ -377,6 +402,7 @@ async def _headers(
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = CONTENT_POLICY
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     elif request.url.path.startswith("/static/"):

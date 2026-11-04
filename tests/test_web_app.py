@@ -83,6 +83,16 @@ def test_the_built_page_loads_without_login(client: TestClient) -> None:
     assert client.get("/static/assets/nothing.js").status_code == 404
 
 
+def test_every_answer_carries_the_security_headers(client: TestClient) -> None:
+    for answer in (client.get("/"), client.get("/static/assets/index.js"), client.get("/api/me")):
+        policy = answer.headers["content-security-policy"]
+        assert "script-src 'self';" in policy
+        assert "frame-ancestors 'none'" in policy
+        assert "https://iiif.prd.cloud.culture.fr " in policy  # an origin, not the IIIF path
+        assert answer.headers["x-frame-options"] == "DENY"
+        assert answer.headers["x-content-type-options"] == "nosniff"
+
+
 def test_a_page_not_built_says_how_to_build_it(tmp_path: Path) -> None:
     engine, _ = h.engine(building=False)
     app = create_app(
