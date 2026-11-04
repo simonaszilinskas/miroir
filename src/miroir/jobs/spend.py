@@ -25,7 +25,7 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -214,9 +214,9 @@ class SpendLedger:
             and (run is None or line.run == run)
         )
 
-    def held_usd(self) -> float:
+    def held_usd(self, lines: Sequence[SpendLine] | None = None) -> float:
         """Worst cases of the calls in flight now, in running processes, Scaleway left out."""
-        lines = self.lines()
+        lines = self.lines() if lines is None else lines
         settled = {line.hold for line in lines if line.hold and not line.hold_usd}
         held = 0.0
         for line in lines:
@@ -337,16 +337,25 @@ def spent_usd(ledger: SpendLedger, key_usage_usd: float | None) -> float:
     For OpenRouter, the ledger or the key's own count, whichever is higher; for the rest,
     the ledger. Scaleway lines are left out: another account pays them.
     """
-    openrouter = ledger.total(service=Service.OPENROUTER)
-    if key_usage_usd is not None:
-        openrouter = max(openrouter, key_usage_usd)
-    others = ledger.total() - ledger.total(service=Service.OPENROUTER)
-    return openrouter + others - ledger.total(service=Service.SCALEWAY)
+    return _spent(ledger.lines(), key_usage_usd)
 
 
 def committed_usd(ledger: SpendLedger, key_usage_usd: float | None) -> float:
-    """Spent so far plus the worst cases of the calls in flight."""
-    return spent_usd(ledger, key_usage_usd) + ledger.held_usd()
+    """Spent so far plus the worst cases of the calls in flight (the ledger read once)."""
+    lines = ledger.lines()
+    return _spent(lines, key_usage_usd) + ledger.held_usd(lines)
+
+
+def _spent(lines: Sequence[SpendLine], key_usage_usd: float | None) -> float:
+    openrouter = sum(line.cost_usd for line in lines if line.service is Service.OPENROUTER)
+    if key_usage_usd is not None:
+        openrouter = max(openrouter, key_usage_usd)
+    others = sum(
+        line.cost_usd
+        for line in lines
+        if line.service not in (Service.OPENROUTER, Service.SCALEWAY)
+    )
+    return openrouter + others
 
 
 def check_probe(budget: Budget, ledger: SpendLedger, key_usage_usd: float | None) -> float:
