@@ -41,10 +41,6 @@ def new_password(groups: int = 3, size: int = 4) -> str:
     )
 
 
-def new_secret() -> str:
-    return secrets.token_urlsafe(32)
-
-
 def password_ok(given: str, expected: str) -> bool:
     return hmac.compare_digest(given.strip().encode(), expected.encode())
 

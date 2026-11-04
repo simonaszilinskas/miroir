@@ -280,8 +280,6 @@ class ScalewayCalls:
         self._http = httpx.Client(base_url=url, timeout=CALL_TIMEOUT_S, transport=transport)
         self.gpu = machine
         self.gate = gate
-        self.busy_s = 0.0
-        """Seconds spent in calls."""
 
     @property
     def machine(self) -> Machine:
@@ -310,11 +308,7 @@ class ScalewayCalls:
         raise TimeoutError(msg)
 
     def _call(self, name: str, *args: object) -> object:
-        start = time.monotonic()
-        try:
-            response = self._http.post("/call", content=pickle.dumps((name, args)))
-        finally:
-            self.busy_s += time.monotonic() - start
+        response = self._http.post("/call", content=pickle.dumps((name, args)))
         if response.status_code != 200:
             msg = f"{name} failed on the machine:\n{response.text[-3000:]}"
             raise RuntimeError(msg)

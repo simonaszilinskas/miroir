@@ -94,15 +94,6 @@ def ranks(values: Floats) -> Floats:
     return out
 
 
-def split_weight(first: float, count: int) -> tuple[float, ...]:
-    """Weights for `count` models: `first` for the first, the rest shared equally by the others."""
-    if count < 2 or not 0 < first < 1:
-        msg = f"need 2+ models and a first weight in (0, 1), got {count} and {first}"
-        raise ValueError(msg)
-    rest = (1 - first) / (count - 1)
-    return (first, *([rest] * (count - 1)))
-
-
 def _check(parts: Sequence[EntityScores], weights: Sequence[float]) -> EntityScores:
     if len(parts) < 2 or len(parts) != len(weights):
         msg = f"fusion needs 2+ models with one weight each: {len(parts)} and {len(weights)}"

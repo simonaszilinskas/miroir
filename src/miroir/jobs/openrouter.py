@@ -271,22 +271,6 @@ class OpenRouterClient:
         response = self._parse(_ChatResponse, self._call("POST", "/chat/completions", payload))
         return _chat_answer(response, need_cost=need_cost)
 
-    def chat_batch(
-        self,
-        model: str,
-        requests: Mapping[str, Mapping[str, JSON]],
-        *,
-        poll_s: float = 30.0,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> tuple[dict[str, ChatAnswer], BatchOutcome]:
-        """Chat completions `{custom_id: body}` through the Batch API (half price); waits.
-
-        Images work here, unlike batch embeddings (checked 2026-10-12).
-        """
-        return self.wait_chat_batch(
-            self.submit_batch("/v1/chat/completions", model, requests), poll_s=poll_s, sleep=sleep
-        )
-
     def wait_chat_batch(
         self,
         batch_id: str,

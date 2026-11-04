@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from miroir.eval.fusion import RRF_K, Method, fuse, min_max, ranks, split_weight
+from miroir.eval.fusion import RRF_K, Method, fuse, min_max, ranks
 from miroir.eval.scoring import (
     EntityScores,
     SearchQuery,
@@ -65,9 +65,3 @@ def test_fusion_refuses_models_on_different_entities() -> None:
     other = EntityScores(("q0",), ("A", "Z"), np.zeros((1, 2), dtype=np.float32), 2)
     with pytest.raises(ValueError, match="different queries or galleries"):
         fuse([scores([0.1, 0.2]), other], (0.5, 0.5), Method.WEIGHTED_SUM)
-
-
-def test_split_weight_shares_the_rest() -> None:
-    assert split_weight(0.6, 3) == pytest.approx((0.6, 0.2, 0.2))
-    with pytest.raises(ValueError, match="first weight"):
-        split_weight(1.0, 2)

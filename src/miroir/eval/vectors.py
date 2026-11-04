@@ -14,7 +14,6 @@ that loads is a run the harness can score.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Sequence
@@ -246,11 +245,6 @@ def merge_runs(directory: Path, runs: Sequence[VectorSet], *, gallery: str) -> V
         notes=notes,
     )
     return write_vectors(directory, ids, vectors, info)
-
-
-def meta_dict(info: RunInfo) -> dict[str, object]:
-    """`RunInfo` as plain JSON values, for copying into result files."""
-    return json.loads(TypeAdapter(RunInfo).dump_json(info))
 
 
 def _check_ids(ids: tuple[str, ...]) -> None:

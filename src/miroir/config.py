@@ -403,21 +403,10 @@ class Settings(BaseSettings):
         return self.data_root / "vlm" / "h4" / label
 
     def matches_path(self, name: str) -> Path:
-        """Keypoint matches of each query against its shortlist (step E1), one query per line."""
+        """A cache of searches on the site's bundle (`eval.sure`, `eval.levels`). The folder
+        name dates from step E1, which wrote keypoint matches there first."""
         _check_name(name)
         return self.data_root / "matches" / f"{name}.jsonl"
-
-    @property
-    def detect_dir(self) -> Path:
-        """Step C: room photos at the page's size, where each T3 artwork hangs in them, and
-        each detector's boxes with their crops' vectors."""
-        return self.data_root / "detect"
-
-    @property
-    def archive_dir(self) -> Path:
-        """Archive prints (T1): the query photos as POP serves them, what the caption reader
-        read, and the vectors of the prints cut from their mounts."""
-        return self.data_root / "archive"
 
     @property
     def index_dir(self) -> Path:

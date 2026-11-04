@@ -12,7 +12,6 @@ from __future__ import annotations
 import io
 import logging
 import threading
-from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -232,7 +231,3 @@ class ImageFetcher:
             # A scan over Pillow's pixel limit (about 179 million) is skipped like a broken file.
             logger.warning("%s: cannot decode image: %s", image_id, err)
             return Fetched(image_id, None, FetchSkip.UNREADABLE)
-
-
-def count_skips(results: Iterable[Fetched]) -> Counter[FetchSkip]:
-    return Counter(r.skip for r in results if r.skip is not None)
