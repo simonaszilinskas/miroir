@@ -10,7 +10,7 @@ says it may have been billed (`ModelError.maybe_billed`). The turn has its own d
 The clients of `miroir.jobs` are synchronous, so each call runs in a thread of the model's own
 pool (`MODEL_THREADS`): a slow call holds one of those, never the threads the searches and the
 image work share. An async client would need async twins of `OpenRouterClient` and
-`MistralClient`, which H4's batch runs share; not worth it for one request at a time per
+`MistralClient`, which the batch runs share; not worth it for one request at a time per
 conversation.
 """
 

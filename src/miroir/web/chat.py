@@ -103,6 +103,7 @@ __all__ = [
     "OpenRouterModel",
     "SpendStore",
     "ThumbSource",
+    "ToolBackend",
     "Visit",
     "VisitorInput",
     "chat_model",
@@ -132,13 +133,26 @@ MAX_CONVERSATIONS = 200
 MAX_WORDS = 500
 
 
-class Backend(Protocol):
-    """What the conversation needs of the search backend (`miroir.web.app.SearchBackend`)."""
+class ToolBackend(Protocol):
+    """What the agent needs of the search, one of its two seams (the other is `ChatModel`).
 
-    async def search(self, request: SearchRequest) -> SearchResponse: ...
-    async def tool_search(self, query: ToolQuery) -> ToolHits: ...
+    The site serves it on the live engine (`miroir.web.app.SearchBackend`); the offline
+    evaluation on a bundle's stored vectors (`miroir.eval.offline.OfflineBackend`). The rest
+    of what the tools use comes with `ChatService`: records to read (`Catalog`), and the one
+    check of what may go to the model (`ThumbSource`, `miroir.web.publishable`)."""
+
+    async def search(self, request: SearchRequest) -> SearchResponse:
+        """The site's usual search: the first look."""
+        ...
+
+    async def tool_search(self, query: ToolQuery) -> ToolHits:
+        """Image search, text search, `more_like`, and the images of entities to view
+        (`miroir.web.toolsearch`); unknown filter values come back in `ToolHits.unknown`."""
+        ...
+
     async def detect(self, jpeg: bytes) -> Outlines:
-        """The works in a photo (F4), as the photo view outlines them."""
+        """The works in a photo (F4), as the photo view outlines them: what a transform may
+        crop to."""
         ...
 
 
@@ -384,7 +398,7 @@ class ChatService:
     def __init__(
         self,
         *,
-        backend: Backend,
+        backend: ToolBackend,
         model: ChatModel,
         thumbs: ThumbSource,
         spend: SpendStore,

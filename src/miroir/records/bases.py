@@ -1,6 +1,6 @@
 """Where an entity comes from in POP, as a searcher names it, and place names folded to compare.
 
-Shared by step H4 (`miroir.eval.h4_tools`) and the conversation page (`miroir.web.toolsearch`).
+Used by the conversation page's tools (`miroir.web.toolsearch`, `miroir.web.chat_tools`).
 """
 
 from __future__ import annotations
