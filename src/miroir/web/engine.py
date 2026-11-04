@@ -17,13 +17,13 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image as PILImage
-from PIL import ImageOps
 
 from miroir.caption import CaptionPlace, Gazetteer, clean_caption
 from miroir.eval.bm25 import Bm25
 from miroir.images.colour import chroma_spread
 from miroir.images.fetch import JPEG_QUALITY, LONG_SIDE
-from miroir.images.mount import Picture, crop_picture, find_picture
+from miroir.images.mount import Picture, cut_picture, picture_in
+from miroir.images.upload import open_photo, open_upload
 from miroir.web import ranking
 from miroir.web.archive import SITE_ARCHIVE, ArchiveRule, CaptionReader, gazetteer
 from miroir.web.catalog import (
@@ -268,7 +268,7 @@ class Engine:
         archive = _Archive()
         if request.image is not None:
             archive = self._archive(request, timings)
-            photo = self._photo(archive.query or request.image, mask, timings)
+            photo = self._photo(archive.query, mask, timings)
             signals += photo.signals
             per_image = photo.per_image
         if archive.caption and self.archive.words > 0:
@@ -370,13 +370,11 @@ class Engine:
         person gave none)."""
         assert request.image is not None
         tick = time.monotonic()
-        try:
-            picture = find_picture(request.image) if request.mount else None
-        except (OSError, PILImage.DecompressionBombError) as err:
-            msg = f"cannot read the photo: {err}"
-            raise ValueError(msg) from err
+        opened = open_upload(request.image)  # the one decode of the upload
+        picture = picture_in(opened) if request.mount else None
         timings["mount"] = _ms(tick)
-        query = crop_picture(request.image, picture) if picture and self.archive.crop else None
+        cut = cut_picture(opened.upright, picture) if picture and self.archive.crop else None
+        query = prepare_upright(opened.upright) if cut is None else prepare_photo(cut)
         read = False
         if request.caption is not None:
             caption = clean_caption(request.caption)
@@ -391,7 +389,7 @@ class Engine:
         return _Archive(
             mount=picture is not None,
             query=query,
-            box=None if query is None or picture is None else _shares(picture),
+            box=None if cut is None or picture is None else _shares(picture),
             caption=caption,
             read=read,
             place=place,
@@ -460,9 +458,9 @@ class Engine:
         bucket = self.routing.choose(photo_type, chroma)
         return PhotoCosines(a7=a7, a3=a3, bucket=bucket, photo_type=photo_type, chroma=chroma)
 
-    def _photo(self, data: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
-        cosines = self._cosines(prepare_photo(data), mask, timings)
-        return self.photo_of(cosines)
+    def _photo(self, jpeg: bytes, mask: NDArray[np.bool_], timings: dict[str, float]) -> _Photo:
+        """`jpeg` is already prepared (`prepare_photo`)."""
+        return self.photo_of(self._cosines(jpeg, mask, timings))
 
     def photo_of(self, cosines: PhotoCosines) -> _Photo:
         """The photo's two signals, routed (what `search` fuses)."""
@@ -579,8 +577,9 @@ class _Photo:
 @dataclass(frozen=True, slots=True)
 class _Archive:
     mount: bool = False
-    query: bytes | None = None
-    """The print alone, when the photo has a mount: what the photo search embeds."""
+    query: bytes = b""
+    """What the photo search embeds (`prepare_photo`): the print alone when the photo has a
+    mount, else the whole photo."""
     box: tuple[float, float, float, float] | None = None
     caption: str = ""
     read: bool = False
@@ -628,15 +627,16 @@ def word_signals(
 
 def prepare_photo(data: bytes) -> bytes:
     """A query photo as the gallery images were (`images.fetch.to_jpeg`): at most 512 px,
-    LANCZOS, RGB JPEG at the same quality. Turned upright first, as a phone camera means it."""
-    try:
-        with PILImage.open(io.BytesIO(data)) as opened:
-            upright = ImageOps.exif_transpose(opened)
-            upright.thumbnail((LONG_SIDE, LONG_SIDE), PILImage.Resampling.LANCZOS)
-            rgb = upright.convert("RGB")
-    except (OSError, PILImage.DecompressionBombError) as err:  # UnidentifiedImageError too
-        msg = f"cannot read the photo: {err}"
-        raise ValueError(msg) from err
+    LANCZOS, RGB JPEG at the same quality. Turned upright first, as a phone camera means it.
+    Raises `UnreadablePhotoError` on bytes Pillow cannot read."""
+    return prepare_upright(open_photo(data).upright)
+
+
+def prepare_upright(upright: PILImage.Image) -> bytes:
+    """`prepare_photo` of a photo already decoded and turned upright (left unchanged)."""
+    small = upright.copy()
+    small.thumbnail((LONG_SIDE, LONG_SIDE), PILImage.Resampling.LANCZOS)
+    rgb = small.convert("RGB")
     out = io.BytesIO()
     rgb.save(out, format="JPEG", quality=JPEG_QUALITY)
     return out.getvalue()

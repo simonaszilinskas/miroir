@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image as PILImage
 
 from miroir.config import Settings
 from miroir.geo.model import Place, PlaceSource
+from miroir.images.upload import UnreadablePhotoError
 from miroir.records.store import write_places as write_places_parquet
 from miroir.web import facets, ranking
 from miroir.web.bundle import add_places, cutoff_for
@@ -265,6 +268,35 @@ def test_query_photos_are_shrunk_like_gallery_images() -> None:
     with PILImage.open(io.BytesIO(jpeg)) as opened:
         assert opened.format == "JPEG"
         assert opened.size == (512, 256)
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+def test_a_photo_search_decodes_the_upload_once(
+    mounted: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_archive import card  # noqa: PLC0415
+
+    upload = card() if mounted else h.photo(130, size=(400, 300))
+    opened: list[bytes] = []
+    real_open = PILImage.open
+
+    def counting_open(fp: io.BytesIO, *args: object, **kwargs: object) -> PILImage.Image:
+        opened.append(fp.getvalue())
+        return real_open(fp, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(PILImage, "open", counting_open)
+    engine, _ = h.engine(building=False)
+    response = engine.search(SearchRequest(image=upload))
+    assert response.mount is mounted
+    assert opened.count(upload) == 1
+
+
+def test_an_unreadable_photo_raises_its_own_error() -> None:
+    engine, _ = h.engine()
+    with pytest.raises(UnreadablePhotoError):
+        engine.search(SearchRequest(image=b"not an image"))
+    with pytest.raises(UnreadablePhotoError):
+        prepare_photo(b"not an image")
 
 
 def test_a_guess_saved_by_index_guess_reads_too(tmp_path: Path) -> None:

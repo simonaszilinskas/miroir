@@ -27,9 +27,14 @@ JPEG_QUALITY = 90
 def chroma_spread(jpeg: bytes) -> float:
     """Standard deviation of the colour (Cb, Cr) over the pixels: 0 for grey or one tint."""
     with PILImage.open(io.BytesIO(jpeg)) as opened:
-        small = opened.convert("RGB")
-        small.thumbnail((_SIDE, _SIDE), PILImage.Resampling.BILINEAR)
-        ycc = np.asarray(small.convert("YCbCr"), dtype=np.float64)
+        return chroma_of(opened)
+
+
+def chroma_of(image: PILImage.Image) -> float:
+    """`chroma_spread` of an opened image (left as it is)."""
+    small = image.convert("RGB")
+    small.thumbnail((_SIDE, _SIDE), PILImage.Resampling.BILINEAR)
+    ycc = np.asarray(small.convert("YCbCr"), dtype=np.float64)
     cb, cr = ycc[..., 1].ravel(), ycc[..., 2].ravel()
     return float(np.sqrt(cb.var() + cr.var()))
 

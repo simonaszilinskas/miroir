@@ -30,9 +30,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image as PILImage
-from PIL import ImageOps
 
-from miroir.images.colour import chroma_spread
+from miroir.images.upload import OpenedPhoto, open_photo
 
 #: The photo is studied at this long side, in pixels.
 WORK_SIDE = 384
@@ -98,12 +97,16 @@ class Picture:
 
 def find_picture(jpeg: bytes) -> Picture | None:
     """The picture inside the photo's mount, or None when the photo has no mount."""
-    if chroma_spread(jpeg) >= MAX_CHROMA:
+    return picture_in(open_photo(jpeg))
+
+
+def picture_in(photo: OpenedPhoto) -> Picture | None:
+    """`find_picture` on a photo already decoded."""
+    if photo.chroma >= MAX_CHROMA:
         return None
-    with PILImage.open(io.BytesIO(jpeg)) as opened:
-        upright = ImageOps.exif_transpose(opened)
-        width, height = upright.size
-        small = upright.convert("L")
+    upright = photo.upright
+    width, height = upright.size
+    small = upright.convert("L")
     small.thumbnail((WORK_SIDE, WORK_SIDE), PILImage.Resampling.BILINEAR)
     grey = np.asarray(small, dtype=np.float32)
     box = picture_box(grey)
@@ -116,10 +119,13 @@ def find_picture(jpeg: bytes) -> Picture | None:
 
 def crop_picture(jpeg: bytes, picture: Picture) -> bytes:
     """The picture alone, as a JPEG (upright, at the photo's own resolution)."""
-    with PILImage.open(io.BytesIO(jpeg)) as opened:
-        upright = ImageOps.exif_transpose(opened)
-        box = picture.scaled(*upright.size)
-        cut = upright.crop((box.left, box.top, box.right, box.bottom)).convert("RGB")
+    return cut_picture(open_photo(jpeg).upright, picture)
+
+
+def cut_picture(upright: PILImage.Image, picture: Picture) -> bytes:
+    """`crop_picture` from a photo already decoded and turned upright."""
+    box = picture.scaled(*upright.size)
+    cut = upright.crop((box.left, box.top, box.right, box.bottom)).convert("RGB")
     out = io.BytesIO()
     cut.save(out, format="JPEG", quality=92)
     return out.getvalue()
