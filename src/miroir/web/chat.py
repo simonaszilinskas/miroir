@@ -35,13 +35,12 @@ from typing import Protocol
 import httpx
 
 from miroir.images.fetch import to_jpeg
-from miroir.jobs.mistral import MistralError
-from miroir.jobs.openrouter import JSON, OpenRouterError, ToolCall
+from miroir.jobs.openrouter import JSON, ChatAnswer, ToolCall
 from miroir.outlines import DETECT_SIDE, Box, Outlines
 from miroir.web import chat_method, chat_prompts
 from miroir.web.catalog import Catalog, CatalogRecord, Filters
 from miroir.web.chat_method import COUNTED, Method
-from miroir.web.chat_model import ChatModel, MistralModel, OpenRouterModel, chat_model
+from miroir.web.chat_model import ChatModel, MistralModel, ModelError, OpenRouterModel, chat_model
 from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE, ONESHOT_NOTE
 from miroir.web.chat_render import (
     CardView,
@@ -95,6 +94,7 @@ __all__ = [
     "Limits",
     "MemorySpend",
     "MistralModel",
+    "ModelError",
     "OpenRouterModel",
     "SpendStore",
     "ThumbSource",
@@ -108,6 +108,8 @@ logger = logging.getLogger(__name__)
 MAX_TOKENS = 800
 #: Model calls per visitor message, all told.
 MAX_MODEL_CALLS = 25
+#: Seconds the model may work on one visitor message, its first look apart.
+TURN_S = 300.0
 #: First-look results the model is told about.
 FIRST_LOOK = 10
 #: The cost guessed for a first call, before one is known.
@@ -498,7 +500,12 @@ class ChatService:
         )
         try:
             await self._take(c, given)
-            waiting = await self._loop(c)
+            async with asyncio.timeout(TURN_S):
+                waiting = await self._loop(c)
+        except TimeoutError:
+            logger.warning("chat %s: turn out of time", c.id[:8])
+            c.emit({"type": "error", "text": chat_prompts.OUT_OF_TIME})
+            c.log({"type": "error", "text": "out of time"})
         except Exception:
             logger.exception("chat %s: turn failed", c.id[:8])
             c.emit({"type": "error", "text": chat_prompts.TURN_FAILED})
@@ -663,11 +670,6 @@ class ChatService:
         told_lock = False
         nudged = False
         for _ in range(MAX_MODEL_CALLS):
-            stop = await self._over_limit(c)
-            if stop is not None:
-                c.emit({"type": "limit", "text": stop})
-                c.log({"type": "limit", "text": stop})
-                return "limit"
             out_of_calls = c.method.out_of_calls
             if out_of_calls and not told_last:
                 c.messages.append(
@@ -686,32 +688,9 @@ class ChatService:
                 "tool_choice": "required" if out_of_calls or told_lock else "auto",
                 "max_tokens": MAX_TOKENS,
             }
-            c.emit({"type": "status", "text": chat_prompts.THINKING})
-            start = time.monotonic()
-            try:
-                answer = await self.model.complete(body)
-            except (OpenRouterError, MistralError) as err:
-                logger.warning("chat %s: model call failed: %s", c.id[:8], err)
-                c.emit({"type": "error", "text": chat_prompts.MODEL_DOWN})
-                c.log({"type": "model", "error": str(err)[:200], "ms": _ms(start)})
-                return "message"
-            await self._paid(c, answer.cost_usd)
-            c.log(
-                {
-                    "type": "model",
-                    "call": c.calls,
-                    "text": answer.text,
-                    "thinking": answer.thinking,
-                    "tool_calls": [
-                        {"name": t.name, "args": redact(arguments_of(t.arguments))}
-                        for t in answer.tool_calls
-                    ],
-                    "cost_usd": answer.cost_usd,
-                    "prompt_tokens": answer.prompt_tokens,
-                    "completion_tokens": answer.completion_tokens,
-                    "ms": _ms(start),
-                }
-            )
+            answer = await self._ask(c, body)
+            if isinstance(answer, str):
+                return answer
             said = answer.text.strip()
             if said and not summarised(answer.tool_calls):
                 c.emit({"type": "say", "text": said})
@@ -738,6 +717,43 @@ class ChatService:
                 return reply.waiting
         c.emit({"type": "say", "text": chat_prompts.GAVE_UP})
         return "message"
+
+    async def _ask(self, c: Conversation, body: Mapping[str, JSON]) -> ChatAnswer | str:
+        """One paid model call, within the caps; what to wait for when none is made."""
+        stop = await self._over_limit(c)
+        if stop is not None:
+            c.emit({"type": "limit", "text": stop})
+            c.log({"type": "limit", "text": stop})
+            return "limit"
+        c.emit({"type": "status", "text": chat_prompts.THINKING})
+        start = time.monotonic()
+        try:
+            answer = await self.model.complete(body)
+        except ModelError as err:
+            logger.warning("chat %s: model call failed: %s", c.id[:8], err)
+            if err.maybe_billed:  # it may have run: count what it would have cost
+                await self._paid(c, c.last_call_usd)
+            c.emit({"type": "error", "text": chat_prompts.MODEL_DOWN})
+            c.log({"type": "model", "error": str(err)[:200], "ms": _ms(start)})
+            return "message"
+        await self._paid(c, answer.cost_usd)
+        c.log(
+            {
+                "type": "model",
+                "call": c.calls,
+                "text": answer.text,
+                "thinking": answer.thinking,
+                "tool_calls": [
+                    {"name": t.name, "args": redact(arguments_of(t.arguments))}
+                    for t in answer.tool_calls
+                ],
+                "cost_usd": answer.cost_usd,
+                "prompt_tokens": answer.prompt_tokens,
+                "completion_tokens": answer.completion_tokens,
+                "ms": _ms(start),
+            }
+        )
+        return answer
 
     async def _calls(
         self,

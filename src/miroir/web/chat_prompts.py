@@ -221,6 +221,10 @@ MODEL_DOWN = (
     "Le modèle ne répond pas pour le moment. Réessayez dans un instant, ou utilisez la "
     "recherche habituelle."
 )
+OUT_OF_TIME = (
+    "La recherche a pris trop de temps et s’arrête là. Dites-m’en plus pour reprendre, ou "
+    "utilisez la recherche habituelle."
+)
 GAVE_UP = (
     "Je m’arrête là pour ce message : je n’ai pas trouvé mieux. Dites-m’en plus, ou utilisez la "
     "recherche habituelle."

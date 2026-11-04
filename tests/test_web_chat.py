@@ -776,10 +776,11 @@ def test_openrouter_asks_mistral_to_reason_a_little_never_none() -> None:
     sent: list[Mapping[str, JSON]] = []
     model = OpenRouterModel(SecretStr("sk-or-test"))
 
-    def chat(name: str, body: Mapping[str, JSON]) -> ChatAnswer:
+    def chat(name: str, body: Mapping[str, JSON], *, need_cost: bool = True) -> ChatAnswer:
         assert name == model.model
+        assert not need_cost  # an answer without a cost is priced, not refused
         sent.append(body)
-        return ChatAnswer("ok", 0.0, 1, 1, "stop")
+        return ChatAnswer("ok", 0.001, 1, 1, "stop")
 
     model._client.chat = chat  # type: ignore[method-assign]
     asyncio.run(model.complete({"messages": [], "max_tokens": 800}))

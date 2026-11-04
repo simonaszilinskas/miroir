@@ -263,11 +263,13 @@ class OpenRouterClient:
 
     # chat
 
-    def chat(self, model: str, body: Mapping[str, JSON]) -> ChatAnswer:
-        """One chat completion. `body` holds `messages` and any other request fields."""
+    def chat(self, model: str, body: Mapping[str, JSON], *, need_cost: bool = True) -> ChatAnswer:
+        """One chat completion. `body` holds `messages` and any other request fields.
+        `need_cost=False`: an answer without a cost comes back with cost 0, for the caller to
+        price, instead of raising (it was paid for all the same)."""
         payload: dict[str, JSON] = {**body, "model": model}
         response = self._parse(_ChatResponse, self._call("POST", "/chat/completions", payload))
-        return _chat_answer(response, need_cost=True)
+        return _chat_answer(response, need_cost=need_cost)
 
     def chat_batch(
         self,

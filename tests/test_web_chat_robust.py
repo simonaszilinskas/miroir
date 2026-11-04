@@ -7,15 +7,22 @@ import asyncio
 import time
 from collections.abc import Mapping, Sequence
 
+import httpx
 import pytest
+from pydantic import SecretStr
 
+from miroir.jobs.mistral import PRICES
 from miroir.jobs.openrouter import JSON, ChatAnswer
+from miroir.web import chat as chat_module
+from miroir.web import chat_model, chat_prompts
 from miroir.web.chat import (
     ChatModel,
     ChatService,
     Conversation,
     Limits,
     MemorySpend,
+    ModelError,
+    OpenRouterModel,
     SpendStore,
     ThumbSource,
     Visit,
@@ -198,7 +205,7 @@ def test_the_visitor_may_write_again_as_soon_as_the_turn_ends() -> None:
         c = service.open("s", photo=None, words="église", position=None)
         ends: list[str] = []
         for kind, text in ((Visit.GOAL, EXACT), (Visit.MESSAGE, "plutôt un vase")):
-            after = service.send(c, VisitorInput(kind, text))  # raised BusyError the 2nd time
+            after = service.send(c, VisitorInput(kind, text))
             events = [e async for e in service.stream(c, after)]
             ends.append(str(events[-1]["type"]))
         await asyncio.sleep(0.6)
@@ -208,3 +215,127 @@ def test_the_visitor_may_write_again_as_soon_as_the_turn_ends() -> None:
     assert asyncio.run(run()) == ["end", "end"]
     assert time.monotonic() - started < 3  # each stream closed at its end, not at a ping
     assert log.flushes == 2
+
+
+# --- 4. a model that is slow or down -----------------------------------------------------------
+
+
+class Wire:
+    """OpenRouter's answers, in order: an HTTP status with a body, or an error to raise."""
+
+    def __init__(self, answers: Sequence[httpx.Response | Exception]) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        del request
+        self.calls += 1
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def chat_body(cost: float | None = 0.002) -> httpx.Response:
+    usage: dict[str, JSON] = {"prompt_tokens": 1000, "completion_tokens": 100}
+    if cost is not None:
+        usage["cost"] = cost
+    return httpx.Response(
+        200,
+        json={
+            "id": "gen-1",
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": usage,
+        },
+    )
+
+
+def complete(wire: Wire) -> ChatAnswer:
+    model = OpenRouterModel(SecretStr("sk-or-test"), transport=httpx.MockTransport(wire))
+    return asyncio.run(model.complete({"messages": [], "max_tokens": 800}))
+
+
+@pytest.fixture
+def no_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat_model, "RETRY_WAIT_S", 0.0)
+
+
+@pytest.mark.usefixtures("no_wait")
+def test_a_model_call_that_timed_out_is_not_sent_again() -> None:
+    """It may have run and been paid for: sending it again could pay up to six times."""
+    wire = Wire([httpx.ReadTimeout("slow"), chat_body()])
+    with pytest.raises(ModelError) as raised:
+        complete(wire)
+    assert raised.value.maybe_billed
+    assert wire.calls == 1
+
+
+@pytest.mark.usefixtures("no_wait")
+def test_a_busy_model_is_asked_twice_at_most() -> None:
+    wire = Wire([httpx.Response(503), httpx.Response(503), chat_body()])
+    with pytest.raises(ModelError) as raised:
+        complete(wire)
+    assert not raised.value.maybe_billed
+    assert wire.calls == 2
+    assert complete(Wire([httpx.ConnectError("refused"), chat_body()])).text == "ok"
+
+
+@pytest.mark.usefixtures("no_wait")
+def test_a_refused_request_is_not_sent_again() -> None:
+    wire = Wire([httpx.Response(400, json={"error": {"message": "bad"}}), chat_body()])
+    with pytest.raises(ModelError):
+        complete(wire)
+    assert wire.calls == 1
+
+
+def test_an_answer_without_a_cost_is_priced_from_its_tokens() -> None:
+    """OpenRouter once answered 200 without a cost: the call raised, and went uncounted."""
+    prompt, _, completion = PRICES[chat_model.MISTRAL_MODEL]
+    answer = complete(Wire([chat_body(cost=None)]))
+    assert answer.cost_usd == pytest.approx((1000 * prompt + 100 * completion) / 1e6)
+    assert complete(Wire([chat_body(cost=0.002)])).cost_usd == 0.002
+
+
+class Raising:
+    """A model that sleeps `sleep_s`, then fails with `error` or shows PA1."""
+
+    def __init__(self, error: Exception | None = None, sleep_s: float = 0.0) -> None:
+        self.error = error
+        self.sleep_s = sleep_s
+
+    @property
+    def model(self) -> str:
+        return "raising"
+
+    async def complete(self, body: Mapping[str, JSON]) -> ChatAnswer:
+        del body
+        await asyncio.sleep(self.sleep_s)
+        if self.error is not None:
+            raise self.error
+        return shown("PA1")
+
+
+def turn(service: ChatService) -> list[dict[str, JSON]]:
+    async def run() -> list[dict[str, JSON]]:
+        c = service.open("s", photo=None, words="église", position=None)
+        after = service.send(c, VisitorInput(Visit.GOAL, EXACT))
+        return [e async for e in service.stream(c, after) if e["type"] != "ping"]
+
+    return asyncio.run(run())
+
+
+def test_a_model_down_says_so_and_counts_a_call_that_may_have_been_paid() -> None:
+    spend = MemorySpend()
+    down = Raising(ModelError("no answer", maybe_billed=True))
+    events = turn(make_service([], model=down, spend=spend))
+    assert [e["text"] for e in of(events, "error")] == [chat_prompts.MODEL_DOWN]
+    assert asyncio.run(spend.spent("2026-10-16")) == pytest.approx(chat_module.FIRST_CALL_USD)
+
+
+def test_a_turn_stops_at_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chat_module, "TURN_S", 0.2)
+    started = time.monotonic()
+    events = turn(make_service([], model=Raising(sleep_s=30)))
+    assert time.monotonic() - started < 5
+    assert [e["text"] for e in of(events, "error")] == [chat_prompts.OUT_OF_TIME]
+    assert events[-1]["type"] == "end"
