@@ -1,4 +1,4 @@
-"""Stacks asked with Commons photos: query runs apart from the gallery, and T8c."""
+"""Scoring Commons photos: query runs apart from the gallery, T8c, views, fetched galleries."""
 
 from __future__ import annotations
 
@@ -10,11 +10,15 @@ import pytest
 
 from miroir.commons.model import CommonsSet, View
 from miroir.config import Settings
-from miroir.eval import stack as stack_module
-from miroir.eval.fusion import Method
-from miroir.eval.run import publishable_only, score_by_view, write_fetched_gallery
+from miroir.eval import run as run_module
+from miroir.eval.run import (
+    not_found_queries,
+    publishable_only,
+    score_by_view,
+    score_test_set,
+    write_fetched_gallery,
+)
 from miroir.eval.sets import Query, load_queries, read_gallery, write_gallery, write_set
-from miroir.eval.stack import Stack, score_stack
 from miroir.eval.vectors import Route, RunInfo, write_vectors
 from miroir.records.build import build
 from miroir.records.store import read_records, write_commons
@@ -91,7 +95,7 @@ def commons_sets(settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: 
             _info(option),
         )
     monkeypatch.setattr(
-        stack_module, "eval_result_path", lambda r, s, o: tmp_path / r / f"{s}-{o}.json"
+        run_module, "eval_result_path", lambda r, s, o: tmp_path / r / f"{s}-{o}.json"
     )
     return settings
 
@@ -101,80 +105,42 @@ def test_closed_models_keep_commons_not_found_queries(commons_sets: Settings) ->
     assert publishable_only(commons_sets, queries) == queries
 
 
-def test_a_stack_asks_commons_photos_with_its_query_runs_and_scores_t8c(
-    commons_sets: Settings,
-) -> None:
-    stack = Stack(
-        runs=("A-gallery", "B-gallery"),
-        method=Method.WEIGHTED_SUM,
-        first_weight=0.5,
-        query_runs=("A-queries", "B-queries"),
-    )
-    result = score_stack(
+def test_commons_photos_are_asked_with_the_query_run(commons_sets: Settings) -> None:
+    scored = score_test_set(
         commons_sets,
-        stack,
-        round_id="R1",
-        step="G",
-        option="G1-A+B",
-        set_ids=["T2", "T2b"],
-        gallery="g",
-        publishable_queries=True,
-        not_found="T8c",
-    )
-    assert [(s.test_set, s.queries, s.hit_at_1.value) for s in result.scores] == [
-        ("T2", 3, 1.0),
-        ("T2b", 3, 1.0),
-    ]
-    assert result.query_vector_run == "A-queries+B-queries"
-    (found,) = result.not_found
-    assert (found.test_set, found.in_index_sets) == ("T8c", ("T2", "T2b"))
-    assert len(found.not_found) == 3
-
-
-def test_a_stack_without_query_runs_cannot_ask_commons_photos(commons_sets: Settings) -> None:
-    with pytest.raises(ValueError, match="have no vector"):
-        score_stack(
-            commons_sets,
-            Stack(runs=("A-gallery",)),
-            round_id="R1",
-            step="A",
-            option="A",
-            set_ids=["T2"],
-            gallery="g",
-        )
-
-
-def test_unknown_not_found_set_is_refused(commons_sets: Settings) -> None:
-    with pytest.raises(ValueError, match="T8, T8c"):
-        score_stack(
-            commons_sets,
-            Stack(runs=("A-gallery",), query_runs=("A-queries",)),
-            round_id="R1",
-            step="A",
-            option="A",
-            set_ids=["T2"],
-            gallery="g",
-            not_found="T2",
-        )
-
-
-def test_query_runs_go_one_per_model() -> None:
-    with pytest.raises(ValueError, match="one query run per model"):
-        Stack(runs=("a", "b"), method=Method.WEIGHTED_SUM, query_runs=("q",))
-
-
-def test_t2_splits_by_view(commons_sets: Settings) -> None:
-    result = score_stack(
-        commons_sets,
-        Stack(runs=("A-gallery",), query_runs=("A-queries",)),
         round_id="R1",
         step="A",
         option="A",
-        set_ids=["T2"],
+        vector_run="A-gallery",
+        query_vector_run="A-queries",
+        set_id="T2b",
+        gallery="g",
+        publishable_queries=True,
+    )
+    assert (scored.queries, scored.hit_at_1.value) == (3, 1.0)
+
+
+def test_not_found_queries_hide_their_own_entity(commons_sets: Settings) -> None:
+    queries = load_queries(commons_sets, "T8c", "tune")
+    asked = not_found_queries(queries, "T8c")
+    assert [q.hidden_entity for q in asked] == [q.entity_id for q in queries]
+    with pytest.raises(ValueError, match="have a right answer"):
+        not_found_queries(load_queries(commons_sets, "T2", "tune"), "T2")
+
+
+def test_t2_splits_by_view(commons_sets: Settings) -> None:
+    scored = score_test_set(
+        commons_sets,
+        round_id="R1",
+        step="A",
+        option="A",
+        vector_run="A-gallery",
+        query_vector_run="A-queries",
+        set_id="T2",
         gallery="g",
     )
-    path = stack_module.eval_result_path("R1", "A", "A")
-    assert result.scores[0].queries == 3
+    path = run_module.eval_result_path("R1", "A", "A")
+    assert scored.queries == 3
     (exterior,) = score_by_view(commons_sets, path, test_set="T2", gallery="g")
     assert (exterior.view, exterior.queries, exterior.hit_at_10.value) == (View.EXTERIOR, 3, 1.0)
 

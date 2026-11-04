@@ -22,6 +22,7 @@ from miroir.eval.scoring import (
     Difference,
     Gallery,
     Interval,
+    NotFoundQuery,
     QueryScore,
     SearchQuery,
     bootstrap,
@@ -30,7 +31,7 @@ from miroir.eval.scoring import (
     score,
 )
 from miroir.eval.sets import Query, cluster_of, load_queries, read_gallery, write_gallery
-from miroir.eval.vectors import VectorSet, merge_runs, read_vectors
+from miroir.eval.vectors import Route, RunInfo, VectorSet, merge_runs, read_vectors
 from miroir.records.store import read_commons, read_images, read_records
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,60 @@ def entity_map(settings: Settings) -> dict[str, str]:
     for path in settings.commons_gallery_parquets():
         entity_of.update((p.image_id, p.entity_id) for p in read_commons(path))
     return entity_of
+
+
+@dataclass(frozen=True, slots=True)
+class Model:
+    """One model's gallery run, and where its query vectors are."""
+
+    run: str
+    vectors: VectorSet
+    gallery: Gallery
+    asking: VectorSet
+    """The query run, else the gallery run."""
+
+
+def load_model(
+    settings: Settings,
+    run: str,
+    entity_of: dict[str, str],
+    ids: list[str],
+    *,
+    query_run: str | None = None,
+) -> Model:
+    """A model's gallery, and where its query vectors are (`query_run`, else the gallery run)."""
+    vectors = read_vectors(settings.vectors_path(run))
+    asking = vectors if query_run is None else read_vectors(settings.vectors_path(query_run))
+    return Model(run, vectors, Gallery.from_vectors(vectors, entity_of, ids), asking)
+
+
+def combined_info(infos: Sequence[RunInfo], notes: str) -> RunInfo:
+    """One `RunInfo` for several models used together: costs and times add up."""
+    routes = {i.route for i in infos}
+    return RunInfo(
+        option="+".join(i.option for i in infos),
+        model=" + ".join(i.model for i in infos),
+        resolution=max(i.resolution for i in infos),
+        pooling="fusion",
+        gallery=infos[0].gallery,
+        created=max(i.created for i in infos),
+        cost_usd=sum(i.cost_usd for i in infos),
+        wall_time_s=sum(i.wall_time_s for i in infos),
+        route=routes.pop() if len(routes) == 1 else Route.HOSTED,
+        notes=notes,
+    )
+
+
+def not_found_queries(queries: Sequence[Query], set_id: str) -> list[NotFoundQuery]:
+    """A not-found set's queries (T8, T8c), each hiding its own entity's images."""
+    with_answer = sum(1 for q in queries if q.expected_entity_ids)
+    if with_answer:
+        msg = f"{with_answer} {set_id} queries have a right answer"
+        raise ValueError(msg)
+    return [
+        NotFoundQuery(q.query_id, q.query_image_id, q.exclude_image_ids, hidden_entity=q.entity_id)
+        for q in queries
+    ]
 
 
 def compare(

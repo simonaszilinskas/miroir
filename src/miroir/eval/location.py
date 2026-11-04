@@ -38,7 +38,13 @@ from miroir.eval.notfound import Confidence, NotFoundScore, not_found_score
 from miroir.eval.results import RunResult, SetScore, set_score, write_result
 from miroir.eval.router import QUERY_SETS, features, guess_report, photo_types
 from miroir.eval.router3 import Bucket, asking_run, bucket_of, query_chroma
-from miroir.eval.run import entity_map, publishable_only, search_queries
+from miroir.eval.run import (
+    combined_info,
+    entity_map,
+    not_found_queries,
+    publishable_only,
+    search_queries,
+)
 from miroir.eval.scoring import (
     Asked,
     Difference,
@@ -53,7 +59,6 @@ from miroir.eval.scoring import (
     tie_ranks,
 )
 from miroir.eval.sets import Query, load_queries, read_gallery
-from miroir.eval.stack import combined_info, not_found_queries
 from miroir.eval.vectors import RunInfo, VectorSet, read_vectors
 from miroir.geo.model import distance_km, moved
 from miroir.records.mappers import PlaceHint

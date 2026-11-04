@@ -16,7 +16,7 @@ from miroir.commons.gallery import Excluded, GalleryFinder, Guard, order_for_gal
 from miroir.commons.model import Source, View
 from miroir.commons.select import Candidate, only_commune
 from miroir.eval.router import ROUTE_GRID
-from miroir.eval.router3 import Bucket, SetGrid, bucket_of, one, pick_weights, three, two
+from miroir.eval.router3 import Bucket, SetGrid, bucket_of
 from miroir.eval.scoring import QueryScore, ScoreResult
 from miroir.images.colour import GREY_BELOW, already_grey, chroma_spread, greyscale
 from miroir.images.phash import phash
@@ -145,14 +145,14 @@ def test_bucket_of_splits_buildings_by_colour() -> None:
     assert bucket_of(0.1, 0.0) is Bucket.OBJECT
 
 
-def grid(set_id: str, buckets: list[Bucket], best: dict[Bucket, float]) -> SetGrid:
+def test_a_grid_reads_each_query_at_its_bucket_weight() -> None:
     """Each query is right (rank 1) only at its bucket's best weight, else rank 50."""
+    best = {Bucket.ARCHIVE_BUILDING: 1.0, Bucket.COLOUR_BUILDING: 0.3, Bucket.OBJECT: 0.2}
+    buckets = (Bucket.COLOUR_BUILDING, Bucket.OBJECT, Bucket.ARCHIVE_BUILDING)
     results = tuple(
         ScoreResult(
             per_query=tuple(
-                QueryScore(
-                    f"{set_id}-{j}", 1 if w == best[b] else 50, 1.0 if w == best[b] else 0.02
-                )
+                QueryScore(f"q{j}", 1 if w == best[b] else 50, 1.0 if w == best[b] else 0.02)
                 for j, b in enumerate(buckets)
             ),
             skipped_no_answer=0,
@@ -162,24 +162,9 @@ def grid(set_id: str, buckets: list[Bucket], best: dict[Bucket, float]) -> SetGr
         )
         for w in ROUTE_GRID
     )
-    n = len(buckets)
-    return SetGrid(set_id, results, tuple(buckets), tuple(f"e{j}" for j in range(n)), ("q",) * n)
-
-
-def test_each_bucket_gets_its_own_best_weight() -> None:
-    best = {Bucket.ARCHIVE_BUILDING: 1.0, Bucket.COLOUR_BUILDING: 0.3, Bucket.OBJECT: 0.2}
-    grids = [
-        grid("T1", [Bucket.ARCHIVE_BUILDING] * 4, best),
-        grid("T2", [Bucket.COLOUR_BUILDING] * 3 + [Bucket.OBJECT], best),
-        grid("T5", [Bucket.OBJECT] * 4, best),
-    ]
-    assert pick_weights(grids, three) == best
-    g4 = pick_weights(grids, two)
-    assert g4[Bucket.ARCHIVE_BUILDING] == g4[Bucket.COLOUR_BUILDING]
-    assert g4[Bucket.OBJECT] == 0.2
-    assert len(set(pick_weights(grids, one).values())) == 1
-    scored = grids[1].at(best)
-    assert all(q.rank == 1 for q in scored.per_query)
+    grid = SetGrid("T2", results, buckets)
+    assert [q.rank for q in grid.at(best).per_query] == [1, 1, 1]
+    assert [q.rank for q in grid.at(dict.fromkeys(Bucket, 0.5)).per_query] == [50, 50, 50]
 
 
 def test_site_routing_sends_colour_building_photos_to_megaloc() -> None:

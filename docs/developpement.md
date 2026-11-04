@@ -47,8 +47,8 @@ Data and images are never stored in the repository. Secrets are never committed.
 ## The `miroir` command
 
 Every entry point is a subcommand: `uv run miroir --help` lists the groups (`records`, `testsets`,
-`embed`, `eval`, `web`, …). Models never run on the development machine: embedding, captioning and
-re-ranking run on a Scaleway GPU machine or on OpenRouter (on Modal before 2026-11-03).
+`embed`, `eval`, `web`, …). Models never run on the development machine: embedding and captioning
+run on a Scaleway GPU machine or on OpenRouter (on Modal before 2026-11-03).
 
 ```sh
 uv run miroir records build      # exports -> records.parquet + images.parquet (about 6 s)
@@ -57,7 +57,6 @@ uv run miroir testsets build     # records -> test sets T1, T3, T5, T8 + galleri
 uv run miroir testsets commons   # Commons photos -> T2, T2b, T8c (cached; 20 s)
 uv run miroir embed scw --option A7-embeddinggemma-2-512 --probe   # open model on a Scaleway GPU
 uv run miroir eval run ...       # score a vector run on a test set (technical spec §7.2)
-uv run miroir eval stack ...     # fuse models (G1, G2), expand queries (E5), score T8
 uv run miroir eval summary       # rebuild the results table in docs/results.md
 uv run miroir web dev            # the website at http://localhost:8000 with fake models
 uv run miroir web mcp-token NAME # a token for the MCP connector (ChatGPT, Claude), kept in .env
@@ -65,7 +64,7 @@ uv run miroir web mcp-token NAME # a token for the MCP connector (ChatGPT, Claud
 
 To put the website online: see [prototype.md](prototype.md), section Hosting.
 
-Paid runs (`embed`, `rerank`, `vlm ask`, `words ask`) start with a probe and stop at a cost
+Paid runs (`embed`, `vlm ask`, `vlm h4`, `words ask`) start with a probe and stop at a cost
 limit (`--probe`, `--max-usd`).
 Start any run longer than a minute detached and follow its log:
 
