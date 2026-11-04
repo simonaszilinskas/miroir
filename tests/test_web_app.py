@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import base64
+import io
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image as PILImage
 
 from miroir.config import Settings
+from miroir.images import upload
 from miroir.web import app as app_module
 from miroir.web import auth
 from miroir.web.app import create_app
 from miroir.web.bundle import MANIFEST_FILE
+from miroir.web.engine import SearchRequest, SearchResponse
 from miroir.web.fake import LocalBackend
 from miroir.web.ops import (
     read_env_password,
@@ -318,6 +322,51 @@ def test_a_huge_body_sent_in_chunks_is_cut_off(client: TestClient) -> None:
         "/api/login", content=chunks(), headers={"Content-Type": "application/json"}
     )
     assert response.status_code == 413
+
+
+class _BrokenBackend(LocalBackend):
+    async def search(self, request: SearchRequest) -> SearchResponse:
+        del request
+        msg = "a7.npy has 5 rows, the catalog 6"
+        raise ValueError(msg)
+
+
+def test_a_server_fault_is_a_500_not_an_unreadable_photo(tmp_path: Path) -> None:
+    engine, _ = h.engine(building=False)
+    app = create_app(
+        catalog=engine.catalog,
+        backend=_BrokenBackend(engine),
+        password=PASSWORD,
+        session_key=b"k" * 32,
+        secure_cookies=False,
+        ui_dir=built_page(tmp_path / "ui"),
+    )
+    broken = TestClient(app, raise_server_exceptions=False)
+    login(broken)
+    image = base64.b64encode(h.photo(130)).decode()
+    response = broken.post("/api/search", json={"image": image})
+    assert response.status_code == 500
+    assert "lue" not in response.json()["detail"]
+
+
+def test_a_photo_too_large_to_decode_is_unreadable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(client)
+    monkeypatch.setattr(upload, "MAX_UPLOAD_PIXELS", 1000)
+    image = base64.b64encode(h.photo(130)).decode()  # 64 x 48 = 3,072 px
+    response = client.post("/api/search", json={"image": image})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Cette image n’a pas pu être lue."
+
+
+def test_a_photo_in_another_format_is_unreadable(client: TestClient) -> None:
+    login(client)
+    out = io.BytesIO()
+    PILImage.new("RGB", (64, 48), "grey").save(out, format="GIF")
+    image = base64.b64encode(out.getvalue()).decode()
+    assert client.post("/api/search", json={"image": image}).status_code == 422
+    assert client.post("/api/detect", json={"image": image}).status_code == 200  # fake outlines
 
 
 @pytest.mark.parametrize("path", ["/api/search", "/api/detect", "/api/chat/open"])

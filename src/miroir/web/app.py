@@ -39,6 +39,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from miroir.caption import MAX_CAPTION
 from miroir.config import WIKIMEDIA_USER_AGENT
 from miroir.images.fetch import to_jpeg
+from miroir.images.upload import UnreadablePhotoError
 from miroir.outlines import Outlines
 from miroir.web import auth
 from miroir.web.catalog import (
@@ -75,6 +76,7 @@ MAX_PHOTO_CHARS = MAX_PHOTO_BYTES * 4 // 3 + 4 + 64
 #: Largest request body, refused before it is read (`BodyLimit`): one photo and the rest.
 MAX_BODY_BYTES = MAX_PHOTO_CHARS + 64 * 1024
 TOO_LARGE = "Photo trop lourde."
+SERVER_ERROR = "La recherche a échoué de notre côté. Réessayez dans un instant."
 #: Longest wait on the search backend before the page is told to retry (`_wait_for`).
 SEARCH_WAIT_S = 100.0
 #: Side of the small images under the large one on a record page.
@@ -513,9 +515,12 @@ async def _wait_for[T](work: Awaitable[T], what: str) -> T:
             detail="Le moteur de recherche démarre. Nouvel essai dans un instant.",
             headers={"Retry-After": "2"},
         ) from err
-    except ValueError as err:
+    except UnreadablePhotoError as err:
         logger.warning("%s refused: %s", what, err)
         raise HTTPException(status_code=422, detail="Cette image n’a pas pu être lue.") from err
+    except Exception as err:
+        logger.exception("%s failed", what)
+        raise HTTPException(status_code=500, detail=SERVER_ERROR) from err
 
 
 # --- the conversation page (step H5, `miroir.web.chat`) -----------------------------------------
