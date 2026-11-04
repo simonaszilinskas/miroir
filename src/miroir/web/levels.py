@@ -4,8 +4,9 @@ Every card shows one level. It comes from what the engine already computes: the 
 card's score (for a photo, the routed mix of its raw cosines, as T8 measures "not found";
 for words, the fused score) and its gap to the best other card of the top 30 (for a photo,
 the photo's own top 30, whatever words or a position add: the thresholds were set on photo
-rankings, `miroir.eval.levels`). On the tune halves the gap tells a right first card best; cards after the first are the right record
-for 4% of searches or fewer, whatever their score, so they always read "Ressemblance".
+rankings, `miroir.eval.levels`). On the tune halves the gap tells a right first card best;
+cards after the first are the right record for 4% of searches or fewer, whatever their
+score, so they always read "Ressemblance".
 
 - "Très proche": the first card, when its score and gap reach the route's first pair of
   thresholds. Set so that it is the right record at least 80% of the time.
