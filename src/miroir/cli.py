@@ -780,45 +780,6 @@ def vlm_ask(
     typer.echo(f"{model}: {done.answered} new answers, ${done.cost_usd:.4f}, skipped {done.skips}")
 
 
-@vlm_app.command("score")
-def vlm_score(
-    model: Annotated[str, typer.Option(help="Vision model whose saved answers to search.")],
-    *,
-    round_id: Annotated[str, typer.Option("--round", help="R2, R3...")] = "R2",
-    test_set: Annotated[list[str] | None, typer.Option("--set", help="Repeat it.")] = None,
-    gallery: Annotated[str, typer.Option(help="Gallery list.")] = DEFAULT_GALLERY,
-    image_run: Annotated[
-        str | None, typer.Option(help="Image vector run to mix with (H3), e.g. the A7 run.")
-    ] = None,
-    image_label: Annotated[str, typer.Option(help="Short name of that run in labels.")] = "A7",
-) -> None:
-    """Score H1 (BM25 on the model's answers) and, with --image-run, H3 (mixed with images)."""
-    from miroir.eval import vlm  # noqa: PLC0415
-    from miroir.jobs.describe import OPTIONS  # noqa: PLC0415
-
-    if model not in OPTIONS:
-        raise typer.BadParameter(f"known models: {', '.join(OPTIONS)}")
-    settings = get_settings()
-    prepared = vlm.prepare(settings, OPTIONS[model], tuple(test_set or DEFAULT_SETS), gallery)
-    h1 = vlm.score_h1(prepared, round_id=round_id)
-    typer.echo(f"H1 {model}: {h1.vectors.notes}")
-    _echo_scores(h1.scores)
-    for r in vlm.report(prepared):
-        bands = ", ".join(f"{b.label}: {b.queries} q, {100 * b.hit_at_10:.0f}%" for b in r.bands)
-        typer.echo(
-            f"{r.set_id}: {r.answered}/{r.queries} answered; named {r.named} "
-            f"(right {r.name_right}); type right {r.kind_right}; commune given "
-            f"{r.commune_given}, right {r.commune_right} of {r.with_commune} with one "
-            f"({r.commune_read} read in the image); "
-            f"visible text {r.visible_text} (top 10 gained {r.text_helped}, lost "
-            f"{r.text_hurt}); hit@10 by confidence: {bands}"
-        )
-    if image_run is not None:
-        h3, weight = vlm.score_h3(settings, prepared, image_run, image_label, round_id=round_id)
-        typer.echo(f"H3 {image_label}+H1, image weight {weight:.1f}: {h3.vectors.notes}")
-        _echo_scores(h3.scores)
-
-
 @vlm_app.command("h4")
 def vlm_h4(
     *,

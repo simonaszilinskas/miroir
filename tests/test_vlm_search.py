@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import numpy as np
-
 from miroir.config import Settings
-from miroir.eval.scoring import SearchQuery, rank_entities
-from miroir.eval.vlm import query_text, text_entity_scores, text_gallery
+from miroir.eval.vlm import query_text, text_gallery
 from miroir.jobs.describe import Description
 from miroir.records.build import build
 from miroir.records.store import read_records
@@ -17,7 +14,7 @@ def test_query_text_doubles_name_and_commune_and_can_drop_visible_text() -> None
     assert query_text(None) == ""
 
 
-def test_text_search_ranks_the_record_named_and_hides_the_query_image(
+def test_text_search_ranks_the_record_named_first(
     settings: Settings,
 ) -> None:
     build(settings)
@@ -29,16 +26,7 @@ def test_text_search_ranks_the_record_named_and_hides_the_query_image(
     image_ids = [i.image_id for r in records for i in r.images]
     gallery = text_gallery(records, image_ids)
     asked = with_two.images[0].image_id
-    query = SearchQuery("q1", asked, (with_two.entity_id,))
     texts = {asked: f"{with_two.title} {with_two.description}"}
 
-    scores = text_entity_scores(gallery, [query], texts)
-    ranked = rank_entities(scores, [query])
-
-    assert ranked.per_query[0].rank == 1
-    # Hiding every image of the record takes the entity out.
-    hidden = SearchQuery(
-        "q1", asked, (with_two.entity_id,), tuple(i.image_id for i in with_two.images)
-    )
-    gone = text_entity_scores(gallery, [hidden], texts)
-    assert gone.values[0, gone.entity_ids.index(with_two.entity_id)] == -np.inf
+    per_image = gallery.index.scores(texts[asked])[gallery.record_rows]
+    assert gallery.entity_ids[int(per_image.argmax())] == with_two.entity_id
