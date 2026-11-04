@@ -52,7 +52,7 @@ before changing behaviour. Setup and commands: [docs/developpement.md](docs/deve
    (`config.eval_result_path`) and is committed.
 6. No network in unit tests (pytest runs with `--disable-socket`).
 7. Paid model runs start with a probe of 100 images. The CLI enforces a spending cap
-   (`MIROIR_OPENROUTER_BUDGET_USD`, see `config.py`); raising it is a project decision.
+   (`BUDGET_USD` in `config.py`; the environment may only lower it); raising it is a project decision.
 8. Only images of `publishable` records may go to outside model services
    (`miroir.jobs.privacy`, technical spec §9).
 9. Start any run longer than a minute detached (`nohup uv run miroir … > run.log 2>&1 &`) and
