@@ -59,7 +59,6 @@ uv run miroir embed scw --option A7-embeddinggemma-2-512 --probe   # open model 
 uv run miroir eval run ...       # score a vector run on a test set (technical spec §7.2)
 uv run miroir eval stack ...     # fuse models (G1, G2), expand queries (E5), score T8
 uv run miroir eval summary       # rebuild the results table in docs/results.md
-uv run miroir eval viewer --out page.html   # each model's top 5 as thumbnails, one HTML file
 uv run miroir web dev            # the website at http://localhost:8000 with fake models
 uv run miroir web mcp-token NAME # a token for the MCP connector (ChatGPT, Claude), kept in .env
 ```
