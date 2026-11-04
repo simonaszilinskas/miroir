@@ -55,7 +55,7 @@ Each POP export is a folder holding `<base>.jsonl` (one record per line, POP fie
 | `joconde` | 33,000 | 32,997 | 54,825 | 12,000 records have 2 or more views |
 | `rose-valand` (base `rose-valland`, Mongo collection `mnr`) | 2,400 | 2,400 | 16,961 | Median 4 images per record, max 52 |
 
-"Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table.
+"Kept" counts records left with at least one image after the skips in 3.3: 101,386 records and 137,775 images in all. `uv run miroir records build` writes them to `records.parquet` and `images.parquet` in `MIROIR_DATA_DIR`, and warns when a count differs from this table. Every table of the data dir is written to a temporary file and renamed when complete, so a failed build keeps the last good one; each carries a schema version (`records/store.py`), and a reader refuses a table of another version or with other columns: rebuild it.
 
 The full export of every POP record with an image (3.4) uses the same format and adds Mérimée, Palissy and Muséofile. `uv run miroir records build-full` maps it into separate tables (11.1); each new mapper keeps only the fields of 3.2.
 

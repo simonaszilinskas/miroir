@@ -72,8 +72,8 @@ def build_full(settings: Settings) -> FullBuild:
     logger.info("July Joconde: %d records publishable", len(joconde))
     memoire_open: set[str] = set()
     fmaps: dict[Collection, FieldMap] = {Collection.MEMOIRE: FIELD_MAPS[Collection.MEMOIRE]}
-    writer = RecordsWriter(settings.full_records_parquet, settings.full_images_parquet)
-    try:
+    paths = settings.full_records_parquet, settings.full_images_parquet
+    with RecordsWriter(*paths) as writer:
         for collection in FULL_ORDER:
             if collection not in fmaps:
                 rights = Rights(joconde_open=joconde, memoire_open=frozenset(memoire_open))
@@ -84,8 +84,6 @@ def build_full(settings: Settings) -> FullBuild:
             report.counts[collection] = counts
             for counter, value in sorted(counts.items()):
                 logger.info("%s %s=%d", collection, counter, value)
-    finally:
-        writer.close()
     return report
 
 
