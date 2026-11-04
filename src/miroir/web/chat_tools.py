@@ -105,6 +105,8 @@ MAX_QUERY_WORDS = 5
 #: Characters kept of a `why`, of a summary.
 WHY_CHARS = 200
 SUMMARY_CHARS = 700
+#: Most ids the best-so-far holds (`best` on a search or a look).
+BEST = 5
 #: What a "not found" summary starts with when the model did not say it.
 NOT_FOUND = "Je ne trouve pas cet objet précis dans les collections."
 
