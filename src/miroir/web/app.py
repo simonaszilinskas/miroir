@@ -281,6 +281,17 @@ SessionId = Annotated[str, Depends(require_session)]
 api = APIRouter(prefix="/api")
 
 
+def _client_of(request: Request) -> str:
+    """The visitor's address: uvicorn reads it from Caddy's X-Forwarded-For (`remote.site`)."""
+    return request.client.host if request.client else "unknown"
+
+
+def _limit_key(request: Request, session_id: str) -> str:
+    """The rate-limit key: the session and the visitor's address, so logging in again (a new
+    session) from the same address does not reset the limits."""
+    return f"{session_id}:{_client_of(request)}"
+
+
 def create_app(
     *,
     catalog: Catalog,
@@ -403,6 +414,8 @@ async def _headers(
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
     response.headers["Content-Security-Policy"] = CONTENT_POLICY
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
@@ -418,8 +431,7 @@ async def _chat_page() -> RedirectResponse:
 
 @api.post("/login")
 async def login(body: LoginBody, request: Request, site: SiteDep) -> JSONResponse:
-    # The visitor's address: uvicorn reads it from Caddy's X-Forwarded-For (`remote.site`).
-    client = request.client.host if request.client else "unknown"
+    client = _client_of(request)
     if not site.login_limit.allow(client):
         raise HTTPException(status_code=429, detail="Trop d’essais. Réessayez dans une minute.")
     if not auth.password_ok(body.password, site.password):
@@ -449,8 +461,8 @@ async def me(_: SessionId) -> dict[str, bool]:
 
 
 @api.post("/warm")
-async def warm(session_id: SessionId, site: SiteDep) -> dict[str, bool]:
-    _calls_allowed(site, session_id)
+async def warm(request: Request, session_id: SessionId, site: SiteDep) -> dict[str, bool]:
+    _calls_allowed(site, _limit_key(request, session_id))
     await site.backend.warm()
     return {"ok": True}
 
@@ -490,8 +502,10 @@ async def example_image(example_id: str, _: SessionId, site: SiteDep) -> Respons
 
 
 @api.post("/search")
-async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> SearchResponse:
-    if not site.search_limit.allow(session_id):
+async def search(
+    body: SearchBody, http_request: Request, session_id: SessionId, site: SiteDep
+) -> SearchResponse:
+    if not site.search_limit.allow(_limit_key(http_request, session_id)):
         raise HTTPException(
             status_code=429, detail="Trop de recherches en une minute. Patientez un instant."
         )
@@ -517,9 +531,11 @@ async def search(body: SearchBody, session_id: SessionId, site: SiteDep) -> Sear
 
 
 @api.post("/detect")
-async def detect(body: DetectBody, session_id: SessionId, site: SiteDep) -> Outlines:
+async def detect(
+    body: DetectBody, request: Request, session_id: SessionId, site: SiteDep
+) -> Outlines:
     """F4: outlines of the objects in the photo, in shares of its width and height."""
-    if not site.detect_limit.allow(session_id):
+    if not site.detect_limit.allow(_limit_key(request, session_id)):
         raise HTTPException(status_code=429, detail="Trop de photos en une minute.")
     image = _decode_photo(body.image)
     if image is None:
@@ -628,15 +644,18 @@ async def chat_status(_: SessionId, site: SiteDep) -> dict[str, bool]:
 
 
 @api.post("/chat/open")
-async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) -> dict[str, str]:
+async def chat_open(
+    body: ChatOpenBody, request: Request, session_id: SessionId, site: SiteDep
+) -> dict[str, str]:
     """A new conversation; with a photo, the usual search starts at once."""
     chat = _chat(site)
-    if not site.search_limit.allow(session_id):
+    key = _limit_key(request, session_id)
+    if not site.search_limit.allow(key):
         raise HTTPException(status_code=429, detail="Trop de messages en une minute.")
     image = _decode_photo(body.image)
     if image is None and not body.text.strip():
         raise HTTPException(status_code=422, detail="Ajoutez une photo ou des mots.")
-    if not site.conversation_limit.allow(session_id):
+    if not site.conversation_limit.allow(key):
         raise HTTPException(
             status_code=429,
             detail="Assez de recherches approfondies pour aujourd’hui. Revenez demain.",
@@ -652,10 +671,12 @@ async def chat_open(body: ChatOpenBody, session_id: SessionId, site: SiteDep) ->
 
 
 @api.post("/chat/send")
-async def chat_send(body: ChatSendBody, session_id: SessionId, site: SiteDep) -> dict[str, int]:
+async def chat_send(
+    body: ChatSendBody, request: Request, session_id: SessionId, site: SiteDep
+) -> dict[str, int]:
     """The visitor's goal, answer, framed region or message: the model's turn starts."""
     chat = _chat(site)
-    if not site.search_limit.allow(session_id):
+    if not site.search_limit.allow(_limit_key(request, session_id)):
         raise HTTPException(status_code=429, detail="Trop de messages en une minute.")
     conversation = chat.get(session_id, body.conversation_id)
     if conversation is None:
@@ -674,10 +695,12 @@ async def chat_send(body: ChatSendBody, session_id: SessionId, site: SiteDep) ->
 
 
 @api.post("/chat/events")
-async def chat_events(body: ChatEventsBody, session_id: SessionId, site: SiteDep) -> Response:
+async def chat_events(
+    body: ChatEventsBody, request: Request, session_id: SessionId, site: SiteDep
+) -> Response:
     """What the model does, one JSON object per line, as it happens."""
     chat = _chat(site)
-    _calls_allowed(site, session_id)
+    _calls_allowed(site, _limit_key(request, session_id))
     conversation = chat.get(session_id, body.conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation introuvable. Recommencez.")

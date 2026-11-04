@@ -35,6 +35,7 @@ from miroir.jobs.remote_spec import (
     Pooling,
     Resize,
     SuppliedImage,
+    hub_repo,
     weights_key,
 )
 from miroir.parallel import bounded_map
@@ -173,7 +174,7 @@ class MegaLocEncoder:
 
     def __init__(self, option: ModelOption) -> None:
         self.option = option
-        model = torch.hub.load(option.model, "get_trained_model", trust_repo=True)
+        model = torch.hub.load(hub_repo(option), "get_trained_model", trust_repo=True)
         self.model = model.to(DEVICE).eval()
 
     def prepare(self, image: PILImage.Image) -> NDArray[np.float32]:

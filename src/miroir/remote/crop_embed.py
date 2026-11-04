@@ -47,7 +47,7 @@ from miroir.jobs.crop_embed import (
 )
 from miroir.jobs.crop_slice import SUPPLIED_KEY, Grid, QuerySource, crop_boxes, outside_key
 from miroir.jobs.objects import Bucket, bucket_name, download_tree, listing, s3_client
-from miroir.jobs.remote_spec import OPTIONS
+from miroir.jobs.remote_spec import OPTIONS, hub_repo
 from miroir.parallel import bounded_map, process_map
 from miroir.remote.crop_slice import as_gallery_crop
 from miroir.remote.models import DEVICE
@@ -112,7 +112,7 @@ class Megaloc:
     """MegaLoc on the GPU, in any `Precision`; pixels normalised there as `squash` does."""
 
     def __init__(self) -> None:
-        self.model = torch.hub.load(A3.model, "get_trained_model", trust_repo=True)
+        self.model = torch.hub.load(hub_repo(A3), "get_trained_model", trust_repo=True)
         self.model = self.model.to(DEVICE).eval()
         self.mean = torch.from_numpy(IMAGENET_MEAN).to(DEVICE).view(1, 3, 1, 1)
         self.std = torch.from_numpy(IMAGENET_STD).to(DEVICE).view(1, 3, 1, 1)

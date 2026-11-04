@@ -198,6 +198,11 @@ _ALL = (
 
 OPTIONS: dict[str, ModelOption] = {o.id: o for o in _ALL}
 
+#: MegaLoc loads its code through torch.hub from GitHub, so the exact commit is pinned:
+#: a moved default branch would run different code on the GPU machine (HEAD of main,
+#: 2026-07-28).
+MEGALOC_COMMIT = "5fe0dd697c4a70ba3e23607f6716ab3c606b16db"
+
 
 def option(option_id: str) -> ModelOption:
     """Look up a gallery option by its id."""
@@ -206,6 +211,13 @@ def option(option_id: str) -> ModelOption:
         msg = f"unknown model option {option_id!r}; known: {', '.join(OPTIONS)}"
         raise ValueError(msg)
     return found
+
+
+def hub_repo(option: ModelOption) -> str:
+    """The `torch.hub.load` source: `owner/repo:commit` with the commit pinned for MegaLoc."""
+    if option.family is Family.MEGALOC:
+        return f"{option.model}:{MEGALOC_COMMIT}"
+    return option.model
 
 
 @dataclass(frozen=True, slots=True)
