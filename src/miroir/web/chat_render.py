@@ -47,7 +47,7 @@ def render(
     messages: Sequence[Message],
     *,
     photo: bytes | None,
-    region: bytes | None,
+    regions: Sequence[bytes],
     thumbs: Mapping[str, bytes],
     query_images: Mapping[str, bytes],
     check: Callable[[str], None],
@@ -81,12 +81,19 @@ def render(
                     rendered.append(data_url(query_images[key]))
                 else:
                     rendered.append(text_part(QUERY_SHOWN))
-            elif ref == "region" and region is not None:
-                rendered.append(data_url(to_jpeg(region, PHOTO_SIDE)))
+            elif ref == "region" and (n := _index(part.get("image_id"))) < len(regions):
+                rendered.append(data_url(to_jpeg(regions[n], PHOTO_SIDE)))
             elif ref == "photo" and photo is not None:
                 rendered.append(data_url(to_jpeg(photo, PHOTO_SIDE)))
         out.append({**message, "content": rendered})
     return out
+
+
+def _index(value: object) -> int:
+    try:
+        return int(str(value))
+    except ValueError:
+        return 1 << 30
 
 
 def sent_thumbs(messages: Sequence[Message]) -> set[str]:

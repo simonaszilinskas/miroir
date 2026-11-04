@@ -20,6 +20,7 @@ says whether the very thing was found (`found`), and says so plainly when it was
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -452,6 +453,11 @@ class Signature:
         return shared / max(len(self.words | other.words), 1) >= SAME_WORDS
 
 
+def _digest(data: bytes) -> str:
+    """Tells two framed regions apart, whatever their size."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 def _repeated(step: int, what: str) -> ToolOutcome:
     return ToolOutcome(
         f"not run: this repeats step {step} ({what}). Its results are above. Change the "
@@ -486,7 +492,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
                 source,
                 weight,
                 _filters_key(filters),
-                len(ctx.region or b""),
+                _digest(image) if source == "region" else None,
                 None if asked is None else repr(asked.transform),
             ]
         ),

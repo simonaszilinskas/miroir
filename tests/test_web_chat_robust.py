@@ -4,6 +4,7 @@ or down, a stream that drops, calls in flight against the spending caps."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from collections.abc import Mapping, Sequence
 
@@ -11,6 +12,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from miroir.images.fetch import to_jpeg
 from miroir.jobs.mistral import PRICES
 from miroir.jobs.openrouter import JSON, ChatAnswer
 from miroir.web import chat as chat_module
@@ -31,17 +33,22 @@ from miroir.web.chat import (
 from miroir.web.chatlog import ChatLog
 from miroir.web.fake import ScriptedModel
 from miroir.web.publishable import Publishable
+from miroir.web.toolsearch import SearchKind
+from tests import web_helpers as h
 from tests.test_web_chat import (
     CAPS,
     EXACT,
+    LOOK,
     WHY,
     CountingBackend,
     Fetches,
     Rig,
     body_text,
+    call,
     calls,
     card_ids,
     of,
+    searching,
     shown,
     tool_messages,
 )
@@ -460,3 +467,34 @@ def test_a_conversation_keeps_only_the_thumbnails_it_still_sends(
     model = service.model
     assert isinstance(model, ScriptedModel)
     assert body_text(model.bodies[-1]).count("data:image/jpeg") == 1
+
+
+# --- 12. two framed regions --------------------------------------------------------------------
+
+
+def test_a_second_framed_region_is_searched_and_the_first_still_shown() -> None:
+    """Every region in the messages showed the latest one, and a second region of the same
+    byte length was refused as a repeat of the first one's search."""
+    region = {"source": "region", "model": "A3"}
+    script = [
+        call("ask_region", {"reason": "Quel tableau ?"}),
+        LOOK,
+        searching("image_search", region),
+        call("ask_region", {"reason": "Et l’autre ?"}),
+        searching("image_search", region),
+        shown("OBJ1"),
+    ]
+    first, second = h.photo(130), h.photo(140)
+    assert len(first) == len(second)
+    with Rig(script) as rig:
+        cid = rig.start()
+        rig.send(cid, "goal", EXACT)
+        rig.send(cid, "region", region=base64.b64encode(first).decode())
+        rig.send(cid, "region", region=base64.b64encode(second).decode())
+    assert not tool_messages(rig.model.bodies[-1])[-1].startswith("not run")
+    searched = [q.image for q in rig.backend.queries if q.kind is SearchKind.IMAGE]
+    assert len(searched) == 2
+    assert searched[0] != searched[1]
+    sent = body_text(rig.model.bodies[-1])
+    for framed in (first, second):
+        assert base64.b64encode(to_jpeg(framed, chat_render.PHOTO_SIDE)).decode() in sent

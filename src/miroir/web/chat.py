@@ -255,7 +255,8 @@ class Conversation:
         self.known: dict[str, CardView] = {}
         """Every entity the model has seen in a result: what show_results may show."""
         self.signatures: list[tuple[Signature, int]] = []
-        self.region_bytes: bytes | None = None
+        self.regions: list[bytes] = []
+        """The parts of the photo the visitor framed, in order; searches take the last."""
         self.thumbs: dict[str, bytes] = {}
         """Thumbnails fetched for the model, by image id (each one publishable)."""
         self.spent_usd = 0.0
@@ -276,7 +277,7 @@ class Conversation:
 
     @property
     def region(self) -> bytes | None:
-        return self.region_bytes
+        return self.regions[-1] if self.regions else None
 
     @property
     def position(self) -> Position | None:
@@ -589,11 +590,11 @@ class ChatService:
             if given.region is None:
                 c.messages[pending.message]["content"] = chat_prompts.FRAMED_NOTHING
                 return
-            c.region_bytes = given.region
+            c.regions.append(given.region)
             c.messages[pending.message]["content"] = chat_prompts.FRAMED
             c.messages.append(
                 user_message(
-                    text_part(chat_prompts.FRAMED_PART), image_ref("region", len(c.thumbs))
+                    text_part(chat_prompts.FRAMED_PART), image_ref("region", len(c.regions) - 1)
                 )
             )
             return
@@ -964,7 +965,7 @@ class ChatService:
         return render(
             c.messages,
             photo=c.photo_bytes,
-            region=c.region_bytes,
+            regions=c.regions,
             thumbs=c.thumbs,
             query_images=c.query_images,
             check=lambda image_id: publishable.check(image_id, "the model"),
