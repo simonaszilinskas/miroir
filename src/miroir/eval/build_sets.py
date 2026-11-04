@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from miroir.commons.model import QUERY_SETS, CommonsPhoto, CommonsSet, is_commons_image
 from miroir.config import SEED, Half, Settings
 from miroir.eval.sets import Query, write_gallery, write_set
-from miroir.images.phash import distance
 from miroir.records.images import copy_key
 from miroir.records.model import Collection, Record
 from miroir.records.store import read_commons, read_records
@@ -259,6 +258,9 @@ def copies_in_record(
         if file_key(url[other]) == key:
             return True
         theirs = hashed.get(other)
+        # Pillow is in the `fetch` extra; building sets needs only the base install.
+        from miroir.images.phash import distance  # noqa: PLC0415
+
         return asked is not None and theirs is not None and distance(asked, theirs) <= COPY_BITS
 
     return (image_id, *(i for i in sorted(url) if i != image_id and same(i)))
