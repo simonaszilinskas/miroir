@@ -8,6 +8,7 @@ and on the Mac with fake models (`miroir.web.fake`, tests, `miroir web dev`).
 from __future__ import annotations
 
 import io
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -59,7 +60,7 @@ from miroir.web.routing import (
     read_guess,
     read_routing,
 )
-from miroir.web.store import ExactStore, read_exact, shortlist_cosines, top_rows
+from miroir.web.store import EXACT_FILE, ExactStore, read_exact, shortlist_cosines, top_rows
 from miroir.web.sure import SURE_FILE, SureRule, read_sure
 
 logger = logging.getLogger(__name__)
@@ -689,6 +690,7 @@ def load_engine(
     """An engine over one index bundle; the caller brings the models and the vectors."""
     start = time.monotonic()
     catalog = read_catalog(directory / CATALOG_FILE)
+    check_bundle(directory, catalog)
     logger.info(
         "catalog: %d images, %d records, %d entities in %.1f s",
         len(catalog.images),
@@ -710,6 +712,37 @@ def load_engine(
         captions=captions,
         crops=read_crops(directory, crop_store),
     )
+
+
+def check_bundle(directory: Path, catalog: Catalog) -> None:
+    """Raise unless the bundle's files are in step with its catalog: one vector row per
+    catalog image in every matrix, the ids in the same order, the manifest's count.
+
+    A file copied alone (`miroir web upload-file`) or a half-finished copy would otherwise
+    serve every search with the wrong records, or fail on each one."""
+    from miroir.web.bundle import IDS_FILE, MANIFEST_FILE  # noqa: PLC0415 (bundle imports this)
+
+    count = len(catalog.images)
+    problems: list[str] = []
+    for name in (A7_FILE, A3_FILE, EXACT_FILE):
+        path = directory / name
+        if path.exists():
+            rows = np.load(path, mmap_mode="r", allow_pickle=False).shape[0]
+            if rows != count:
+                problems.append(f"{name} has {rows} rows")
+    ids = directory / IDS_FILE
+    if ids.exists() and ids.read_text(encoding="utf-8").split() != [
+        i.image_id for i in catalog.images
+    ]:
+        problems.append(f"{IDS_FILE} lists other images or another order")
+    manifest = directory / MANIFEST_FILE
+    if manifest.exists():
+        said = json.loads(manifest.read_text(encoding="utf-8")).get("images")
+        if said != count:
+            problems.append(f"{MANIFEST_FILE} says {said} images")
+    if problems:
+        msg = f"{directory}: the catalog holds {count} images but " + "; ".join(problems)
+        raise RuntimeError(msg)
 
 
 def _first(records: list[CatalogRecord]) -> CatalogRecord | None:

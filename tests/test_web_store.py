@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -9,8 +10,9 @@ import numpy as np
 import pytest
 
 from miroir.eval.vectors import Route, RunInfo, write_vectors
-from miroir.web.bundle import right_rank, write_shortlist_store
-from miroir.web.engine import A3_FILE, SearchRequest, read_projection
+from miroir.web.bundle import IDS_FILE, MANIFEST_FILE, right_rank, write_shortlist_store
+from miroir.web.catalog import Catalog
+from miroir.web.engine import A3_FILE, A7_FILE, SearchRequest, check_bundle, read_projection
 from miroir.web.store import (
     ExactStore,
     quantize_rows,
@@ -104,6 +106,39 @@ def test_a_bundle_without_int8_rows_has_no_store(tmp_path: Path) -> None:
     assert read_exact(tmp_path) is None
     write_exact(tmp_path, h.unit_rows(3, 4))
     assert read_exact(tmp_path) is not None
+
+
+def _bundle(folder: Path, rows: int) -> Catalog:
+    """A bundle folder whose files match `h.catalog()` (6 images), with `rows` A7 rows."""
+    catalog = h.catalog()
+    count = len(catalog.images)
+    np.save(folder / A7_FILE, h.unit_rows(rows, 4))
+    np.save(folder / A3_FILE, h.unit_rows(count, 4))
+    write_exact(folder, h.unit_rows(count, 4))
+    ids = "".join(f"{i.image_id}\n" for i in catalog.images)
+    (folder / IDS_FILE).write_text(ids, encoding="utf-8")
+    (folder / MANIFEST_FILE).write_text(json.dumps({"images": count}), encoding="utf-8")
+    return catalog
+
+
+def test_a_bundle_in_step_with_its_catalog_loads(tmp_path: Path) -> None:
+    catalog = _bundle(tmp_path, rows=6)
+    check_bundle(tmp_path, catalog)
+
+
+def test_a_vector_file_out_of_step_with_the_catalog_stops_the_load(tmp_path: Path) -> None:
+    catalog = _bundle(tmp_path, rows=5)
+    with pytest.raises(RuntimeError, match=f"6 images but {A7_FILE} has 5 rows"):
+        check_bundle(tmp_path, catalog)
+
+
+def test_ids_in_another_order_or_another_count_stop_the_load(tmp_path: Path) -> None:
+    catalog = _bundle(tmp_path, rows=6)
+    ids = [i.image_id for i in catalog.images]
+    (tmp_path / IDS_FILE).write_text("\n".join(reversed(ids)), encoding="utf-8")
+    (tmp_path / MANIFEST_FILE).write_text(json.dumps({"images": 7}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match=f"{IDS_FILE}.*{MANIFEST_FILE} says 7"):
+        check_bundle(tmp_path, catalog)
 
 
 def test_a_right_answer_off_the_shortlist_is_a_miss_not_a_skipped_query() -> None:
