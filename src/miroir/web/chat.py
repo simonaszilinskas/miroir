@@ -44,6 +44,7 @@ from miroir.web.chat_model import ChatModel, MistralModel, ModelError, OpenRoute
 from miroir.web.chat_prompts import BRIEF, LOCKED_NOTE, ONESHOT_NOTE
 from miroir.web.chat_render import (
     KEEP_QUERY_IMAGES,
+    PHOTO_SIDE,
     CardView,
     Event,
     Message,
@@ -51,6 +52,7 @@ from miroir.web.chat_render import (
     call_id_of,
     card_json,
     card_of_hit,
+    data_url,
     image_ref,
     render,
     sent_thumbs,
@@ -242,7 +244,7 @@ class Conversation:
         self.first_look: asyncio.Future[SearchResponse] | None = None
         self.detected: asyncio.Future[Outlines] | None = None
         """The detector's outlines of the photo, started with the first look."""
-        self.query_images: dict[str, bytes] = {}
+        self.query_images: dict[str, JSON] = {}
         """Transformed photos the model searched, kept for it to look at, by key."""
         self.query_count = 0
         self.stream_id = 0
@@ -257,8 +259,11 @@ class Conversation:
         self.signatures: list[tuple[Signature, int]] = []
         self.regions: list[bytes] = []
         """The parts of the photo the visitor framed, in order; searches take the last."""
-        self.thumbs: dict[str, bytes] = {}
-        """Thumbnails fetched for the model, by image id (each one publishable)."""
+        self.thumbs: dict[str, JSON] = {}
+        """Thumbnails fetched for the model, by image id (each one publishable), as data URLs.
+        The images below are kept as data URLs too, each encoded once."""
+        self.photo_image: JSON | None = None
+        self.region_images: list[JSON] = []
         self.spent_usd = 0.0
         self.last_call_usd = FIRST_CALL_USD
         self.calls = 0
@@ -300,7 +305,7 @@ class Conversation:
                 continue
             data = await source.jpeg(image.image_id, image.url)
             if data is not None:
-                self.thumbs[image.image_id] = data
+                self.thumbs[image.image_id] = data_url(data)
                 self.viewed[hit.entity_id] = image.image_id
                 return image.image_id
         return None
@@ -324,7 +329,7 @@ class Conversation:
     def keep_query_image(self, jpeg: bytes) -> str:
         self.query_count += 1
         key = f"query-{self.query_count}"
-        self.query_images[key] = jpeg
+        self.query_images[key] = data_url(jpeg)
         return key
 
     def forget_images(self) -> None:
@@ -438,9 +443,7 @@ class ChatService:
                 filters=conversation.filters,
             )
             conversation.first_look = asyncio.ensure_future(self.backend.search(request))
-            conversation.detected = asyncio.ensure_future(
-                self.backend.detect(to_jpeg(photo, DETECT_SIDE))
-            )
+            conversation.detected = asyncio.ensure_future(self._detect(photo))
         self._conversations[conversation.id] = conversation
         conversation.log(
             {
@@ -457,6 +460,9 @@ class ChatService:
             "chat %s opened: photo=%s words=%d", conversation.id[:8], photo is not None, len(words)
         )
         return conversation
+
+    async def _detect(self, photo: bytes) -> Outlines:
+        return await self.backend.detect(await asyncio.to_thread(to_jpeg, photo, DETECT_SIDE))
 
     def get(self, session: str, conversation_id: str) -> Conversation | None:
         found = self._conversations.get(conversation_id)
@@ -590,6 +596,7 @@ class ChatService:
             if given.region is None:
                 c.messages[pending.message]["content"] = chat_prompts.FRAMED_NOTHING
                 return
+            c.region_images.append(await _for_model(given.region))
             c.regions.append(given.region)
             c.messages[pending.message]["content"] = chat_prompts.FRAMED
             c.messages.append(
@@ -612,6 +619,8 @@ class ChatService:
         if c.photo_bytes is None:
             parts.append(text_part(chat_prompts.NO_PHOTO.format(words=c.words)))
             return user_message(*parts)
+        if c.photo_image is None:
+            c.photo_image = await _for_model(c.photo_bytes)
         parts += [text_part(chat_prompts.PHOTO), image_ref("photo", 0)]
         if c.words:
             parts.append(text_part(chat_prompts.WORDS_WITH_PHOTO.format(words=c.words)))
@@ -964,12 +973,17 @@ class ChatService:
         publishable = self.thumbs.publishable
         return render(
             c.messages,
-            photo=c.photo_bytes,
-            regions=c.regions,
+            photo=c.photo_image,
+            regions=c.region_images,
             thumbs=c.thumbs,
             query_images=c.query_images,
             check=lambda image_id: publishable.check(image_id, "the model"),
         )
+
+
+async def _for_model(image: bytes) -> JSON:
+    """The visitor's photo or framed part as the model sees it, encoded off the event loop."""
+    return data_url(await asyncio.to_thread(to_jpeg, image, PHOTO_SIDE))
 
 
 def _ms(start: float) -> float:

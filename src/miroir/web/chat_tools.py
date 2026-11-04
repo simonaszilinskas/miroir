@@ -505,7 +505,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     head = f"image_search {source}, model {model}"
     viewed: tuple[Thumbnail, ...] = ()
     if asked is not None:
-        image, viewed = _transformed(ctx, image, asked)
+        image, viewed = await _transformed(ctx, image, asked)
         label = f"{asked.french}, puis cherche par image ({used})"
         head += f", on the photo {asked.english} (the image searched follows)"
     if source == "region":
@@ -584,15 +584,21 @@ class _Crop:
     english: str
 
 
-def _transformed(
+async def _transformed(
     ctx: ToolContext, image: bytes, asked: AskedTransform
 ) -> tuple[bytes, tuple[Thumbnail, ...]]:
-    """The image with the transform done, and the thumbnail of it the model looks at next."""
-    try:
+    """The image with the transform done, and the thumbnail of it the model looks at next;
+    the image work runs off the event loop."""
+
+    def work() -> tuple[bytes, bytes]:
         done = apply(image, asked.transform, TRANSFORM_SIDE)
+        return done, to_jpeg(done, TRANSFORM_VIEW_SIDE)
+
+    try:
+        done, small = await asyncio.to_thread(work)
     except (TransformError, OSError) as err:
         raise ArgumentError(str(err)) from err
-    key = ctx.keep_query_image(to_jpeg(done, TRANSFORM_VIEW_SIDE))
+    key = ctx.keep_query_image(small)
     return done, (Thumbnail(f"The image searched: {asked.english}", key),)
 
 

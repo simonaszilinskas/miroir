@@ -498,3 +498,25 @@ def test_a_second_framed_region_is_searched_and_the_first_still_shown() -> None:
     sent = body_text(rig.model.bodies[-1])
     for framed in (first, second):
         assert base64.b64encode(to_jpeg(framed, chat_render.PHOTO_SIDE)).decode() in sent
+
+
+# --- 10. images encoded once -------------------------------------------------------------------
+
+
+def test_the_photo_is_encoded_for_the_model_once_not_on_every_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sides: list[int] = []
+
+    def counted(data: bytes, long_side: int = 1024) -> bytes:
+        sides.append(long_side)
+        return to_jpeg(data, long_side)
+
+    for module in (chat_module, chat_render):
+        monkeypatch.setattr(module, "to_jpeg", counted, raising=False)
+    script = [LOOK, searching("text_search", {"query": "église"}), shown("PA1")]
+    with Rig(script) as rig:
+        cid = rig.start()
+        assert card_ids(rig.send(cid, "goal", EXACT)) == ["PA1"]
+    assert len(rig.model.bodies) == 3
+    assert sides.count(chat_render.PHOTO_SIDE) == 1

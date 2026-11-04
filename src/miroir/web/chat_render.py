@@ -7,7 +7,6 @@ import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from miroir.images.fetch import to_jpeg
 from miroir.jobs.openrouter import JSON, ToolCall
 from miroir.web.chat_prompts import QUERY_SHOWN, THUMB_SHOWN, THUMBNAILS
 from miroir.web.chat_tools import ToolName, ToolOutcome, arguments_of
@@ -46,14 +45,15 @@ class CardView:
 def render(
     messages: Sequence[Message],
     *,
-    photo: bytes | None,
-    regions: Sequence[bytes],
-    thumbs: Mapping[str, bytes],
-    query_images: Mapping[str, bytes],
+    photo: JSON | None,
+    regions: Sequence[JSON],
+    thumbs: Mapping[str, JSON],
+    query_images: Mapping[str, JSON],
     check: Callable[[str], None],
 ) -> list[JSON]:
-    """The messages with images as data URLs. Only the last `KEEP_THUMBS` thumbnails go
-    again; `check` sees each thumbnail's id once more before it leaves."""
+    """The messages with the images they name, each already encoded once as a data URL
+    (`data_url`): no image work here. Only the last `KEEP_THUMBS` thumbnails go again;
+    `check` sees each thumbnail's id once more before it leaves."""
     keep = {(i, j) for i, j, _ in _sent_thumbs(messages)}
     keep_queries = set(list(query_images)[-KEEP_QUERY_IMAGES:])
     out: list[JSON] = []
@@ -74,17 +74,17 @@ def render(
                     rendered.append(text_part(THUMB_SHOWN))
                     continue
                 check(image_id)
-                rendered.append(data_url(thumbs[image_id]))
+                rendered.append(thumbs[image_id])
             elif ref == "query":
                 key = str(part.get("image_id"))
                 if key in query_images and key in keep_queries:
-                    rendered.append(data_url(query_images[key]))
+                    rendered.append(query_images[key])
                 else:
                     rendered.append(text_part(QUERY_SHOWN))
             elif ref == "region" and (n := _index(part.get("image_id"))) < len(regions):
-                rendered.append(data_url(to_jpeg(regions[n], PHOTO_SIDE)))
+                rendered.append(regions[n])
             elif ref == "photo" and photo is not None:
-                rendered.append(data_url(to_jpeg(photo, PHOTO_SIDE)))
+                rendered.append(photo)
         out.append({**message, "content": rendered})
     return out
 
