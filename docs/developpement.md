@@ -116,9 +116,10 @@ Every command that runs a GPU job starts its own machine: `embed scw`, `embed f2
 **Money.** Each machine's life goes to its own ledger, `~/miroir-data/scaleway/spend.jsonl`,
 in euros, rounded up to the minute. It is kept apart from the dollar budget (`MIROIR_BUDGET_USD`):
 another account pays. Before it starts a machine, the command adds the dearest offer's price
-for the whole of `--max-hours` to the ledger's total, and refuses when that passes
-`MIROIR_SCW_BUDGET_EUR` (default €5). The plan allows €100 in all (search-levels.md); raising
-the cap is a project decision: `SCW_BUDGET_EUR` in `config.py`.
+for the whole of `--max-hours` to the ledger's total and to what machines alive in other
+runs hold, and refuses when that passes `MIROIR_SCW_BUDGET_EUR` (default €5). Its own longest
+life stays held in the ledger until it is deleted and written down. The plan allows €100 in all
+(search-levels.md); raising the cap is a project decision: `SCW_BUDGET_EUR` in `config.py`.
 
 The prices are typed by hand into `OFFERS` in `src/miroir/jobs/scaleway.py` (euros an hour
 without VAT, rounded up). The Instance API gives none, but Scaleway's public catalogue does,

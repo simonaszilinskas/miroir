@@ -13,6 +13,7 @@ from miroir.remote.preprocess import (
     dino_eval,
     dino_whole,
     resize_shorter_side,
+    shape_batches,
     squash,
     whole_size,
 )
@@ -70,3 +71,22 @@ def test_dino_whole_keeps_the_sides_a_crop_would_cut() -> None:
     white = (1.0 - IMAGENET_MEAN) / IMAGENET_STD
     assert np.allclose(pixels[:, 128, 5], white, atol=1e-2)
     assert not np.allclose(dino_eval(wide, 256)[:, 128, 5], white, atol=1e-2)
+
+
+def test_shape_batches_keep_one_shape_per_batch_and_lose_nothing() -> None:
+    wide, tall = np.zeros((3, 224, 448)), np.zeros((3, 448, 224))
+    items = [(f"i{n}", wide if n % 3 else tall) for n in range(20)]
+    batches = list(shape_batches(items, 4, hold=8))
+    assert all(len({b[1].shape for b in batch}) == 1 for batch in batches)
+    assert all(len(batch) <= 4 for batch in batches)
+    assert sorted(i for batch in batches for i, _ in batch) == sorted(i for i, _ in items)
+    assert sum(len(b) == 4 for b in batches) >= 4  # full batches, not one pass per change
+
+
+def test_shape_batches_never_hold_more_than_asked() -> None:
+    shapes = [np.zeros((n % 7 + 1,)) for n in range(50)]  # seven shapes, none fills a batch soon
+    waiting = 0
+    for batch in shape_batches([(str(n), a) for n, a in enumerate(shapes)], 32, hold=10):
+        waiting += 1
+        assert batch
+    assert waiting >= 5

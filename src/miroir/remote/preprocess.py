@@ -9,6 +9,8 @@ The crop cuts the sides off wide photos, so `dino_whole` keeps the whole image i
 
 from __future__ import annotations
 
+from collections.abc import Hashable, Iterable, Iterator
+
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image as PILImage
@@ -70,3 +72,29 @@ def squash(image: PILImage.Image, side: int) -> NDArray[np.float32]:
     resized = image.convert("RGB").resize((side, side), PILImage.Resampling.BILINEAR)
     pixels = np.asarray(resized, dtype=np.float32) / 255.0
     return ((pixels - IMAGENET_MEAN) / IMAGENET_STD).transpose(2, 0, 1).copy()
+
+
+def shape_batches[T](
+    items: Iterable[tuple[str, T]], size: int, *, hold: int
+) -> Iterator[list[tuple[str, T]]]:
+    """Batches of at most `size` items whose arrays share one shape, from a stream.
+
+    Whole images (`dino_whole`) come in a few aspect buckets; a batch of mixed shapes would
+    need one forward pass per shape. Items wait in their bucket for a full batch; once `hold`
+    are waiting, the fullest bucket goes as it is, and the rest go at the end.
+    """
+    buckets: dict[Hashable, list[tuple[str, T]]] = {}
+    waiting = 0
+    for item in items:
+        key: Hashable = getattr(item[1], "shape", None)
+        bucket = buckets.setdefault(key, [])
+        bucket.append(item)
+        waiting += 1
+        if len(bucket) >= size:
+            waiting -= len(bucket)
+            yield buckets.pop(key)
+        elif waiting >= hold:
+            fullest = max(buckets, key=lambda k: len(buckets[k]))
+            waiting -= len(buckets[fullest])
+            yield buckets.pop(fullest)
+    yield from (b for b in buckets.values() if b)

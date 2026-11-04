@@ -32,6 +32,7 @@ from miroir.config import (
     WEIGHTS_MOUNT,
     Settings,
 )
+from miroir.images.fetch import cache_key
 from miroir.jobs.objects import (
     Bucket,
     bucket_name,
@@ -52,11 +53,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WATCH_S = 30.0
-
-
-def image_key(image_id: str) -> str:
-    """Where `ImageCache` keeps an image, relative to its folder."""
-    return f"{image_id[:2]}/{image_id}.jpg"
 
 
 class Worker:
@@ -108,7 +104,7 @@ class Worker:
 
     def _images_down(self, images: Sequence[Image]) -> set[str]:
         """Copy the images the bucket holds into the image folder. Returns the keys it lacks."""
-        keys = [image_key(i.image_id) for i in images]
+        keys = [cache_key(i.image_id) for i in images]
         return download_keys(self.s3, self._bucket(Bucket.IMAGES), Path(IMAGES_MOUNT), keys)
 
     def _images_up(self, keys: set[str]) -> None:

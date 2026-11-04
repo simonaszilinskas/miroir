@@ -10,6 +10,7 @@ from miroir.config import Settings
 from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors
 from miroir.images.fetch import ImageCache, ImageFetcher
+from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.embed import (
     OPTIONS,
     OpenRouterEmbedder,
@@ -21,7 +22,8 @@ from miroir.jobs.embed import (
 )
 from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PrivacyError
-from miroir.jobs.spend import BudgetError, SpendKind
+from miroir.jobs.resumable import Resumable
+from miroir.jobs.spend import BudgetError, RunSpend, SpendKind
 from miroir.records.build import build
 from miroir.records.store import read_records, write_commons
 from tests.fakes import (
@@ -66,13 +68,17 @@ def embedder(
     )
 
 
+def spend(e: OpenRouterEmbedder, limit: float = 1.0) -> RunSpend:
+    return e.spend(SpendKind.RUN, "r", limit_usd=limit, per_item_usd=COST_PER_INPUT)
+
+
 def test_non_publishable_images_never_leave(built: Settings) -> None:
     fake = FakeOpenRouter()
     e = embedder(built, fake)
     private = image_ids(built, publishable=False)
     mixed = [*image_ids(built, publishable=True)[:2], private[0]]
     with pytest.raises(PrivacyError, match="not publishable"):
-        e.embed_images(mixed, kind=SpendKind.RUN, run="r", limit_usd=1.0)
+        e.embed_images(mixed, spend(e))
     assert fake.embedding_bodies == []
 
 
@@ -194,7 +200,7 @@ def test_commons_query_photos_go_out_in_one_run_with_the_sets_queries(built: Set
 def test_an_unknown_commons_id_is_refused(built: Settings) -> None:
     e = embedder(built, FakeOpenRouter(), commons=FakeCommons().images(built))
     with pytest.raises(KeyError, match=r"commons\.parquet"):
-        e.embed_images(["commons-0000000000000000"], kind=SpendKind.RUN, run="r", limit_usd=1.0)
+        e.embed_images(["commons-0000000000000000"], spend(e))
 
 
 def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
@@ -221,3 +227,45 @@ def test_a_stopped_run_resumes_without_paying_twice(built: Settings) -> None:
     assert sorted(done.ids) == sorted(ids)
     assert done.info.cost_usd == pytest.approx(COST_PER_INPUT * len(ids))
     assert not built.checkpoint_path(run_name(OPTIONS["A9"], "g")).exists()
+
+
+def test_a_run_stopped_by_its_limit_keeps_the_answers_in_flight(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    fake = FakeOpenRouter()
+    e = embedder(built, fake)
+    run = run_name(OPTIONS["A9"], "g")
+    job = Resumable(run, built.checkpoint_path(run), [])
+    with pytest.raises(BudgetError, match="over its"):
+        e.embed_images(ids, spend(e, limit=COST_PER_INPUT), job)  # past it after one request
+    # Every request that was paid is in the ledger and in the checkpoint: none is lost.
+    sent = sum(fake.request_sizes)
+    assert 0 < sent < len(ids)
+    assert len(Checkpoint(built.checkpoint_path(run)).ids) == sent
+    assert e.ledger.total() == pytest.approx(COST_PER_INPUT * sent)
+    assert e.ledger.held_usd() == 0.0
+
+
+def test_an_answer_without_a_cost_is_still_written_to_the_ledger(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)[:2]
+    fake = FakeOpenRouter(priced=False)
+    e = embedder(built, fake)
+    with pytest.raises(OpenRouterError, match="without a cost"):
+        e.embed_images(ids, spend(e))
+    (line,) = [line for line in e.ledger.lines() if not line.hold_usd]
+    assert line.estimated
+    assert line.cost_usd == pytest.approx(COST_PER_INPUT * 2)
+
+
+def test_texts_that_fail_in_a_batch_are_asked_again_not_written_as_done(built: Settings) -> None:
+    texts = {"q1": "une église romane", "q2": "un vase grec"}
+    fake = FakeOpenRouter(batch_fails={"q2"})
+    with pytest.raises(OpenRouterError, match="1 of 2 texts failed"):
+        embed_texts(embedder(built, fake), "T7-tune-text", texts)
+    assert not built.vectors_path(run_name(OPTIONS["A9"], "T7-tune-text")).exists()
+    again = FakeOpenRouter()
+    run = embed_texts(embedder(built, again), "T7-tune-text", texts)
+    assert set(run.ids) == {"q1", "q2"}
+    asked = again.batch_bodies[0]["requests"]
+    assert isinstance(asked, list)
+    assert [r["custom_id"] for r in asked] == ["q2"]

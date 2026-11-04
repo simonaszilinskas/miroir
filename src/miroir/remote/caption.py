@@ -7,6 +7,7 @@ Qwen3-VL Instruct is asked to copy the caption line that names the place
 
 from __future__ import annotations
 
+import gc
 import io
 import logging
 import threading
@@ -73,9 +74,26 @@ class CaptionReader:
         return clean_caption(answer)
 
 
+_READER: dict[str, CaptionReader] = {}
+"""The reader loaded on this machine, by model: one at a time."""
+
+
+def caption_reader(model: str) -> tuple[CaptionReader, float]:
+    """The model's reader, loaded once per machine, and the seconds this call spent loading."""
+    if model in _READER:
+        return _READER[model], 0.0
+    _READER.clear()  # free the last reader before loading another
+    gc.collect()
+    torch.cuda.empty_cache()
+    _READER[model] = CaptionReader(model)
+    return _READER[model], _READER[model].load_s
+
+
 def read_captions(model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
     """Every photo's caption, and the time each took on the GPU."""
-    reader = CaptionReader(model)
+    if not photos:
+        return CaptionChunk(ids=(), texts=(), seconds=(), load_s=0.0)
+    reader, load_s = caption_reader(model)
     reader.read(photos[0].jpeg)  # warm the kernels: the timings are of a warm reader
     texts: list[str] = []
     seconds: list[float] = []
@@ -88,7 +106,7 @@ def read_captions(model: str, photos: Sequence[CaptionPhoto]) -> CaptionChunk:
         ids=tuple(p.image_id for p in photos),
         texts=tuple(texts),
         seconds=tuple(seconds),
-        load_s=reader.load_s,
+        load_s=load_s,
     )
 
 

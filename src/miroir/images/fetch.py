@@ -16,14 +16,16 @@ from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import chain
 from pathlib import Path
 from urllib.parse import quote, unquote
 
 import httpx
+import numpy as np
 from PIL import Image as PILImage
-from PIL import UnidentifiedImageError
+from PIL import ImageOps, UnidentifiedImageError
 
-from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST
+from miroir.config import POP_ASSET_HOST, POP_IIIF_IMAGE_HOST, Settings
 from miroir.http import Retry, send
 from miroir.parallel import bounded_map
 from miroir.records.model import Image
@@ -33,6 +35,12 @@ logger = logging.getLogger(__name__)
 #: Longest side, in pixels, of every image sent to an outside model.
 LONG_SIDE = 512
 JPEG_QUALITY = 90
+#: What `to_jpeg` does, named in cache paths. v1 (until 2026-11-04): shrink, then convert to
+#: RGB (palette images resized with NEAREST, transparency black, 16-bit clipped), no EXIF
+#: turn. v2: EXIF turn, RGB on white, then shrink.
+RECIPE = "v2"
+#: Modes Pillow opens 16-bit greyscale as.
+_SIXTEEN_BIT = frozenset({"I", "I;16", "I;16B", "I;16L", "I;16N"})
 #: Parallel downloads from POP. Kept low: the bucket and IIIF server are public services,
 #: and the Mac should stay responsive.
 CONCURRENCY = 4
@@ -70,17 +78,40 @@ def iiif_url(asset_url: str, long_side: int = LONG_SIDE) -> str:
 
 
 def to_jpeg(data: bytes, long_side: int = LONG_SIDE) -> bytes:
-    """Decode any image, shrink it to fit `long_side` (never enlarge), encode as RGB JPEG."""
+    """Decode any image, turn it upright, make it RGB, shrink it to fit `long_side` (never
+    enlarge), encode as JPEG. `RECIPE` names these steps."""
     with PILImage.open(io.BytesIO(data)) as opened:
-        opened.thumbnail((long_side, long_side), PILImage.Resampling.LANCZOS)
-        rgb = opened.convert("RGB")
+        rgb = to_rgb(ImageOps.exif_transpose(opened))
+    rgb.thumbnail((long_side, long_side), PILImage.Resampling.LANCZOS)
     out = io.BytesIO()
     rgb.save(out, format="JPEG", quality=JPEG_QUALITY)
     return out.getvalue()
 
 
+def to_rgb(image: PILImage.Image) -> PILImage.Image:
+    """RGB for any mode: transparency over white, 16-bit grey scaled to 8 bits (not clipped).
+
+    Done before resizing: Pillow resizes palette and 1-bit images with NEAREST only."""
+    if image.mode in _SIXTEEN_BIT:
+        grey = np.asarray(image, dtype=np.float64) / 257.0
+        image = PILImage.fromarray(np.clip(np.rint(grey), 0, 255).astype(np.uint8))
+    if image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info:
+        rgba = image.convert("RGBA")
+        white = PILImage.new("RGBA", rgba.size, (255, 255, 255, 255))
+        return PILImage.alpha_composite(white, rgba).convert("RGB")
+    return image.convert("RGB")
+
+
+def cache_key(image_id: str) -> str:
+    """Where an image made by `to_jpeg` at `LONG_SIDE` is kept, relative to a cache folder or
+    the images bucket: under `<size>-<recipe>/`, so a new size or recipe never serves old
+    bytes."""
+    return f"{LONG_SIDE}-{RECIPE}/{image_id[:2]}/{image_id}.jpg"
+
+
 class ImageCache:
-    """Resized JPEGs keyed by `image_id`, capped at `max_bytes`; oldest files are removed first.
+    """Resized JPEGs keyed by `image_id` (`cache_key`), capped at `max_bytes`; oldest files
+    are removed first.
 
     `max_bytes=None` means no cap: no eviction, and no scan of the folder at start (the GPU
     machine's image folder, where listing 19,000 files would be slow).
@@ -129,10 +160,18 @@ class ImageCache:
         logger.debug("image cache: removed %d old file(s)", removed)
 
     def _files(self) -> Iterator[Path]:
-        return self._dir.glob("*/*.jpg") if self._dir.exists() else iter(())
+        """Every cached file, of every size and recipe (old ones go first when evicting)."""
+        if not self._dir.exists():
+            return iter(())
+        return chain(self._dir.glob("*/*.jpg"), self._dir.glob("*/*/*.jpg"))
 
     def _path(self, image_id: str) -> Path:
-        return self._dir / image_id[:2] / f"{image_id}.jpg"
+        return self._dir / cache_key(image_id)
+
+
+def local_cache(settings: Settings) -> ImageCache:
+    """The Mac's image cache, at its size in MB (`image_cache_mb`, MiB)."""
+    return ImageCache(settings.image_cache_dir, settings.image_cache_mb * 1024 * 1024)
 
 
 class ImageFetcher:
@@ -160,9 +199,10 @@ class ImageFetcher:
             self._cache.put(image.image_id, result.jpeg)
         return result
 
-    def fetch_all(self, images: Iterable[Image]) -> Iterator[Fetched]:
-        """Fetch in parallel; yields results in the order of `images`, a few at a time."""
-        yield from bounded_map(self.fetch, images, workers=self._concurrency)
+    def fetch_all(self, images: Iterable[Image], *, window: int | None = None) -> Iterator[Fetched]:
+        """Fetch in parallel; yields results in the order of `images`, at most `window` ahead
+        (twice the workers by default)."""
+        yield from bounded_map(self.fetch, images, workers=self._concurrency, window=window)
 
     def _download(self, image: Image) -> Fetched:
         direct = self._get(image.url)

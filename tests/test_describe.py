@@ -3,22 +3,25 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
+from miroir.commons.model import CommonsSet
 from miroir.config import POP_ASSET_HOST, Settings
 from miroir.images.fetch import ImageCache, ImageFetcher
 from miroir.jobs.describe import (
+    FULL_SIZE,
     OPTIONS,
     DescribeOption,
     Describer,
     parse_description,
     probe,
     run,
+    standard,
 )
 from miroir.jobs.openrouter import OpenRouterClient, OpenRouterError
 from miroir.jobs.privacy import PrivacyError
-from miroir.jobs.spend import BudgetError, SpendKind
+from miroir.jobs.spend import BudgetError, RunSpend, SpendKind
 from miroir.records.build import build
-from miroir.records.store import read_records
-from tests.fakes import COST_PER_INPUT, NO_WAIT, FakeOpenRouter, FakePop
+from miroir.records.store import read_records, write_commons
+from tests.fakes import COST_PER_INPUT, NO_WAIT, FakeCommons, FakeOpenRouter, FakePop, commons_photo
 
 
 @pytest.fixture
@@ -33,14 +36,27 @@ def image_ids(settings: Settings, *, publishable: bool) -> list[str]:
 
 
 def describer(
-    settings: Settings, fake: FakeOpenRouter, model: str = "qwen3-vl-30b-a3b"
+    settings: Settings,
+    fake: FakeOpenRouter,
+    model: str | DescribeOption = "qwen3-vl-30b-a3b",
+    commons: FakeCommons | None = None,
 ) -> Describer:
     client = OpenRouterClient(SecretStr("sk-test"), transport=fake.transport(), retry=NO_WAIT)
     cache = ImageCache(settings.image_cache_dir, 50_000_000)
     fetcher = ImageFetcher(FakePop().client(), cache, retry=NO_WAIT, concurrency=2)
     return Describer(
-        settings, OPTIONS[model], client, fetcher, request_concurrency=2, batch_poll_s=0.0
+        settings,
+        OPTIONS[model] if isinstance(model, str) else model,
+        client,
+        fetcher,
+        commons=None if commons is None else commons.images(settings),
+        request_concurrency=2,
+        batch_poll_s=0.0,
     )
+
+
+def spend(d: Describer) -> RunSpend:
+    return d.spend(SpendKind.RUN, limit_usd=1.0, per_item_usd=COST_PER_INPUT)
 
 
 def test_parse_reads_fenced_json_lists_and_empty_markers() -> None:
@@ -60,7 +76,7 @@ def test_private_images_never_leave(built: Settings) -> None:
     fake = FakeOpenRouter()
     mixed = [*image_ids(built, publishable=True)[:1], image_ids(built, publishable=False)[0]]
     with pytest.raises(PrivacyError, match="not publishable"):
-        describer(built, fake).ask(mixed, kind=SpendKind.RUN, limit_usd=1.0)
+        (d := describer(built, fake)).ask(mixed, spend(d))
     assert fake.chat_bodies == []
 
 
@@ -103,8 +119,9 @@ def test_run_refuses_past_its_cap(built: Settings) -> None:
 
 def test_failures_in_a_row_stop_the_run(built: Settings) -> None:
     ids = image_ids(built, publishable=True)
+    d = describer(built, FakeOpenRouter(refuse_after=0))
     with pytest.raises(OpenRouterError, match="in a row"):
-        describer(built, FakeOpenRouter(refuse_after=0)).ask(ids, kind=SpendKind.RUN, limit_usd=1.0)
+        d.ask(ids, spend(d))
 
 
 def test_batch_models_go_through_the_batch_api(built: Settings) -> None:
@@ -112,7 +129,7 @@ def test_batch_models_go_through_the_batch_api(built: Settings) -> None:
     fake = FakeOpenRouter(batch_models=("google/gemini-3.5-flash-lite:batch",))
     d = describer(built, fake, "gemini-3.5-flash-lite")
 
-    done = d.ask(ids, kind=SpendKind.RUN, limit_usd=1.0)
+    done = d.ask(ids, spend(d))
 
     assert fake.chat_bodies == []
     sent = fake.batch_bodies[0]
@@ -147,10 +164,72 @@ def test_a_batch_left_by_a_stopped_run_is_collected_not_sent_again(built: Settin
         {"endpoint": "/v1/chat/completions", "requests": [{"custom_id": i} for i in left]}
     )
 
-    d.ask(ids, kind=SpendKind.RUN, limit_usd=1.0)
+    d.ask(ids, spend(d))
 
     assert set(d.answers()) == set(ids)
     sent = fake.batch_bodies[1]["requests"]
     assert isinstance(sent, list)
     assert [r["custom_id"] for r in sent] == [ids[2]]
     assert pending.read_text(encoding="utf-8") == ""
+
+
+GEMINI = "gemini-3.5-flash-lite"
+BATCH = ("google/gemini-3.5-flash-lite:batch",)
+
+
+def test_a_batch_stays_pending_until_its_answers_are_saved(
+    built: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = image_ids(built, publishable=True)[:3]
+    fake = FakeOpenRouter(batch_models=BATCH)
+    d = describer(built, fake, GEMINI)
+
+    def crash(_answers: object) -> None:
+        raise KeyboardInterrupt  # the Mac stops between the batch's answer and its saving
+
+    monkeypatch.setattr(d, "_save", crash)
+    with pytest.raises(KeyboardInterrupt):
+        d.ask(ids, spend(d))
+    pending = d.answers_path.with_suffix(".pending")
+    assert pending.read_text(encoding="utf-8").startswith("batch-1\t")  # kept: collect again
+    assert d.ledger.total() == pytest.approx(COST_PER_INPUT / 2 * 3)  # and its cost is logged
+    monkeypatch.undo()
+    d.ask(ids, spend(d))
+    assert set(d.answers()) == set(ids)
+    assert len(fake.batch_bodies) == 1  # collected again, never sent twice
+    assert pending.read_text(encoding="utf-8") == ""
+
+
+def test_an_answer_cut_short_by_a_crash_is_asked_again(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)[:2]
+    fake = FakeOpenRouter()
+    d = describer(built, fake)
+    d.ask(ids[:1], spend(d))
+    with d.answers_path.open("ab") as out:
+        out.write(b'{"image_id": "')
+    assert set(d.answers()) == {ids[0]}
+    d.ask(ids, spend(d))
+    assert set(d.answers()) == set(ids)
+
+
+def test_commons_query_photos_are_asked_on_the_standard_endpoint(built: Settings) -> None:
+    photo = commons_photo("File:a.jpg", CommonsSet.T2, "E1")
+    write_commons([photo], built.commons_parquet)
+    fake = FakeOpenRouter(batch_models=BATCH)
+    d = describer(built, fake, commons=FakeCommons())
+    assert d.ask([photo.image_id], spend(d)).answered == 1
+    batch = describer(built, fake, GEMINI, commons=FakeCommons())
+    with pytest.raises(ValueError, match="--no-batch"):
+        batch.ask([photo.image_id], spend(batch))
+
+
+def test_batch_and_standard_runs_of_one_model_never_share_a_probe(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)[:2]
+    fake = FakeOpenRouter(batch_models=BATCH)
+    batch = describer(built, fake, GEMINI)
+    measured = probe(batch, ids, "T1-tune")
+    assert measured.resolution == FULL_SIZE  # the batch sends the image URL, as POP serves it
+    no_batch = describer(built, fake, standard(OPTIONS[GEMINI]))
+    assert no_batch.option.option != batch.option.option
+    with pytest.raises(BudgetError, match="--probe"):
+        run(no_batch, ids, max_usd=1.0)

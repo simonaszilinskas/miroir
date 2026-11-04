@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -16,7 +16,7 @@ from miroir.eval.sets import Query, write_gallery, write_set
 from miroir.eval.vectors import Route, read_vectors, write_vectors
 from miroir.jobs.checkpoint import Checkpoint
 from miroir.jobs.gpu_run import GpuRunner, load_gpu_probe, output_runs, run_name
-from miroir.jobs.privacy import PrivacyError
+from miroir.jobs.privacy import ImageGate, PrivacyError, PublishableImages
 from miroir.jobs.remote_spec import (
     CHUNK_TIMEOUT_S,
     MATCH_QUERIES,
@@ -28,6 +28,7 @@ from miroir.jobs.remote_spec import (
     Resize,
     SuppliedImage,
     option,
+    weights_key,
 )
 from miroir.jobs.spend import BudgetError, Service, SpendKind
 from miroir.records.build import build
@@ -54,9 +55,12 @@ class Clock:
 @dataclass
 class FakeCalls:
     clock: Clock
+    gate: ImageGate
     calls: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
     fail: bool = False
     machine: Machine = L4
+    answer: Callable[[tuple[str, ...]], tuple[str, ...]] | None = None
+    """Changes the ids an embed call answers with (a machine that gets them wrong)."""
 
     supplied: list[str] = field(default_factory=list[str])
     """Ids of the images sent as bytes."""
@@ -74,6 +78,8 @@ class FakeCalls:
             msg = "container died"
             raise RuntimeError(msg)
         ids = (*(i.image_id for i in images), *(s.image_id for s in supplied))
+        if self.answer is not None:
+            ids = self.answer(ids)
         vectors = np.random.default_rng(len(ids)).normal(size=(len(ids), 8)).astype(np.float32)
         return ChunkResult(ids, vectors, {}, load_s=30.0, embed_s=60.0)
 
@@ -135,9 +141,13 @@ def runner(
     settings: Settings, *, key_usage: float | None = None, commons: FakeCommons | None = None
 ) -> tuple[GpuRunner, FakeCalls]:
     clock = Clock()
-    calls = FakeCalls(clock)
+    calls = FakeCalls(clock, gate(settings))
     fetcher = None if commons is None else commons.images(settings)
     return GpuRunner(settings, calls, key_usage_usd=key_usage, commons=fetcher, clock=clock), calls
+
+
+def gate(settings: Settings, *, all_images: bool = False) -> ImageGate:
+    return ImageGate(lambda: PublishableImages.load(settings), all_images=all_images)
 
 
 def test_options_name_their_model_and_machine() -> None:
@@ -395,8 +405,8 @@ def test_a_run_reuses_earlier_vectors_and_may_send_private_images(
     write_gallery(built, "g", ids)
     write_gallery(built, "old", ids[:3])
     clock = Clock()
-    calls = FakeCalls(clock)
-    r = GpuRunner(built, calls, clock=clock, all_images=True)
+    calls = FakeCalls(clock, gate(built, all_images=True))
+    r = GpuRunner(built, calls, clock=clock)
     r.probe(GEMMA, "g")
     (old,) = r.embed_gallery(GEMMA, "old")
 
@@ -451,3 +461,40 @@ def test_vectors_of_another_number_type_are_never_reused(built: Settings) -> Non
     write_vectors(built.vectors_path(other), old.ids, old.vectors, info)
     with pytest.raises(ValueError, match="not reused"):
         r.embed_gallery(GEMMA, "g", reuse=[other])
+
+
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        (lambda ids: (*ids[:-1], "stranger"), "not asked for"),
+        (lambda ids: (ids[0], *ids[:-1]), "repeats an id"),
+    ],
+)
+def test_an_answer_with_ids_not_sent_is_refused_and_not_saved(
+    built: Settings, answer: Callable[[tuple[str, ...]], tuple[str, ...]], error: str
+) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids)
+    r, calls = runner(built)
+    r.probe(GEMMA, "g")
+    calls.answer = answer
+    with pytest.raises(ValueError, match=error):
+        r.embed_gallery(GEMMA, "g")
+    assert Checkpoint(built.checkpoint_path(run_name(OPTIONS[GEMMA], "g"))).ids == ()
+
+
+def test_saved_vectors_of_ids_no_longer_asked_for_are_left_out(built: Settings) -> None:
+    ids = image_ids(built, publishable=True)
+    write_gallery(built, "g", ids[1:])
+    r, _ = runner(built)
+    r.probe(GEMMA, "g")
+    saved = np.ones((1, 8), dtype=np.float16) / np.sqrt(8)
+    Checkpoint(built.checkpoint_path(run_name(OPTIONS[GEMMA], "g"))).append([ids[0]], saved)
+    (done,) = r.embed_gallery(GEMMA, "g")
+    assert set(done.ids) == set(ids[1:])
+
+
+def test_options_of_one_model_share_its_weights_on_the_machine() -> None:
+    cls, gem = option("A1-dinov2-l-224-cls"), option("A1-dinov2-l-224-gem")
+    assert weights_key(cls) == weights_key(gem)
+    assert weights_key(cls) != weights_key(option(GEMMA))

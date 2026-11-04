@@ -930,10 +930,11 @@ def embed_images(
     from miroir.jobs.scw_run import open_scaleway  # noqa: PLC0415
 
     settings = get_settings()
-    with open_scaleway(settings, max_hours=max_hours, purpose=f"images {gallery}") as calls:
-        runner = GpuRunner(
-            settings, calls, key_usage_usd=_openrouter_key_usage(), all_images=all_images
-        )
+    purpose = f"images {gallery}"
+    with open_scaleway(
+        settings, max_hours=max_hours, purpose=purpose, all_images=all_images
+    ) as calls:
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage())
         counts = runner.fill_images(gallery)
     typer.echo(f"{gallery}: {counts}")
 
@@ -2188,15 +2189,11 @@ def embed_scw(
     purpose = f"embed {option} {'+'.join(queries) if queries else gallery}"
     with (
         open_commons_images(settings) as commons,
-        open_scaleway(settings, max_hours=max_hours, purpose=purpose) as calls,
+        open_scaleway(
+            settings, max_hours=max_hours, purpose=purpose, all_images=all_images
+        ) as calls,
     ):
-        runner = GpuRunner(
-            settings,
-            calls,
-            key_usage_usd=_openrouter_key_usage(),
-            commons=commons,
-            all_images=all_images,
-        )
+        runner = GpuRunner(settings, calls, key_usage_usd=_openrouter_key_usage(), commons=commons)
         if queries:
             done = runner.embed_queries(option, queries, max_usd=max_usd)
             typer.echo(f"{done.info.gallery}: {len(done.ids)} vectors, ${done.info.cost_usd:.4f}")

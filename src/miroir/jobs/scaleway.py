@@ -25,9 +25,11 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import signal
 import threading
 import time
+import uuid
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,6 +41,7 @@ from typing import cast
 import httpx
 
 from miroir.config import Settings
+from miroir.jobs.durable import append_lines, locked, read_lines
 
 logger = logging.getLogger(__name__)
 
@@ -354,16 +357,9 @@ def gpu_machine(
     """Start a GPU machine (first offer that has stock), yield it, delete it whatever happens."""
     ledger = MachineLedger(settings.scaleway_dir / "spend.jsonl")
     worst = max(o.eur_per_hour for o in offers) * max_hours
-    spent = ledger.total_eur()
-    if spent + worst > settings.scw_budget_eur:
-        msg = (
-            f"a machine may cost up to €{worst:.2f} ({max_hours} h) and €{spent:.2f} is spent; "
-            f"together that passes the €{settings.scw_budget_eur:.2f} Scaleway cap"
-        )
-        raise RuntimeError(msg)
     name = f"{TAG}-{datetime.now(UTC):%Y%m%d-%H%M%S}"
     tags = [TAG, key_tag(public_key)]
-    with _signals_raise():
+    with ledger.hold(worst, settings.scw_budget_eur), _signals_raise():
         errors: list[str] = []
         for offer in offers:
             created = clock()
@@ -551,10 +547,15 @@ def delete_leftovers(api: InstanceApi, found: Sequence[Leftover]) -> None:
 
 
 class MachineLedger:
-    """One JSON line per machine: its life and what it cost, rounded up to the minute."""
+    """One JSON line per machine: its life and what it cost, rounded up to the minute.
 
-    def __init__(self, path: Path) -> None:
+    While a machine lives, a hold line keeps its longest life counted (`hold`), under a lock
+    every process on the Mac shares, so two runs started together cannot both pass the cap.
+    """
+
+    def __init__(self, path: Path, *, alive: Callable[[int], bool] | None = None) -> None:
         self._path = path
+        self._alive = alive or _alive
 
     def record(self, name: str, offer: Offer, seconds: float, purpose: str) -> float:
         minutes = max(1, math.ceil(seconds / 60))
@@ -576,14 +577,57 @@ class MachineLedger:
             "cost_eur": round(cost, 4),
             "purpose": purpose,
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a") as out:
-            out.write(json.dumps(line) + "\n")
+        with locked(self._path):
+            append_lines(self._path, [json.dumps(line).encode()])
         logger.info("%s: %d min of %s, €%.3f", name, minutes, kind, cost)
         return cost
 
     def total_eur(self) -> float:
-        if not self._path.exists():
-            return 0.0
-        lines = self._path.read_text().splitlines()
-        return sum(float(json.loads(line)["cost_eur"]) for line in lines if line.strip())
+        return sum(float(cast("float", line.get("cost_eur", 0.0))) for line in self._lines())
+
+    def held_eur(self) -> float:
+        """The longest lives of machines alive now, in running processes."""
+        lines = self._lines()
+        released = {line.get("release") for line in lines}
+        return sum(
+            float(cast("float", line["hold_eur"]))
+            for line in lines
+            if "hold_eur" in line
+            and line.get("hold") not in released
+            and self._alive(int(cast("int", line.get("pid", 0))))
+        )
+
+    @contextmanager
+    def hold(self, worst_eur: float, cap_eur: float) -> Generator[None]:
+        """Count `worst_eur` for a machine while the block runs; refuse it past the cap."""
+        name = uuid.uuid4().hex
+        with locked(self._path):
+            spent = self.total_eur() + self.held_eur()
+            if spent + worst_eur > cap_eur:
+                msg = (
+                    f"a machine may cost up to €{worst_eur:.2f} and €{spent:.2f} is spent or held "
+                    f"by machines alive now; together that passes the €{cap_eur:.2f} Scaleway cap"
+                )
+                raise RuntimeError(msg)
+            line = {"hold": name, "hold_eur": round(worst_eur, 4), "pid": os.getpid()}
+            append_lines(self._path, [json.dumps(line).encode()])
+        try:
+            yield
+        finally:
+            with locked(self._path):
+                append_lines(self._path, [json.dumps({"release": name}).encode()])
+
+    def _lines(self) -> list[JSON]:
+        return [cast("JSON", json.loads(line)) for line in read_lines(self._path)]
+
+
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True

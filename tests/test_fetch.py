@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import io
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 from PIL import Image as PILImage
 
 from miroir.http import send
-from miroir.images.fetch import FetchSkip, ImageCache, ImageFetcher, iiif_url, to_jpeg
+from miroir.images.fetch import (
+    LONG_SIDE,
+    RECIPE,
+    FetchSkip,
+    ImageCache,
+    ImageFetcher,
+    cache_key,
+    iiif_url,
+    to_jpeg,
+)
 from miroir.parallel import bounded_map
 from miroir.records.model import Collection, Image, ImageType
 from tests.fakes import NO_WAIT, FakePop, jpeg
@@ -138,3 +149,127 @@ def test_an_uncapped_cache_never_evicts(tmp_path: Path) -> None:
     for n in range(5):
         cache.put(f"{n:016x}", b"x" * 1000)
     assert all(cache.get(f"{n:016x}") is not None for n in range(5))
+
+
+def _counting(*outcomes: httpx.Response | Exception) -> tuple[httpx.Client, list[str]]:
+    sent: list[str] = []
+    pending = iter(outcomes)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request.method)
+        outcome = next(pending)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return httpx.Client(transport=httpx.MockTransport(answer)), sent
+
+
+def test_a_paid_post_is_never_sent_twice_once_it_may_have_run() -> None:
+    client, sent = _counting(httpx.ReadTimeout("slow"), httpx.Response(200))
+    with pytest.raises(httpx.ReadTimeout):
+        send(client, client.build_request("POST", "https://x.test/batches"), NO_WAIT)
+    assert sent == ["POST"]
+    client, sent = _counting(httpx.Response(502), httpx.Response(200))
+    response = send(client, client.build_request("POST", "https://x.test/batches"), NO_WAIT)
+    assert (response.status_code, sent) == (502, ["POST"])
+
+
+def test_a_post_is_sent_again_when_it_provably_did_not_run() -> None:
+    client, sent = _counting(
+        httpx.ConnectError("refused"), httpx.Response(429), httpx.Response(200)
+    )
+    response = send(client, client.build_request("POST", "https://x.test/"), NO_WAIT)
+    assert (response.status_code, sent) == (200, ["POST"] * 3)
+
+
+def test_a_read_is_retried_on_a_dropped_answer() -> None:
+    client, sent = _counting(httpx.ReadTimeout("slow"), httpx.Response(502), httpx.Response(200))
+    response = send(client, client.build_request("GET", "https://x.test/"), NO_WAIT)
+    assert (response.status_code, sent) == (200, ["GET"] * 3)
+
+
+def test_a_stopped_map_cancels_what_has_not_started_and_saves_what_ran() -> None:
+    started: list[int] = []
+    saved: list[int] = []
+    lock = threading.Lock()
+    gate = threading.Event()
+
+    def paid(n: int) -> int:
+        with lock:
+            started.append(n)
+        if n == 0:
+            raise RuntimeError("call 0 failed")
+        gate.wait(5)
+        return n
+
+    out = bounded_map(paid, range(100), workers=3, window=6, salvage=saved.append)
+    threading.Timer(0.2, gate.set).start()  # calls 1 and 2 finish after call 0 failed
+    with pytest.raises(RuntimeError, match="call 0"):
+        next(out)
+    # Every call that ran beside call 0 was paid: each one is kept. Calls still queued when
+    # the map stopped were never sent (before, the pool ran all six it held).
+    assert sorted(saved) == sorted(n for n in started if n)
+    assert len(started) <= 6
+
+
+def test_a_consumer_that_stops_still_gets_the_calls_in_flight() -> None:
+    saved: list[int] = []
+    out = bounded_map(lambda n: n, range(100), workers=2, window=4, salvage=saved.append)
+    assert next(out) == 0
+    out.close()  # as when the consumer raises BudgetError
+    assert all(n in {1, 2, 3} for n in saved)
+
+
+def _open_jpeg(data: bytes) -> PILImage.Image:
+    image = PILImage.open(io.BytesIO(data))
+    image.load()
+    return image
+
+
+def _encoded(image: PILImage.Image, fmt: str, **options: object) -> bytes:
+    out = io.BytesIO()
+    image.save(out, format=fmt, **options)
+    return out.getvalue()
+
+
+def test_to_jpeg_turns_an_image_upright_as_its_exif_says() -> None:
+    wide = PILImage.new("RGB", (40, 20), (200, 30, 30))
+    exif = PILImage.Exif()
+    exif[0x0112] = 6  # orientation: the camera was turned; show it rotated 90 degrees
+    out = _open_jpeg(to_jpeg(_encoded(wide, "JPEG", exif=exif.tobytes()), 512))
+    assert out.size == (20, 40)
+
+
+def test_to_jpeg_puts_transparency_on_white_not_black() -> None:
+    clear = PILImage.new("RGBA", (16, 16), (0, 0, 0, 0))
+    for mode in ("RGBA", "LA"):
+        out = _open_jpeg(to_jpeg(_encoded(clear.convert(mode), "PNG")))
+        assert np.asarray(out).min() > 245
+
+
+def test_to_jpeg_scales_16_bit_grey_instead_of_clipping_it() -> None:
+    grey = PILImage.fromarray(np.full((8, 8), 32768, dtype=np.uint16))
+    assert grey.mode.startswith("I")
+    value = np.asarray(_open_jpeg(to_jpeg(_encoded(grey, "PNG"))))[4, 4, 0]
+    assert 120 < value < 136  # half of white, not 255
+
+
+def test_to_jpeg_shrinks_palette_images_smoothly() -> None:
+    stripes = np.zeros((64, 64), dtype=np.uint8)
+    stripes[:, ::2] = 255  # one-pixel stripes: NEAREST keeps them hard, LANCZOS greys them
+    palette = PILImage.fromarray(stripes).convert("P")
+    out = np.asarray(_open_jpeg(to_jpeg(_encoded(palette, "PNG"), 16)).convert("L"))
+    assert 60 < out.mean() < 200
+    assert out.std() < 40
+
+
+def test_the_cache_path_names_the_size_and_recipe(tmp_path: Path) -> None:
+    cache = ImageCache(tmp_path / "cache", None)
+    cache.put("ab00000000000001", b"jpeg")
+    assert (tmp_path / "cache" / cache_key("ab00000000000001")).exists()
+    assert cache_key("ab00000000000001").startswith(f"{LONG_SIDE}-{RECIPE}/ab/")
+    old = tmp_path / "cache" / "ab" / "ab00000000000002.jpg"  # made by the old recipe
+    old.parent.mkdir()
+    old.write_bytes(b"old")
+    assert cache.get("ab00000000000002") is None
