@@ -34,6 +34,8 @@ from miroir.eval.build_sets import (
     Sizes,
     SplitSet,
     build_sets,
+    copies_in_record,
+    file_key,
     halves_of,
     same_shoot,
     split_following,
@@ -194,11 +196,14 @@ def _main_images(record: Record, index_ids: set[str]) -> list[str]:
 
 
 def _buildings(records: Sequence[Record], index_ids: set[str], size: int, seed: int) -> list[Query]:
-    """Mémoire buildings: one photo, hidden with every photo of its shoot (T1's rule)."""
+    """Mémoire buildings: one photo, hidden with every photo of its shoot and their copies
+    in other bases (T1's rule)."""
     photos: defaultdict[str, list[Record]] = defaultdict(list)
+    files: defaultdict[str, list[tuple[str, tuple[str, str]]]] = defaultdict(list)
     for r in records:
         if r.collection is Collection.MEMOIRE and r.entity_id.startswith("PA"):
             photos[r.entity_id].append(r)
+        files[r.entity_id].extend((i.image_id, file_key(i.url)) for i in r.images)
     entities = sorted(photos)
     rng = random.Random(f"{seed}:{SET_ID}:memoire")
     rng.shuffle(entities)
@@ -210,7 +215,10 @@ def _buildings(records: Sequence[Record], index_ids: set[str], size: int, seed: 
         if not candidates:
             continue
         image_id, record = rng.choice(sorted(candidates, key=lambda c: c[0]))
-        hidden = {i.image_id for r in photos[entity] if same_shoot(record, r) for i in r.images}
+        shoot = [r for r in photos[entity] if same_shoot(record, r)]
+        shot = {file_key(i.url) for r in shoot for i in r.images}
+        hidden = {i.image_id for r in shoot for i in r.images}
+        hidden.update(i for i, key in files[entity] if key in shot)
         left = [
             i.image_id
             for r in photos[entity]
@@ -226,7 +234,8 @@ def _buildings(records: Sequence[Record], index_ids: set[str], size: int, seed: 
 def _objects(
     records: Sequence[Record], index_ids: set[str], collection: Collection, size: int, seed: int
 ) -> list[Query]:
-    """Joconde or Rose Valland records with 2+ images in the index; the query image hides."""
+    """Joconde or Rose Valland records with 2+ images in the index; the query image hides,
+    with its copies in the record (`copies_in_record`)."""
     eligible = sorted(
         (
             r
@@ -242,7 +251,7 @@ def _objects(
     chosen = rng.sample(eligible, min(size, len(eligible)))
     _warn_short(collection, len(chosen), size)
     return [
-        _query(image_id, r.entity_id, {image_id})
+        _query(image_id, r.entity_id, set(copies_in_record(r, image_id)))
         for r in chosen
         for image_id in [rng.choice(_main_images(r, index_ids))]
     ]
