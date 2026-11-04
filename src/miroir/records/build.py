@@ -52,7 +52,7 @@ class Mismatch:
     actual: int
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class BuildReport:
     counts: dict[Collection, Counter[str]] = field(default_factory=dict[Collection, Counter[str]])
 
