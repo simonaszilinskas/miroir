@@ -189,6 +189,21 @@ class _Pending:
     """Index of the tool message waiting for the visitor's reply."""
 
 
+class _Reply:
+    """One model reply's messages: its tool calls, then a reply to each. They join the
+    conversation only once every call has its reply."""
+
+    __slots__ = ("messages", "thumbs", "wait", "waiting")
+
+    def __init__(self, assistant: Message) -> None:
+        self.messages: list[Message] = [assistant]
+        self.thumbs: list[tuple[str, str]] = []
+        """(label, image id or query image key) to show the model after the replies."""
+        self.wait: tuple[Wait, int] | None = None
+        """What a question waits for, and its tool reply's index in `messages`."""
+        self.waiting: str | None = None
+
+
 class Conversation:
     """One visitor's conversation: what the model has been told and seen, and what it cost."""
 
@@ -314,7 +329,6 @@ class Conversation:
         for earlier, step in self.signatures:
             if signature.same(earlier):
                 return step
-        self.signatures.append((signature, self.steps))
         return None
 
     # --- events --------------------------------------------------------------------------------
@@ -702,11 +716,16 @@ class ChatService:
                 nudged = True
                 continue
             ids = [call_id_of(call, c.calls, n) for n, call in enumerate(answer.tool_calls)]
-            c.messages.append(assistant_message(answer.text, answer.tool_calls, ids))
-            waiting, thumbs = await self._calls(c, answer.tool_calls, ids, offered)
-            c.messages.extend(shown_images(thumbs, c.query_images))
-            if waiting is not None:
-                return waiting
+            reply = _Reply(assistant_message(answer.text, answer.tool_calls, ids))
+            await self._calls(c, answer.tool_calls, ids, offered, reply)
+            reply.messages += shown_images(reply.thumbs, c.query_images)
+            # Only now, every call answered: the history the model is sent stays valid.
+            if reply.wait is not None:
+                kind, at = reply.wait
+                c.pending = _Pending(kind, len(c.messages) + at)
+            c.messages.extend(reply.messages)
+            if reply.waiting is not None:
+                return reply.waiting
         c.emit({"type": "say", "text": chat_prompts.GAVE_UP})
         return "message"
 
@@ -716,18 +735,17 @@ class ChatService:
         calls: Sequence[ToolCall],
         ids: Sequence[str],
         offered: set[str],
-    ) -> tuple[str | None, list[tuple[str, str]]]:
-        """Run one reply's tool calls."""
+        reply: _Reply,
+    ) -> None:
+        """Run one reply's tool calls, each answered in `reply`."""
         method = c.method
-        waiting: str | None = None
-        thumbs: list[tuple[str, str]] = []
         for call, call_id in zip(calls, ids, strict=True):
             args = arguments_of(call.arguments)
             refused = method.refusal(
-                call.name, args, offered=offered, waiting=waiting is not None, seen=c.seen
+                call.name, args, offered=offered, waiting=reply.waiting is not None, seen=c.seen
             )
             if refused is not None:
-                c.messages.append(tool_message(call_id, call.name, refused))
+                reply.messages.append(tool_message(call_id, call.name, refused))
                 c.log({"type": "tool", "name": call.name, "args": redact(args), "refused": refused})
                 logger.info("chat %s: %s refused: %s", c.id[:8], call.name, refused[:60])
                 continue
@@ -749,6 +767,8 @@ class ChatService:
             start = time.monotonic()
             outcome = await run_tool(c, call.name, call.arguments)
             method.ran(call.name, outcome, best_before)
+            if outcome.signature is not None and not outcome.error:
+                c.signatures.append((outcome.signature, step))
             logger.info(
                 "chat %s step %d: %s%s",
                 c.id[:8],
@@ -775,24 +795,26 @@ class ChatService:
             ran = not outcome.error
             if ran and (counted or call.name == ToolName.VIEW_RESULTS.value):
                 outcome = with_note(outcome, method.best_line(c.title_of))
-            waiting = self._outcome(c, outcome, step, call_id, call.name, why=why)
-            thumbs += [(t.label, t.image_id) for t in outcome.thumbnails]
-        return waiting, thumbs
+            reply.waiting = self._outcome(
+                c, reply, outcome, step=step, call_id=call_id, name=call.name, why=why
+            )
+            reply.thumbs += [(t.label, t.image_id) for t in outcome.thumbnails]
 
     def _outcome(
         self,
         c: Conversation,
+        reply: _Reply,
         outcome: ToolOutcome,
+        *,
         step: int,
         call_id: str,
         name: str,
-        *,
         why: str = "",
     ) -> str | None:
-        """Put one tool's outcome in the messages and the events; what to wait for, if any."""
+        """Put one tool's outcome in the reply and the events; what to wait for, if any."""
         if outcome.wait is not None:
-            c.messages.append(tool_message(call_id, name, chat_prompts.WAITING))
-            c.pending = _Pending(outcome.wait, len(c.messages) - 1)
+            reply.wait = (outcome.wait, len(reply.messages))
+            reply.messages.append(tool_message(call_id, name, chat_prompts.WAITING))
             if outcome.question is not None:
                 q = outcome.question
                 c.emit(
@@ -806,7 +828,7 @@ class ChatService:
                 return "answer"
             c.emit({"type": "region", "text": outcome.region_reason})
             return "region"
-        c.messages.append(tool_message(call_id, name, outcome.text))
+        reply.messages.append(tool_message(call_id, name, outcome.text))
         if outcome.picks is not None:
             cards: list[JSON] = []
             for pick in outcome.picks[:MAX_RESULTS]:

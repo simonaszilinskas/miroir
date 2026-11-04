@@ -203,6 +203,8 @@ class ToolOutcome:
     error: bool = False
     counted: bool = True
     """It used one of the turn's tool calls (searches and views do; questions do not)."""
+    signature: Signature | None = None
+    """What makes it the same search as another, once it has run (`ToolContext.repeats`)."""
 
 
 class ToolContext(Protocol):
@@ -225,7 +227,8 @@ class ToolContext(Protocol):
         ...
 
     def repeats(self, signature: Signature) -> int | None:
-        """The step number of an earlier call this one repeats, else None (and noted)."""
+        """The step number of an earlier call this one repeats, else None. A call is noted
+        once it has run (`ToolOutcome.signature`), so one that failed may be tried again."""
         ...
 
     def viewed_image(self, entity_id: str) -> str | None:
@@ -515,7 +518,7 @@ async def image_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
     if found.mount:
         head += "; an archive print on its card: the print alone was searched"
     listed = _listing(ctx, head, label, filters, found)
-    return replace(listed, thumbnails=viewed) if viewed else listed
+    return replace(listed, thumbnails=viewed, signature=signature)
 
 
 def running_label(name: str, args: Mapping[str, object]) -> str | None:
@@ -713,8 +716,11 @@ async def text_search(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutco
             f"text_search {query!r}: no record holds these words. Try other French words "
             "(as records write them) or another approach.",
             Step(label, "aucune notice ne contient ces mots"),
+            signature=signature,
         )
-    return _listing(ctx, f"text_search {query!r}", label, filters, found)
+    return replace(
+        _listing(ctx, f"text_search {query!r}", label, filters, found), signature=signature
+    )
 
 
 def _listing(
@@ -783,6 +789,7 @@ async def view_results(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutc
         Step("Regarde des images de près", f"{n} image{'s' if n > 1 else ''}", thumbs),
         thumbnails=tuple(thumbnails),
         hit_ids=tuple(h.entity_id for h in found.hits),
+        signature=signature,
     )
 
 
@@ -868,7 +875,7 @@ async def more_like(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome
     label = f"Ce qui ressemble à « {title[:50]} »"
     start = "the image you looked at" if image_id else "its cover image"
     head = f"more_like {entity_id} (from {start}; A7 weight {weight:g}; itself left out)"
-    return _listing(ctx, head, label, filters, found)
+    return replace(_listing(ctx, head, label, filters, found), signature=signature)
 
 
 async def ask_visitor(ctx: ToolContext, args: Mapping[str, object]) -> ToolOutcome:
@@ -1188,7 +1195,9 @@ def tools_for(*, photo: bool, ask: bool = True) -> tuple[Tool, ...]:
 
 
 async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
-    """One call, as the model wrote it. Bad arguments come back as an error it can read."""
+    """One call, as the model wrote it. Bad arguments, and a tool that fails (the search
+    backend down, a photo it cannot read), come back as an error the model can read: every
+    call the model makes gets its reply."""
     tool = BY_NAME.get(name)
     if tool is None:
         known = ", ".join(BY_NAME)
@@ -1211,6 +1220,14 @@ async def run_tool(ctx: ToolContext, name: str, arguments: str) -> ToolOutcome:
     except ArgumentError as err:
         return ToolOutcome(
             f"error: {err}", Step(_LABELS[tool.name], str(err), error=True), error=True
+        )
+    except Exception as err:
+        logger.exception("tool %s failed", name)
+        return ToolOutcome(
+            f"error: {name} failed ({type(err).__name__}); nothing came back. Call it again, "
+            "or try another approach.",
+            Step(_LABELS[tool.name], "n’a pas abouti", error=True),
+            error=True,
         )
 
 

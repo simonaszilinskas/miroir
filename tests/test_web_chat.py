@@ -87,6 +87,8 @@ class CountingBackend:
         self.counts = {"search": 0, "tool": 0}
         self.queries: list[ToolQuery] = []
         self.requests: list[SearchRequest] = []
+        self.failures: list[Exception] = []
+        """Raised by the next tool searches, one each, before any runs."""
 
     async def search(self, request: SearchRequest) -> SearchResponse:
         self.counts["search"] += 1
@@ -96,6 +98,8 @@ class CountingBackend:
     async def tool_search(self, query: ToolQuery) -> ToolHits:
         self.counts["tool"] += 1
         self.queries.append(query)
+        if self.failures:
+            raise self.failures.pop(0)
         return await self.local.tool_search(query)
 
     async def warm(self) -> None:
